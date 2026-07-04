@@ -709,6 +709,187 @@ struct KanbanBoardDisplayPropertyValue: Identifiable, Equatable {
     }
 }
 
+struct KanbanBoardScanStripColumnCount: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let visibleCount: Int
+    let totalCount: Int
+
+    var countText: String {
+        "\(visibleCount)/\(totalCount)"
+    }
+}
+
+struct KanbanBoardScanStripState: Equatable {
+    let totalCardCount: Int
+    let visibleCardCount: Int
+    let activeFilterCount: Int
+    let columnCounts: [KanbanBoardScanStripColumnCount]
+
+    var resultText: String {
+        "\(visibleCardCount) of \(totalCardCount) \(totalCardCount == 1 ? "card" : "cards")"
+    }
+
+    var activeFilterSummary: String {
+        activeFilterCount == 1 ? "1 filter" : "\(activeFilterCount) filters"
+    }
+
+    static func state(
+        in board: KanbanBoard,
+        searchText: String,
+        attachmentType: KanbanCardCommentAttachmentType?,
+        featureDomainFilter: String?,
+        projectBoardViewID: String,
+        milestoneFilterCardID: String?
+    ) -> KanbanBoardScanStripState {
+        let counts = board.columns.map { column in
+            let visible = KanbanBoardVisibleCardFilter.filteredCards(
+                column.cards,
+                in: column,
+                board: board,
+                searchText: searchText,
+                attachmentType: attachmentType,
+                featureDomainFilter: featureDomainFilter,
+                projectBoardViewID: projectBoardViewID,
+                milestoneFilterCardID: milestoneFilterCardID
+            ).count
+            return KanbanBoardScanStripColumnCount(
+                id: column.id,
+                label: column.name,
+                visibleCount: visible,
+                totalCount: column.cards.count
+            )
+        }
+
+        return KanbanBoardScanStripState(
+            totalCardCount: board.allCards.count,
+            visibleCardCount: counts.reduce(0) { $0 + $1.visibleCount },
+            activeFilterCount: KanbanBoardScanStripFilterRow.rows(
+                in: board,
+                searchText: searchText,
+                attachmentType: attachmentType,
+                featureDomainFilter: featureDomainFilter,
+                projectBoardViewID: projectBoardViewID,
+                milestoneFilterCardID: milestoneFilterCardID
+            ).filter(\.isActive).count,
+            columnCounts: counts
+        )
+    }
+}
+
+struct KanbanBoardScanStripFilterRow: Identifiable, Equatable {
+    enum Kind: String, Equatable {
+        case projectView
+        case domain
+        case attachment
+        case milestone
+        case search
+    }
+
+    let kind: Kind
+    let title: String
+    let value: String
+    let systemImage: String
+    let isActive: Bool
+
+    var id: String { kind.rawValue }
+
+    static func rows(
+        in board: KanbanBoard,
+        searchText: String,
+        attachmentType: KanbanCardCommentAttachmentType?,
+        featureDomainFilter: String?,
+        projectBoardViewID: String,
+        milestoneFilterCardID: String?
+    ) -> [KanbanBoardScanStripFilterRow] {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let projectView = KanbanBoardLayout.projectBoardViewFilters(for: board)
+            .first { $0.id == projectBoardViewID }
+
+        return [
+            KanbanBoardScanStripFilterRow(
+                kind: .projectView,
+                title: "View",
+                value: projectView?.label ?? "All",
+                systemImage: "rectangle.3.group",
+                isActive: projectBoardViewID != "all"
+            ),
+            KanbanBoardScanStripFilterRow(
+                kind: .domain,
+                title: "Domain",
+                value: featureDomainLabel(featureDomainFilter) ?? "All domains",
+                systemImage: "cube.transparent",
+                isActive: featureDomainFilter?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ),
+            KanbanBoardScanStripFilterRow(
+                kind: .attachment,
+                title: "Attachment",
+                value: attachmentType?.displayName ?? "All refs",
+                systemImage: "paperclip",
+                isActive: attachmentType != nil
+            ),
+            KanbanBoardScanStripFilterRow(
+                kind: .milestone,
+                title: "Milestone",
+                value: milestoneFilterCardID.flatMap { board.card(id: $0) }.map { board.displayKey(for: $0) } ?? "All milestones",
+                systemImage: "diamond",
+                isActive: milestoneFilterCardID != nil
+            ),
+            KanbanBoardScanStripFilterRow(
+                kind: .search,
+                title: "Search",
+                value: trimmedSearch.isEmpty ? "Any text" : trimmedSearch,
+                systemImage: "magnifyingglass",
+                isActive: !trimmedSearch.isEmpty
+            ),
+        ]
+    }
+
+    private static func featureDomainLabel(_ id: String?) -> String? {
+        let normalized = KanbanCardTagTaxonomy.normalized(id ?? "")
+        guard !normalized.isEmpty else { return nil }
+        return KanbanBoardLayout.featureDomainCatalog.first { $0.id == normalized }?.label
+            ?? displayLabel(for: normalized)
+    }
+
+    private static func displayLabel(for value: String) -> String {
+        value.split(separator: "-")
+            .map { part in
+                let lowercased = part.lowercased()
+                if lowercased == "ios" { return "iOS" }
+                if lowercased == "qa" { return "QA" }
+                guard let first = part.first else { return "" }
+                return first.uppercased() + part.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+}
+
+struct KanbanCardScanMetadata: Equatable {
+    let displayKey: String
+    let title: String
+    let status: String
+    let readiness: String?
+    let attachmentText: String?
+    let chips: [KanbanCardFaceChip]
+
+    static func metadata(
+        for card: KanbanCard,
+        in board: KanbanBoard,
+        column: KanbanColumn
+    ) -> KanbanCardScanMetadata {
+        let attachmentCount = card.attachmentSummary.totalCount
+        return KanbanCardScanMetadata(
+            displayKey: board.displayKey(for: card),
+            title: card.title,
+            status: column.name,
+            readiness: KanbanBoardLayout.testingOwnerBadge(for: card)?.text,
+            attachmentText: attachmentCount > 0 ? "\(attachmentCount) \(attachmentCount == 1 ? "ref" : "refs")" : nil,
+            chips: KanbanBoardLayout.cardFaceOverflowTags(for: card, limit: 3)
+        )
+    }
+}
+
 enum KanbanBoardVisibleCardFilter {
     static func filteredCards(
         _ cards: [KanbanCard],
@@ -943,16 +1124,19 @@ struct KanbanBoardView: View {
         let featureFilters = KanbanBoardLayout.featureDomainFilters(for: board)
 
         return GeometryReader { proxy in
-            boardHeaderRow(
-                board,
-                featureFilters: featureFilters,
-                mode: KanbanBoardHeaderLayoutMode.mode(
-                    availableWidth: proxy.size.width,
-                    inspectorVisible: isBoardInspectorVisible
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                boardHeaderRow(
+                    board,
+                    featureFilters: featureFilters,
+                    mode: KanbanBoardHeaderLayoutMode.mode(
+                        availableWidth: proxy.size.width,
+                        inspectorVisible: isBoardInspectorVisible
+                    )
                 )
-            )
+                boardScanStrip(board)
+            }
         }
-        .frame(height: 44)
+        .frame(height: 72)
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
     }
@@ -1143,6 +1327,118 @@ struct KanbanBoardView: View {
             tabs: projectHeaderTabs,
             onSelect: onSelectProjectHeaderTab
         )
+    }
+
+    private func boardScanStrip(_ board: KanbanBoard) -> some View {
+        let state = KanbanBoardScanStripState.state(
+            in: board,
+            searchText: searchText,
+            attachmentType: selectedAttachmentTypeFilter,
+            featureDomainFilter: selectedFeatureDomainFilter,
+            projectBoardViewID: selectedProjectBoardViewID,
+            milestoneFilterCardID: selectedMilestoneFilterCardID
+        )
+        let activeRows = KanbanBoardScanStripFilterRow.rows(
+            in: board,
+            searchText: searchText,
+            attachmentType: selectedAttachmentTypeFilter,
+            featureDomainFilter: selectedFeatureDomainFilter,
+            projectBoardViewID: selectedProjectBoardViewID,
+            milestoneFilterCardID: selectedMilestoneFilterCardID
+        ).filter(\.isActive)
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Spacing.xs) {
+                scanStripResultChip(state)
+
+                if activeRows.isEmpty {
+                    scanStripPassiveChip(title: "Filters", value: "All cards", systemImage: "line.3.horizontal.decrease.circle")
+                } else {
+                    ForEach(activeRows) { row in
+                        scanStripFilterChip(row)
+                    }
+                }
+
+                Divider()
+                    .frame(height: 16)
+                    .background(CiderColors.separator)
+
+                ForEach(state.columnCounts) { count in
+                    scanStripPassiveChip(
+                        title: count.label,
+                        value: count.countText,
+                        systemImage: "rectangle.split.3x1"
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityLabel("Kanban scan controls, \(state.resultText), \(state.activeFilterSummary)")
+    }
+
+    private func scanStripResultChip(_ state: KanbanBoardScanStripState) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            Image(systemName: "number")
+                .font(CiderFont.micro)
+            Text(state.resultText)
+                .lineLimit(1)
+            if state.activeFilterCount > 0 {
+                Text(state.activeFilterSummary)
+                    .foregroundColor(CiderColors.controlAccent)
+            }
+        }
+        .font(CiderFont.micro)
+        .foregroundColor(CiderColors.secondary)
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.surfaceInput)
+        )
+    }
+
+    private func scanStripFilterChip(_ row: KanbanBoardScanStripFilterRow) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            Image(systemName: row.systemImage)
+                .font(CiderFont.micro)
+            Text(row.title)
+                .foregroundColor(CiderColors.tertiary)
+            Text(row.value)
+                .foregroundColor(CiderColors.controlAccent)
+                .lineLimit(1)
+        }
+        .font(CiderFont.micro)
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.controlAccent.opacity(0.10))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(CiderColors.controlAccent.opacity(0.18), lineWidth: CiderBorder.hairlineStrokeWidth)
+        )
+        .accessibilityLabel("\(row.title): \(row.value)")
+    }
+
+    private func scanStripPassiveChip(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            Image(systemName: systemImage)
+                .font(CiderFont.micro)
+            Text(title)
+                .foregroundColor(CiderColors.tertiary)
+            Text(value)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+        }
+        .font(CiderFont.micro)
+        .padding(.horizontal, Spacing.xs)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous)
+                .fill(CiderColors.surfaceInput.opacity(0.76))
+        )
+        .accessibilityLabel("\(title): \(value)")
     }
 
     // MARK: - Columns
@@ -2705,6 +3001,18 @@ struct KanbanBoardView: View {
                     .padding(.top, compact ? Spacing.xxs : KanbanDesign.cardPreviewSectionSpacing)
             }
 
+            if compact {
+                compactCardScanMetadataView(
+                    KanbanCardScanMetadata.metadata(
+                        for: card,
+                        in: board,
+                        column: column
+                    ),
+                    for: card
+                )
+                .padding(.top, Spacing.xxs)
+            }
+
             if compact, hasCardContext(parentBadge: parentBadge, planIndicator: planIndicator) {
                 cardContextView(parentBadge: parentBadge, planIndicator: planIndicator)
                     .padding(.top, Spacing.xxs)
@@ -2839,6 +3147,41 @@ struct KanbanBoardView: View {
                         .strokeBorder(CiderColors.borderSubtle, lineWidth: CiderBorder.hairlineStrokeWidth)
                 )
                 .accessibilityLabel("\(value.title): \(value.value)")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func compactCardScanMetadataView(_ metadata: KanbanCardScanMetadata, for card: KanbanCard) -> some View {
+        TagFlowLayout(spacing: Spacing.xs) {
+            HStack(spacing: 3) {
+                Text("Status")
+                    .foregroundColor(CiderColors.tertiary)
+                Text(metadata.status)
+                    .foregroundColor(CiderColors.secondary)
+            }
+            .font(CiderFont.micro)
+            .lineLimit(1)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, 3)
+            .background(Capsule(style: .continuous).fill(CiderColors.surfaceInput.opacity(0.78)))
+
+            if let readiness = metadata.readiness {
+                HStack(spacing: 3) {
+                    Image(systemName: "checkmark.seal")
+                        .font(CiderFont.micro)
+                    Text(readiness)
+                }
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.controlAccent)
+                .lineLimit(1)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, 3)
+                .background(Capsule(style: .continuous).fill(CiderColors.controlAccent.opacity(0.10)))
+            }
+
+            ForEach(metadata.chips, id: \.label) { chip in
+                cardFaceChipView(chip, card: card)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

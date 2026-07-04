@@ -165,6 +165,151 @@ struct KanbanBoardHeaderControlTests {
         ])
     }
 
+    @Test("Kanban scan strip summarizes active filters, result counts, and column counts")
+    func scanStripSummarizesActiveFiltersResultCountsAndColumnCounts() {
+        let milestone = KanbanCard(
+            id: "milestone",
+            title: "Milestone: Command center",
+            displayKey: "CID-10",
+            tags: ["milestone-object"]
+        )
+        let matching = KanbanCard(
+            id: "matching",
+            title: "Wire scan filters",
+            displayKey: "CID-11",
+            priority: .high,
+            tags: ["kanban", "needs-qa"],
+            parentCardID: milestone.id,
+            comments: [
+                KanbanCardComment(
+                    id: "qa-comment",
+                    kind: .qa,
+                    body: "Verify scan strip layout.",
+                    attachments: [
+                        KanbanCardCommentAttachment(
+                            id: "qa-file",
+                            kind: .file,
+                            type: .qa,
+                            title: "QA report",
+                            localPath: "Projects/Cider/QA/scan.md"
+                        )
+                    ]
+                )
+            ]
+        )
+        let hiddenByDomain = KanbanCard(
+            id: "hidden-domain",
+            title: "Capture flow",
+            tags: ["capture"],
+            parentCardID: milestone.id
+        )
+        let hiddenByColumn = KanbanCard(id: "done-child", title: "Done child", parentCardID: milestone.id)
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [milestone, hiddenByDomain]),
+                KanbanColumn(id: "in_progress", name: "In Progress", cards: [matching]),
+                KanbanColumn(id: "done", name: "Done", isDoneColumn: true, cards: [hiddenByColumn]),
+            ]
+        )
+
+        let state = KanbanBoardScanStripState.state(
+            in: board,
+            searchText: "scan",
+            attachmentType: .qa,
+            featureDomainFilter: "kanban",
+            projectBoardViewID: "active",
+            milestoneFilterCardID: milestone.id
+        )
+
+        #expect(state.totalCardCount == 4)
+        #expect(state.visibleCardCount == 1)
+        #expect(state.resultText == "1 of 4 cards")
+        #expect(state.activeFilterCount == 5)
+        #expect(state.activeFilterSummary == "5 filters")
+        #expect(state.columnCounts.map(\.label) == ["Backlog", "In Progress", "Done"])
+        #expect(state.columnCounts.map(\.countText) == ["0/2", "1/1", "0/1"])
+    }
+
+    @Test("Kanban scan strip rows expose ordered high signal filter metadata")
+    func scanStripRowsExposeOrderedHighSignalFilterMetadata() {
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [
+                KanbanColumn(id: "backlog", name: "Backlog", cards: [
+                    KanbanCard(id: "milestone", title: "Milestone: Board control", displayKey: "CID-90")
+                ])
+            ]
+        )
+
+        let rows = KanbanBoardScanStripFilterRow.rows(
+            in: board,
+            searchText: "control",
+            attachmentType: .research,
+            featureDomainFilter: "kanban",
+            projectBoardViewID: "active",
+            milestoneFilterCardID: "milestone"
+        )
+
+        #expect(rows.map(\.title) == ["View", "Domain", "Attachment", "Milestone", "Search"])
+        #expect(rows.map(\.value) == ["Active", "Kanban", "Research", "CID-90", "control"])
+        #expect(rows.map(\.isActive) == [true, true, true, true, true])
+        #expect(rows.map(\.systemImage) == [
+            "rectangle.3.group",
+            "cube.transparent",
+            "paperclip",
+            "diamond",
+            "magnifyingglass",
+        ])
+    }
+
+    @Test("Kanban compact card scan metadata exposes key status chips readiness and attachments")
+    func compactCardScanMetadataExposesKeyStatusChipsReadinessAndAttachments() {
+        let card = KanbanCard(
+            id: "card",
+            title: "Ship command strip",
+            displayKey: "CID-200",
+            priority: .high,
+            tags: ["kanban", "needs-qa", "agent-can-verify"],
+            comments: [
+                KanbanCardComment(
+                    id: "evidence-comment",
+                    kind: .qa,
+                    body: "Agent verification notes.",
+                    attachments: [
+                        KanbanCardCommentAttachment(
+                            id: "evidence",
+                            kind: .file,
+                            type: .evidence,
+                            title: "Evidence",
+                            localPath: "Projects/Cider/QA/evidence.md"
+                        )
+                    ]
+                )
+            ]
+        )
+        let board = KanbanBoard(
+            id: "cider",
+            name: "Cider",
+            columns: [KanbanColumn(id: "testing", name: "Testing", cards: [card])]
+        )
+
+        let metadata = KanbanCardScanMetadata.metadata(
+            for: card,
+            in: board,
+            column: board.columns[0]
+        )
+
+        #expect(metadata.displayKey == "CID-200")
+        #expect(metadata.title == "Ship command strip")
+        #expect(metadata.status == "Testing")
+        #expect(metadata.readiness == "Agent can verify")
+        #expect(metadata.attachmentText == "1 ref")
+        #expect(metadata.chips.map(\.label) == ["Refs 1", "Kanban", "Needs QA"])
+    }
+
     @Test("Kanban board header exposes the three control entry points")
     func exposesBoardControlEntryPoints() {
         #expect(KanbanBoardHeaderControl.allCases.map(\.title) == [
