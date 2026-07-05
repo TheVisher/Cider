@@ -16,6 +16,26 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
 
     var id: String { rawValue }
 
+    static let primaryRoots: [WorkspaceNavigationDomain] = [
+        .mainDashboard,
+        .browse,
+        .spaces,
+        .aiAssistant
+    ]
+
+    var isPrimaryRoot: Bool {
+        Self.primaryRoots.contains(self)
+    }
+
+    var isDomainSpaceSurface: Bool {
+        switch self {
+        case .review, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people:
+            return true
+        case .mainDashboard, .spaces, .aiAssistant, .browse:
+            return false
+        }
+    }
+
     var title: String {
         switch self {
         case .mainDashboard: "Home"

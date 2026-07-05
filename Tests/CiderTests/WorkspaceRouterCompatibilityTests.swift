@@ -64,6 +64,31 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
         }
     }
 
+    func testCompatibilityKeepsLegacyDomainDeepLinksAfterPrimaryRootSimplification() {
+        let expectations: [(WorkspaceNavigationDomain, WorkspaceRoute)] = [
+            (.projects, .projects(.home)),
+            (.tasksEvents, .library(.overview)),
+            (.people, .library(.overview)),
+            (.media, .library(.overview)),
+            (.bookmarks, .library(.bookmarks)),
+            (.notes, .library(.notes)),
+            (.files, .library(.files)),
+            (.review, .review)
+        ]
+
+        for (domain, expectedRoute) in expectations {
+            XCTAssertTrue(domain.isDomainSpaceSurface, "\(domain.title) should be classified as a domain surface")
+            XCTAssertEqual(
+                WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
+                    selectedNavigationDomain: domain,
+                    selectedDomainRouteKind: .overview
+                )),
+                expectedRoute,
+                "\(domain.title) legacy route should stay compatibility-mapped"
+            )
+        }
+    }
+
     func testCompatibilityPrioritizesAllCiderHomeOverStaleDomainState() {
         let folderID = UUID()
         let tagID = UUID()

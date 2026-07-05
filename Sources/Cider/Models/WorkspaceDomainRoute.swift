@@ -153,20 +153,7 @@ enum WorkspaceDomainSidebarModel {
         selectedDomain: WorkspaceNavigationDomain?,
         pinnedSpaces: [CiderSpace]
     ) -> [WorkspaceNavigationDomain] {
-        let domains: [WorkspaceNavigationDomain] = [
-            .mainDashboard,
-            .browse,
-            .review,
-            .projects,
-            .tasksEvents,
-            .people,
-            .aiAssistant
-        ]
-
-        if selectedDomain == .spaces {
-            return Array(domains.prefix(3)) + [.spaces] + Array(domains.dropFirst(3))
-        }
-        return domains
+        WorkspaceNavigationDomain.primaryRoots
     }
 
     static func isDomainSelected(

@@ -24,6 +24,36 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(WorkspaceNavigationDomain.projects.systemImage, "square.split.2x1")
     }
 
+    func testPrimarySidebarRootsAreExplicitAndStable() {
+        XCTAssertEqual(WorkspaceNavigationDomain.primaryRoots, [
+            .mainDashboard,
+            .browse,
+            .spaces,
+            .aiAssistant
+        ])
+        XCTAssertEqual(
+            WorkspaceNavigationDomain.primaryRoots.map(\.title),
+            ["Home", "Library", "Spaces", "AI Assistant"]
+        )
+        XCTAssertTrue(WorkspaceNavigationDomain.primaryRoots.allSatisfy(\.isPrimaryRoot))
+    }
+
+    func testDomainSurfacesAreClassifiedAsSpacesInsteadOfPrimaryRoots() {
+        let domainSurfaces: [WorkspaceNavigationDomain] = [
+            .projects,
+            .tasksEvents,
+            .people,
+            .media,
+            .bookmarks,
+            .notes,
+            .files,
+            .review
+        ]
+
+        XCTAssertTrue(domainSurfaces.allSatisfy(\.isDomainSpaceSurface))
+        XCTAssertTrue(domainSurfaces.allSatisfy { !$0.isPrimaryRoot })
+    }
+
     func testHomeAndLibraryAreFirstClassTopLevelDestinations() {
         let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .projects)
 
@@ -56,13 +86,13 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
-            .review,
-            .projects,
-            .tasksEvents,
-            .people,
+            .spaces,
             .aiAssistant
         ])
-        XCTAssertFalse(domains.contains(.spaces))
+        XCTAssertFalse(domains.contains(.review))
+        XCTAssertFalse(domains.contains(.projects))
+        XCTAssertFalse(domains.contains(.tasksEvents))
+        XCTAssertFalse(domains.contains(.people))
         XCTAssertFalse(domains.contains(.bookmarks))
         XCTAssertFalse(domains.contains(.notes))
         XCTAssertFalse(domains.contains(.files))
@@ -91,10 +121,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertEqual(domains, [
             .mainDashboard,
             .browse,
-            .review,
-            .projects,
-            .tasksEvents,
-            .people,
+            .spaces,
             .aiAssistant
         ])
 
@@ -106,11 +133,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
             [
                 .mainDashboard,
                 .browse,
-                .review,
                 .spaces,
-                .projects,
-                .tasksEvents,
-                .people,
                 .aiAssistant
             ]
         )
