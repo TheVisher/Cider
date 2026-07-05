@@ -5055,6 +5055,63 @@ struct CiderCLIAgentSafetyTests {
         #expect(safeCommands.contains("cider-cli review list --item-type bookmark --state needs_review --limit 10 --json"))
     }
 
+    @Test("item get exposes media route intent without mutating bookmark routing")
+    func itemGetExposesMediaRouteIntentWithoutMutatingBookmarkRouting() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-media-route-intent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try runCLI(args: ["db", "integrity", "--json"], vault: vault)
+        let bookmarkID = "7E357853-8331-4AA0-8F13-657F6BC852EB"
+        try seedRichRemoteOnlyBookmark(
+            bookmarkID: bookmarkID,
+            vault: vault,
+            title: "The Vampire Lestat: Season 1 | Rotten Tomatoes",
+            urlString: "https://www.rottentomatoes.com/tv/the_vampire_lestat/s01",
+            notes: "Rotten Tomatoes TV season page.",
+            aiSummary: "A rich TV season capture.",
+            mediaType: "tv",
+            thumbnailRemoteURLString: "https://example.invalid/vampire-lestat.png"
+        )
+
+        let getResult = try runCLI(
+            args: ["item", "get", "bookmark", bookmarkID, "--json"],
+            vault: vault,
+            environment: ["CIDER_DISABLE_BOOKMARK_ENRICHMENT": "1"]
+        )
+        let payload = try parseJSONObject(getResult.stdout)
+        let routeIntent = try #require(payload["routeIntent"] as? [String: Any])
+        let routingReadiness = try #require(payload["routingReadiness"] as? [String: Any])
+
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(routeIntent["route"] as? String == "media/shows")
+        #expect(routeIntent["source"] as? String == "capture.intent.url_provider")
+        #expect(routeIntent["wouldRouteWithoutReview"] as? Bool == false)
+        #expect(routeIntent["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(routeIntent["provenance"] as? [String] == ["url_host:rottentomatoes.com", "url_path:/tv/the_vampire_lestat/s01"])
+        #expect(routingReadiness["status"] as? String == "ready")
+        #expect(routingReadiness["routeReviewNeeded"] as? Bool == false)
+        #expect(routingReadiness["agentMayRoute"] as? Bool == false)
+
+        let reviewList = try parseJSONObject(try runCLI(args: [
+            "review", "list",
+            "--item-type", "bookmark",
+            "--state", "needs_review",
+            "--limit", "10",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(reviewList["count"] as? Int == 1)
+        let reviewItems = try #require(reviewList["items"] as? [[String: Any]])
+        let reviewItem = try #require(reviewItems.first)
+        let reviewRouteIntent = try #require(reviewItem["routeIntent"] as? [String: Any])
+        #expect(reviewItem["kind"] as? String == "inbox_backlog")
+        #expect(reviewRouteIntent["route"] as? String == "media/shows")
+        #expect(reviewRouteIntent["wouldRouteWithoutReview"] as? Bool == false)
+        #expect(reviewItem["relativePath"] as? String == "Inbox/Bookmarks/The Vampire Lestat- Season 1 - Rotten Tomatoes.webloc")
+    }
+
     @Test("item thumbnail plan explains remote-only social bookmark without creating local thumbnail")
     func itemThumbnailPlanExplainsRemoteOnlySocialBookmarkWithoutCreatingLocalThumbnail() throws {
         let vault = FileManager.default.temporaryDirectory

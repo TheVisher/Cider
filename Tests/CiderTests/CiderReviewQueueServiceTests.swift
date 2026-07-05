@@ -1967,6 +1967,45 @@ struct CiderReviewQueueServiceTests {
         #expect(routingState["confidence"] as? Double == 0.1)
     }
 
+    @Test("capture review worklist exposes media route intent without accepting routing")
+    func captureReviewWorklistExposesMediaRouteIntentWithoutAcceptingRouting() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let itemID = try insertBookmark(
+            db,
+            title: "The Vampire Lestat: Season 1 | Rotten Tomatoes",
+            url: "https://www.rottentomatoes.com/tv/the_vampire_lestat/s01",
+            enrichmentStatus: "complete",
+            lastEnrichedAt: Date()
+        )
+        let routing = CiderRoutingDecisionService(database: db)
+        _ = try routing.recordDecision(
+            itemID: itemID,
+            itemType: "bookmark",
+            target: .init(kind: "inbox", name: "Inbox/Bookmarks", relativePath: "Inbox/Bookmarks", folderID: nil),
+            confidence: 0,
+            reason: "No deterministic route was supplied.",
+            actor: "agent",
+            source: "capture.add",
+            reviewState: "needs_review"
+        )
+        let queue = CiderReviewQueueService(database: db, routingDecisionService: routing)
+
+        let result = try queue.captureReviewWorklist(limit: 10)
+
+        let item = try #require(result.items.first { $0.itemID == itemID })
+        let dictionary = item.toDictionary()
+        let routeIntent = try #require(dictionary["routeIntent"] as? [String: Any])
+        #expect(routeIntent["route"] as? String == "media/shows")
+        #expect(routeIntent["source"] as? String == "capture.intent.url_provider")
+        #expect(routeIntent["wouldRouteWithoutReview"] as? Bool == false)
+        #expect(routeIntent["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(routeIntent["provenance"] as? [String] == ["url_host:rottentomatoes.com", "url_path:/tv/the_vampire_lestat/s01"])
+        #expect(dictionary["needsReview"] as? Bool == true)
+        #expect(dictionary["agentMayRoute"] as? Bool == false)
+        #expect(item.routingState?["targetPath"] == "Inbox/Bookmarks")
+    }
+
     @Test("capture review worklist surfaces unsupported attachment capture events")
     func captureReviewWorklistSurfacesUnsupportedAttachments() throws {
         let (db, url) = try makeTempDB()

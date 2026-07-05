@@ -157,6 +157,27 @@ struct CiderCaptureResult {
         }
     }
 
+    struct RouteIntent: Equatable {
+        var route: String
+        var source: String
+        var confidence: Double
+        var reason: String
+        var provenance: [String]
+
+        func toDictionary() -> [String: Any] {
+            [
+                "status": "candidate",
+                "route": route,
+                "source": source,
+                "confidence": confidence,
+                "reason": reason,
+                "provenance": provenance,
+                "wouldRouteWithoutReview": false,
+                "truthBoundary": "reviewable_candidate_not_truth",
+            ]
+        }
+    }
+
     struct PartialSuccess {
         var status: String
         var reason: String
@@ -229,6 +250,7 @@ struct CiderCaptureResult {
     )
     var captureQuality: [String: Any]? = nil
     var stagedIntents: [StagedIntent] = []
+    var routeIntents: [RouteIntent] = []
 
     var captureEventOwner: SecondBrainOwnerRef? {
         captureEventID.map { SecondBrainOwnerRef(ownerType: "capture_event", ownerID: $0.uuidString) }
@@ -312,6 +334,7 @@ struct CiderCaptureResult {
             dict["captureQuality"] = captureQuality
         }
         addStagedIntentDictionaries(to: &dict)
+        addRouteIntentDictionaries(to: &dict)
         CiderAgentDecisionContract.merge(agentDecisionDictionary(), into: &dict)
         if let partialSuccess = partialSuccess ?? canonicalSideEffectPartialSuccess() {
             var partialDict: [String: Any] = [
@@ -338,6 +361,13 @@ struct CiderCaptureResult {
             dict["sourceContext"] = sourceContext.toDictionary()
         }
         return dict
+    }
+
+    private func addRouteIntentDictionaries(to dict: inout [String: Any]) {
+        guard !routeIntents.isEmpty else { return }
+        let intents = routeIntents.map { $0.toDictionary() }
+        dict["routeIntents"] = intents
+        dict["routeIntent"] = intents[0]
     }
 
     private func addStagedIntentDictionaries(to dict: inout [String: Any]) {
@@ -529,6 +559,7 @@ struct CiderCaptureResult {
         finalResult.enrichment.titleState = Self.titleState(for: finalBookmark)
         finalResult.enrichment.lastEnrichedAt = finalBookmark.lastEnrichedAt
         finalResult.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: finalBookmark)
+        finalResult.routeIntents = CiderCaptureIntentStagingService.routeIntents(for: finalBookmark)
         let captureQuality = Self.bookmarkCaptureQualityDictionary(for: finalBookmark)
         finalResult.captureQuality = captureQuality
         finalResult.indexing = Self.finalBookmarkIndexingStatus(
@@ -1100,9 +1131,49 @@ enum CiderCaptureIntentStagingService {
         ))
     }
 
+    static func routeIntents(for bookmark: Bookmark) -> [CiderCaptureResult.RouteIntent] {
+        routeIntents(for: Input(
+            title: bookmark.title,
+            urlString: bookmark.urlString,
+            sourceFile: nil,
+            sourceText: bookmark.notes,
+            sourceContext: nil
+        ))
+    }
+
     static func stagedIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
         let providerIntents = stagedProviderIntents(for: input)
         return providerIntents + stagedProjectIntents(in: input.combinedText)
+    }
+
+    static func routeIntents(for input: Input) -> [CiderCaptureResult.RouteIntent] {
+        guard let urlString = input.urlString ?? firstURLString(in: input.combinedText),
+              let components = URLComponents(string: urlString),
+              let rawHost = components.host?.lowercased() else {
+            return []
+        }
+        let host = canonicalIntentHost(rawHost)
+        let path = components.path.lowercased()
+        if rawHost.matchesDomain("rottentomatoes.com") {
+            let route = path.contains("/tv/") ? "media/shows" : "media/movies"
+            return [.init(
+                route: route,
+                source: "capture.intent.url_provider",
+                confidence: 0.78,
+                reason: "Rotten Tomatoes URL provider metadata indicates an obvious \(route == "media/shows" ? "TV/show" : "movie") media route candidate.",
+                provenance: routeIntentProvenance(host: host, path: components.path)
+            )]
+        }
+        if rawHost.matchesDomain("imdb.com"), path.contains("/title/") {
+            return [.init(
+                route: "media/movies",
+                source: "capture.intent.url_provider",
+                confidence: 0.78,
+                reason: "IMDb title URL provider metadata indicates an obvious movie media route candidate.",
+                provenance: routeIntentProvenance(host: host, path: components.path)
+            )]
+        }
+        return []
     }
 
     static func stagedContactIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
@@ -1159,6 +1230,17 @@ enum CiderCaptureIntentStagingService {
         }
 
         return intents.isEmpty ? stagedTextIntents(in: text) : intents
+    }
+
+    private static func canonicalIntentHost(_ host: String) -> String {
+        host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    private static func routeIntentProvenance(host: String, path: String) -> [String] {
+        [
+            "url_host:\(host)",
+            "url_path:\(path.isEmpty ? "/" : path)",
+        ]
     }
 
     private static func stagedTikTokIntent(in text: String) -> CiderCaptureResult.StagedIntent {
@@ -1428,6 +1510,7 @@ final class CiderCaptureService {
             nextSafeAction: isDuplicate ? "inspect_existing_item" : "enrich"
         )
         result.stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: bookmark)
+        result.routeIntents = CiderCaptureIntentStagingService.routeIntents(for: bookmark)
         return indexCapturedItem(attachCaptureEvent(to: result, sourceContext: sourceContext))
     }
 

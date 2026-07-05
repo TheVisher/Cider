@@ -27600,6 +27600,11 @@ struct CiderCLI {
             dict["routingReadiness"] = routingReadiness
             dict["captureQuality"] = captureQuality
             dict["bookmark"] = bookmarkToDict(bookmark)
+            let routeIntents = CiderCaptureIntentStagingService.routeIntents(for: bookmark).map { $0.toDictionary() }
+            if !routeIntents.isEmpty {
+                dict["routeIntents"] = routeIntents
+                dict["routeIntent"] = routeIntents[0]
+            }
             var safeNextCommands = dict["safeNextCommands"] as? [String] ?? []
             safeNextCommands.append(contentsOf: captureQuality["safeNextCommands"] as? [String] ?? [])
             safeNextCommands.append(contentsOf: routingReadiness["safeNextCommands"] as? [String] ?? [])

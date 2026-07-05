@@ -335,9 +335,33 @@ struct CiderCaptureServiceTests {
             #expect(rottenIntent["area"] as? String == "Shows")
             #expect(rottenIntent["storageDestination"] as? String == "Inbox/Bookmarks")
             #expect(rottenIntent["wouldRouteWithoutReview"] as? Bool == false)
+            let rottenRouteIntent = try #require(rottenTomatoes["routeIntent"] as? [String: Any])
+            #expect(rottenRouteIntent["status"] as? String == "candidate")
+            #expect(rottenRouteIntent["route"] as? String == "media/shows")
+            #expect(rottenRouteIntent["source"] as? String == "capture.intent.url_provider")
+            #expect(rottenRouteIntent["provenance"] as? [String] == ["url_host:rottentomatoes.com", "url_path:/tv/the_vampire_lestat/s01"])
+            #expect(rottenRouteIntent["wouldRouteWithoutReview"] as? Bool == false)
+            #expect((rottenRouteIntent["confidence"] as? Double).map { $0 >= 0.75 } == true)
+            #expect((rottenRouteIntent["reason"] as? String)?.contains("Rotten Tomatoes") == true)
             let rottenRouting = try #require(rottenTomatoes["routing"] as? [String: Any])
             #expect((rottenRouting["candidateTarget"] as? [String: Any])?["relativePath"] as? String == "Inbox/Bookmarks")
             #expect(rottenRouting["reviewNeeded"] as? Bool == false)
+
+            let imdb = try service.addBookmarkCapture(
+                urlString: "https://www.imdb.com/title/tt0111161/",
+                title: "The Shawshank Redemption (1994) - IMDb",
+                folderID: nil
+            ).toDictionary()
+            let imdbRouteIntent = try #require(imdb["routeIntent"] as? [String: Any])
+            #expect(imdbRouteIntent["route"] as? String == "media/movies")
+            #expect(imdbRouteIntent["source"] as? String == "capture.intent.url_provider")
+            #expect(imdbRouteIntent["provenance"] as? [String] == ["url_host:imdb.com", "url_path:/title/tt0111161/"])
+            #expect(imdbRouteIntent["wouldRouteWithoutReview"] as? Bool == false)
+            let imdbRouteIntents = try #require(imdb["routeIntents"] as? [[String: Any]])
+            #expect(imdbRouteIntents.contains { $0["route"] as? String == "media/movies" })
+            let imdbRouting = try #require(imdb["routing"] as? [String: Any])
+            #expect((imdbRouting["candidateTarget"] as? [String: Any])?["relativePath"] as? String == "Inbox/Bookmarks")
+            #expect(imdbRouting["reviewNeeded"] as? Bool == false)
 
             let steam = try service.addBookmarkCapture(
                 urlString: "https://store.steampowered.com/app/1118520/Paralives/",

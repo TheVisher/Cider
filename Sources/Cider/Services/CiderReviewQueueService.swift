@@ -241,6 +241,7 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
     var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
     var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
     var targetOptions: [CiderGraphCandidateTargetOption] = []
+    var routeIntents: [CiderCaptureResult.RouteIntent] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -333,6 +334,11 @@ struct CiderCaptureReviewWorklistItem: Identifiable, Equatable {
         if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
         if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
         if !targetOptions.isEmpty { dictionary["targetOptions"] = targetOptions.map { $0.toDictionary() } }
+        if !routeIntents.isEmpty {
+            let intents = routeIntents.map { $0.toDictionary() }
+            dictionary["routeIntents"] = intents
+            dictionary["routeIntent"] = intents[0]
+        }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -791,6 +797,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var sourceEvidenceRecord: CiderReviewQueueSourceEvidenceRecord? = nil
     var lifecycleHistory: [CiderReviewQueueLifecycleEventRecord] = []
     var targetOptions: [CiderGraphCandidateTargetOption] = []
+    var routeIntents: [CiderCaptureResult.RouteIntent] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -871,6 +878,11 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         if let sourceEvidenceRecord { dictionary["sourceEvidenceRecord"] = sourceEvidenceRecord.toDictionary() }
         if !lifecycleHistory.isEmpty { dictionary["lifecycleHistory"] = lifecycleHistory.map { $0.toDictionary() } }
         if !targetOptions.isEmpty { dictionary["targetOptions"] = targetOptions.map { $0.toDictionary() } }
+        if !routeIntents.isEmpty {
+            let intents = routeIntents.map { $0.toDictionary() }
+            dictionary["routeIntents"] = intents
+            dictionary["routeIntent"] = intents[0]
+        }
         if let truthState { dictionary["truthState"] = truthState }
         if let acceptEffect { dictionary["acceptEffect"] = acceptEffect }
         if let rejectEffect { dictionary["rejectEffect"] = rejectEffect }
@@ -1188,7 +1200,11 @@ final class CiderReviewQueueService {
                   let item = itemsByID[decision.itemID] else {
                 continue
             }
-            reviewItems.append(routingReviewItem(decision: decision, item: item))
+            reviewItems.append(routingReviewItem(
+                decision: decision,
+                item: item,
+                details: bookmarkDetails[decision.itemID]
+            ))
             seenItemIDs.insert(decision.itemID)
         }
 
@@ -1210,7 +1226,7 @@ final class CiderReviewQueueService {
             if latestByItemID[item.id] == nil,
                item.folderID == nil,
                item.relativePath?.hasPrefix("Inbox/") == true {
-                reviewItems.append(inboxReviewItem(item: item, now: now))
+                reviewItems.append(inboxReviewItem(item: item, details: details, now: now))
                 seenItemIDs.insert(item.id)
             }
         }
@@ -2396,7 +2412,8 @@ final class CiderReviewQueueService {
 
     private func routingReviewItem(
         decision: CiderRoutingDecision,
-        item: CiderRoutingItemSummary
+        item: CiderRoutingItemSummary,
+        details: BookmarkReviewDetails?
     ) -> CiderReviewQueueItem {
         CiderReviewQueueItem(
             id: "review-routing-\(decision.id.uuidString)",
@@ -2416,7 +2433,8 @@ final class CiderReviewQueueService {
             createdAt: decision.createdAt,
             safeActions: decision.reviewState == "deferred"
                 ? routingSafeActions(for: item.type, includeDefer: false)
-                : routingSafeActions(for: item.type, includeDefer: true)
+                : routingSafeActions(for: item.type, includeDefer: true),
+            routeIntents: routeIntents(for: item, details: details)
         )
     }
 
@@ -3415,6 +3433,7 @@ final class CiderReviewQueueService {
 
     private func inboxReviewItem(
         item: CiderRoutingItemSummary,
+        details: BookmarkReviewDetails?,
         now: Date
     ) -> CiderReviewQueueItem {
         CiderReviewQueueItem(
@@ -3433,8 +3452,23 @@ final class CiderReviewQueueService {
             routingDecisionID: nil,
             target: nil,
             createdAt: now,
-            safeActions: ["correct", "defer"]
+            safeActions: ["correct", "defer"],
+            routeIntents: routeIntents(for: item, details: details)
         )
+    }
+
+    private func routeIntents(
+        for item: CiderRoutingItemSummary,
+        details: BookmarkReviewDetails?
+    ) -> [CiderCaptureResult.RouteIntent] {
+        guard item.type == "bookmark", let details else { return [] }
+        return CiderCaptureIntentStagingService.routeIntents(for: .init(
+            title: item.title,
+            urlString: details.url,
+            sourceFile: nil,
+            sourceText: details.aiSummary,
+            sourceContext: nil
+        ))
     }
 
     private func duplicateReviewItems(now: Date) -> [CiderReviewQueueItem] {
@@ -3580,7 +3614,8 @@ final class CiderReviewQueueService {
             candidateQualityCodes: item.candidateQualityCodes,
             candidateQualityExplanation: item.candidateQualityExplanation,
             sourceEvidenceRecord: item.sourceEvidenceRecord,
-            targetOptions: item.targetOptions
+            targetOptions: item.targetOptions,
+            routeIntents: item.routeIntents
         )
     }
 
