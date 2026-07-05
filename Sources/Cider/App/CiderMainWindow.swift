@@ -43,9 +43,6 @@ final class CiderMainWindow: NSWindow {
         if usesQAVisibleWindow {
             titleVisibility = .visible
             titlebarAppearsTransparent = false
-        } else {
-            titleVisibility = .hidden
-            titlebarAppearsTransparent = true
         }
 
         NotificationCenter.default.addObserver(
@@ -383,7 +380,7 @@ enum CiderMainWindowChromePolicy {
         if qaVisible {
             return [.titled, .closable, .miniaturizable, .resizable]
         }
-        return [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        return [.borderless, .resizable]
     }
 }
 
