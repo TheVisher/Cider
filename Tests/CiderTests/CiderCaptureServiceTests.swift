@@ -25,11 +25,31 @@ struct CiderCaptureServiceTests {
         return db
     }
 
-    private func expectQuietCaptureSafeCommands(for result: CiderCaptureResult) throws {
+    private func expectInspectOnlyCaptureSafeCommands(for result: CiderCaptureResult) throws {
         let commands = try #require(result.toDictionary()["safeNextCommands"] as? [String])
         #expect(commands.first == "cider-cli item get \(result.item.type) \(result.item.id.uuidString) --json")
         #expect(!commands.contains("cider-cli routing explain \(result.item.id.uuidString) --json"))
         #expect(!commands.contains("cider-cli review list --item-type \(result.item.type) --state needs_review --limit 10 --json"))
+    }
+
+    private func expectReviewableCaptureSafeCommands(for result: CiderCaptureResult) throws {
+        let dict = result.toDictionary()
+        let commands = try #require(dict["safeNextCommands"] as? [String])
+        let routingReadiness = try #require(dict["routingReadiness"] as? [String: Any])
+        let readinessCommands = try #require(routingReadiness["safeNextCommands"] as? [String])
+        let explainCommand = "cider-cli routing explain \(result.item.id.uuidString) --json"
+        let reviewListCommand = "cider-cli review list --item-type \(result.item.type) --state needs_review --limit 10 --json"
+
+        #expect(commands.first == "cider-cli item get \(result.item.type) \(result.item.id.uuidString) --json")
+        #expect(commands.contains(explainCommand))
+        #expect(commands.contains(reviewListCommand))
+        #expect(routingReadiness["status"] as? String == "needs_review")
+        #expect(routingReadiness["routeReviewNeeded"] as? Bool == true)
+        #expect(routingReadiness["agentMayRoute"] as? Bool == false)
+        #expect(routingReadiness["safeNextAction"] as? String == "review_route")
+        #expect(routingReadiness["truthBoundary"] as? String == "read_only_routing_readiness_no_route_mutation_or_auto_acceptance")
+        #expect(readinessCommands.contains(explainCommand))
+        #expect(readinessCommands.contains(reviewListCommand))
     }
 
     private func expectDuplicateInspectionCommand(
@@ -286,7 +306,7 @@ struct CiderCaptureServiceTests {
             #expect(nextActions.first?["action"] as? String == "enrich")
             #expect(nextActions.first?["readOnly"] as? Bool == false)
             #expect(nextActions.first?["requiresApproval"] as? Bool == true)
-            try expectQuietCaptureSafeCommands(for: result)
+            try expectInspectOnlyCaptureSafeCommands(for: result)
 
             let stored = bookmarks.bookmarks.first(where: { $0.id == result.item.id })
             #expect(stored?.urlString == "https://example.com/articles/42?utm_source=test")
@@ -1298,7 +1318,7 @@ struct CiderCaptureServiceTests {
             #expect(routingReadiness["status"] as? String == "ready")
             #expect(routingReadiness["routeReviewNeeded"] as? Bool == false)
             #expect(blockingIssues.contains("routing_needs_review") == false)
-            try expectQuietCaptureSafeCommands(for: result)
+            try expectInspectOnlyCaptureSafeCommands(for: result)
 
             let storedNote = notes.notes.first(where: { $0.id == result.item.id })
             #expect(storedNote?.title == "One capture box")
@@ -1396,8 +1416,7 @@ struct CiderCaptureServiceTests {
             #expect(dict["partialSuccess"] == nil)
             #expect(result.nextSafeAction == "inspect_item")
             #expect(safeNextCommands.first == "cider-cli item get note \(result.item.id.uuidString) --json")
-            #expect(!safeNextCommands.contains("cider-cli routing explain \(result.item.id.uuidString) --json"))
-            #expect(!safeNextCommands.contains("cider-cli review list --item-type note --state needs_review --limit 10 --json"))
+            try expectInspectOnlyCaptureSafeCommands(for: result)
             #expect(!safeNextCommands.contains("cider-cli item get \(result.item.id.uuidString) --json"))
         }
     }
@@ -1488,9 +1507,10 @@ struct CiderCaptureServiceTests {
             #expect(result.item.title == "Untitled")
             #expect(result.item.relativePath?.hasPrefix("Inbox/Notes/") == true)
             #expect(result.enrichment.status == "not_applicable")
-            #expect(result.routing.reviewNeeded == true)
+            #expect(result.routing.reviewNeeded == false)
             #expect(result.routing.decisionID != nil)
             #expect(result.nextSafeAction == "inspect_item")
+            try expectInspectOnlyCaptureSafeCommands(for: result)
 
             let explanation = try routing.explain(itemID: result.item.id)
             #expect(explanation.latestDecision?.id == result.routing.decisionID)
@@ -1572,6 +1592,7 @@ struct CiderCaptureServiceTests {
             #expect(result.routing.reviewNeeded == true)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Notes")
             #expect(result.nextSafeAction == "inspect_item")
+            try expectReviewableCaptureSafeCommands(for: result)
 
             let stored = try #require(notes.notes.first(where: { $0.id == result.item.id }))
             let content = notes.loadContent(for: stored)
@@ -1865,7 +1886,7 @@ struct CiderCaptureServiceTests {
             #expect(result.item.relativePath?.hasPrefix("Inbox/Todos/") == true)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Todos")
             #expect(result.nextSafeAction == "inspect_item")
-            try expectQuietCaptureSafeCommands(for: result)
+            try expectReviewableCaptureSafeCommands(for: result)
 
             let storedTodo = todos.todoCards.first(where: { $0.id == result.item.id })
             #expect(storedTodo?.title == "Call the dentist next week")
@@ -1944,7 +1965,7 @@ struct CiderCaptureServiceTests {
             #expect(result.routing.reviewNeeded == true)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Date Cards")
             #expect(result.nextSafeAction == "inspect_item")
-            try expectQuietCaptureSafeCommands(for: result)
+            try expectReviewableCaptureSafeCommands(for: result)
 
             let stored = dateCards.dateCards.first(where: { $0.id == result.item.id })
             #expect(stored?.location == "Studio")
@@ -2049,7 +2070,7 @@ struct CiderCaptureServiceTests {
             #expect(result.routing.reviewNeeded == true)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Contacts")
             #expect(result.nextSafeAction == "inspect_item")
-            try expectQuietCaptureSafeCommands(for: result)
+            try expectReviewableCaptureSafeCommands(for: result)
 
             let stored = contacts.contacts.first(where: { $0.id == result.item.id })
             #expect(stored?.relationshipLabel == "Designer")
@@ -2213,7 +2234,7 @@ struct CiderCaptureServiceTests {
             #expect(result.item.relativePath?.hasPrefix("Inbox/Images/") == true)
             #expect(result.routing.candidateTarget?.relativePath == "Inbox/Images")
             #expect(result.nextSafeAction == "inspect_item")
-            try expectQuietCaptureSafeCommands(for: result)
+            try expectReviewableCaptureSafeCommands(for: result)
 
             let copiedPath = try #require(result.item.relativePath)
             let copiedURL = StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(copiedPath)
@@ -2462,7 +2483,8 @@ struct CiderCaptureServiceTests {
             #expect(blockingIssues.contains("file_body_not_indexed"))
 
             let commands = try #require(dict["safeNextCommands"] as? [String])
-            #expect(commands == ["cider-cli item get vaultFile \(result.item.id.uuidString) --json"])
+            #expect(commands.first == "cider-cli item get vaultFile \(result.item.id.uuidString) --json")
+            try expectReviewableCaptureSafeCommands(for: result)
         }
     }
 }
