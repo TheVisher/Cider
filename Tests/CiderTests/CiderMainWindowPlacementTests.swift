@@ -67,7 +67,13 @@ struct CiderMainWindowPlacementTests {
         #expect(CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: [
             CiderMainWindowChromePolicy.qaVisibleEnvironmentKey: "1"
         ]))
-        #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: false).contains(.borderless))
+        #expect(CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: [:]) == false)
+        #expect(CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: [
+            CiderMainWindowChromePolicy.verificationVisibleEnvironmentKey: "1"
+        ]))
+        #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: false).contains(.titled))
+        #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: false).contains(.fullSizeContentView))
         #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: true).contains(.titled))
+        #expect(CiderMainWindowChromePolicy.styleMask(qaVisible: true).contains(.fullSizeContentView) == false)
     }
 }

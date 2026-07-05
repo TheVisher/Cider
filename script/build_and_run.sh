@@ -16,6 +16,7 @@ TELEMETRY=0
 QA_VISIBLE=0
 LOG_DIR=""
 WATCHDOG_PID=""
+VERIFY_WINDOW_STATUS_PATH="${TMPDIR:-/tmp}/cider-verify-window-status.txt"
 
 for arg in "$@"; do
   case "$arg" in
@@ -96,6 +97,59 @@ start_watchdog() {
   WATCHDOG_PID="$!"
 }
 
+wait_for_accessible_window() {
+  local attempts=60
+  local last_status=""
+
+  for _ in $(seq 1 "$attempts"); do
+    if screen_is_locked; then
+      echo "Cannot verify a Cider window while the macOS screen is locked; unlock the session and rerun --verify." >&2
+      return 1
+    fi
+
+    last_status="$(osascript <<APPLESCRIPT 2>&1 || true
+tell application "System Events"
+  if not (exists process "$APP_NAME") then
+    return "missing-process"
+  end if
+  tell process "$APP_NAME"
+    set frontmost to true
+    set windowCount to count of windows
+    if windowCount > 0 then
+      set windowDescriptions to {}
+      repeat with appWindow in windows
+        set end of windowDescriptions to ((name of appWindow) & " " & (position of appWindow as text) & " " & (size of appWindow as text))
+      end repeat
+      return "windows=" & windowCount & " " & (windowDescriptions as text)
+    end if
+    return "windows=0"
+  end tell
+end tell
+APPLESCRIPT
+)"
+
+    if [[ "$last_status" == windows=[1-9]* ]]; then
+      echo "$APP_NAME accessible window: $last_status"
+      return 0
+    fi
+
+    sleep 0.5
+  done
+
+  echo "$APP_NAME did not expose an accessible window after launch. Last status: $last_status" >&2
+  return 1
+}
+
+screen_is_locked() {
+  python3 - <<'PY'
+import Quartz
+import sys
+
+session = Quartz.CGSessionCopyCurrentDictionary() or {}
+sys.exit(0 if session.get("CGSSessionScreenIsLocked") else 1)
+PY
+}
+
 cleanup() {
   if [[ -n "$WATCHDOG_PID" ]]; then
     kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
@@ -104,6 +158,7 @@ cleanup() {
 
 stop_app
 remove_stale_app_bundles
+rm -f "$VERIFY_WINDOW_STATUS_PATH"
 
 xcodebuild \
   -project "$PROJECT_PATH" \
@@ -137,16 +192,32 @@ if [[ "$TELEMETRY" -eq 1 ]]; then
       --env "CIDER_QA_VISIBLE_WINDOW=1" \
       "$APP_PATH"
   else
-    /usr/bin/open \
-      --stdout "$LOG_DIR/stdout.log" \
-      --stderr "$LOG_DIR/stderr.log" \
-      --env "CIDER_PERF_MONITOR=1" \
-      --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
-      "$APP_PATH"
+    if [[ "$VERIFY" -eq 1 ]]; then
+      /usr/bin/open \
+        --stdout "$LOG_DIR/stdout.log" \
+        --stderr "$LOG_DIR/stderr.log" \
+        --env "CIDER_PERF_MONITOR=1" \
+        --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
+        --env "CIDER_VERIFY_VISIBLE_WINDOW=1" \
+        --env "CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH" \
+        "$APP_PATH"
+    else
+      /usr/bin/open \
+        --stdout "$LOG_DIR/stdout.log" \
+        --stderr "$LOG_DIR/stderr.log" \
+        --env "CIDER_PERF_MONITOR=1" \
+        --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
+        "$APP_PATH"
+    fi
   fi
 else
   if [[ "$QA_VISIBLE" -eq 1 ]]; then
     /usr/bin/open --env "CIDER_QA_VISIBLE_WINDOW=1" "$APP_PATH"
+  elif [[ "$VERIFY" -eq 1 ]]; then
+    /usr/bin/open \
+      --env "CIDER_VERIFY_VISIBLE_WINDOW=1" \
+      --env "CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH" \
+      "$APP_PATH"
   else
     /usr/bin/open "$APP_PATH"
   fi
@@ -163,6 +234,16 @@ if [[ "$VERIFY" -eq 1 || "$STREAM_LOGS" -eq 1 ]]; then
 
   if ! pgrep -f "$APP_PATH/Contents/MacOS/$APP_NAME" >/dev/null; then
     echo "$APP_NAME did not start after launch." >&2
+    exit 1
+  fi
+fi
+
+if [[ "$VERIFY" -eq 1 ]]; then
+  if ! wait_for_accessible_window; then
+    if [[ -f "$VERIFY_WINDOW_STATUS_PATH" ]]; then
+      echo "$APP_NAME verification window status:" >&2
+      cat "$VERIFY_WINDOW_STATUS_PATH" >&2
+    fi
     exit 1
   fi
 fi

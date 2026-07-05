@@ -113,11 +113,20 @@ extension AppDelegate {
     }
 
     func showCiderMainWindow() {
+        if qaCiderMainWindow == nil, ciderMainWindow == nil {
+            configureCiderMainWindow()
+        }
+
         if let qaCiderMainWindow {
             showQACiderMainWindow(qaCiderMainWindow)
+            writeVerificationWindowStatus(window: qaCiderMainWindow, kind: "qa")
         } else {
-            guard let window = ciderMainWindow else { return }
+            guard let window = ciderMainWindow else {
+                writeVerificationWindowStatus(window: nil, kind: "missing")
+                return
+            }
             window.showCentered()
+            writeVerificationWindowStatus(window: window, kind: "normal")
         }
     }
 
@@ -153,6 +162,34 @@ extension AppDelegate {
 
         if transition.shouldActivateApp {
             NSApp.activate(ignoringOtherApps: true)
+            promoteVerificationWindowIfNeeded()
+        }
+    }
+
+    private func promoteVerificationWindowIfNeeded() {
+        let environment = ProcessInfo.processInfo.environment
+        guard CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment)
+            || CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: environment) else {
+            return
+        }
+        guard let window = qaCiderMainWindow ?? ciderMainWindow else {
+            writeVerificationWindowStatus(window: nil, kind: "missing-after-activate")
+            return
+        }
+
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.collectionBehavior.insert(.moveToActiveSpace)
+        window.makeKeyAndOrderFront(nil)
+        window.makeMain()
+        window.orderFrontRegardless()
+
+        DispatchQueue.main.async { [weak self, weak window] in
+            self?.writeVerificationWindowStatus(
+                window: window,
+                kind: CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: ProcessInfo.processInfo.environment) ? "qa-after-activate" : "normal-after-activate"
+            )
         }
     }
 
@@ -190,10 +227,29 @@ extension AppDelegate {
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
+        window.collectionBehavior.insert(.moveToActiveSpace)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
 
         let frame = window.frame
         print("CIDER_QA_WINDOW visible x=\(Int(frame.minX)) y=\(Int(frame.minY)) width=\(Int(frame.width)) height=\(Int(frame.height))")
+    }
+
+    private func writeVerificationWindowStatus(window: NSWindow?, kind: String) {
+        guard let path = ProcessInfo.processInfo.environment["CIDER_VERIFY_WINDOW_STATUS_PATH"] else { return }
+
+        let frame = window?.frame ?? .zero
+        let payload = [
+            "kind=\(kind)",
+            "exists=\(window != nil)",
+            "visible=\(window?.isVisible ?? false)",
+            "key=\(window?.isKeyWindow ?? false)",
+            "main=\(window?.isMainWindow ?? false)",
+            "miniaturized=\(window?.isMiniaturized ?? false)",
+            "frame=\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height))",
+            "windows=\(NSApp.windows.map { String(describing: type(of: $0)) + ":\(Int($0.frame.minX)),\(Int($0.frame.minY)),\(Int($0.frame.width)),\(Int($0.frame.height)):visible=\($0.isVisible)" }.joined(separator: "|"))"
+        ].joined(separator: "\n")
+
+        try? payload.write(toFile: path, atomically: true, encoding: .utf8)
     }
 }
