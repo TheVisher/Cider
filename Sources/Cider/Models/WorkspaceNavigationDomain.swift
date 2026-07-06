@@ -20,6 +20,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         .mainDashboard,
         .browse,
         .spaces,
+        .projects,
         .aiAssistant
     ]
 

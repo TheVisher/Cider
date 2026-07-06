@@ -29,11 +29,12 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
             .mainDashboard,
             .browse,
             .spaces,
+            .projects,
             .aiAssistant
         ])
         XCTAssertEqual(
             WorkspaceNavigationDomain.primaryRoots.map(\.title),
-            ["Home", "Library", "Spaces", "AI Assistant"]
+            ["Home", "Library", "Spaces", "Projects", "AI Assistant"]
         )
         XCTAssertTrue(WorkspaceNavigationDomain.primaryRoots.allSatisfy(\.isPrimaryRoot))
     }
@@ -51,7 +52,8 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         ]
 
         XCTAssertTrue(domainSurfaces.allSatisfy(\.isDomainSpaceSurface))
-        XCTAssertTrue(domainSurfaces.allSatisfy { !$0.isPrimaryRoot })
+        XCTAssertTrue(domainSurfaces.filter { $0 != .projects }.allSatisfy { !$0.isPrimaryRoot })
+        XCTAssertTrue(WorkspaceNavigationDomain.projects.isPrimaryRoot)
     }
 
     func testHomeAndLibraryAreFirstClassTopLevelDestinations() {
@@ -87,10 +89,11 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
             .mainDashboard,
             .browse,
             .spaces,
+            .projects,
             .aiAssistant
         ])
         XCTAssertFalse(domains.contains(.review))
-        XCTAssertFalse(domains.contains(.projects))
+        XCTAssertTrue(domains.contains(.projects))
         XCTAssertFalse(domains.contains(.tasksEvents))
         XCTAssertFalse(domains.contains(.people))
         XCTAssertFalse(domains.contains(.bookmarks))
@@ -122,6 +125,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
             .mainDashboard,
             .browse,
             .spaces,
+            .projects,
             .aiAssistant
         ])
 
@@ -134,6 +138,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
                 .mainDashboard,
                 .browse,
                 .spaces,
+                .projects,
                 .aiAssistant
             ]
         )
