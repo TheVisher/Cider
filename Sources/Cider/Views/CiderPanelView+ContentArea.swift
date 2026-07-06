@@ -303,8 +303,6 @@ extension CiderPanelView {
                         KanbanBoardView(
                             boardID: boardID,
                             milestoneFilterCardID: kanbanMilestoneFilterByBoardID[boardID],
-                            projectHeaderTabs: projectHeaderTabs(for: project, selectedKind: .board(boardID)),
-                            onSelectProjectHeaderTab: selectProjectHeaderTab,
                             onOpenCard: openKanbanCardDetail
                         )
                     }

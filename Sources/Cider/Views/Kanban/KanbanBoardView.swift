@@ -993,8 +993,6 @@ enum KanbanBoardVisibleCardFilter {
 struct KanbanBoardView: View {
     let boardID: String
     var milestoneFilterCardID: String?
-    var projectHeaderTabs: [ProjectWorkspaceLocalTab] = []
-    var onSelectProjectHeaderTab: (ProjectWorkspaceLocalTabKind) -> Void = { _ in }
     var onOpenCard: (String, String) -> Void = { _, _ in }
 
     @ObservedObject private var storage = KanbanStorage.shared
@@ -1149,11 +1147,7 @@ struct KanbanBoardView: View {
         let isCompact = mode == .compact
 
         return HStack(spacing: Spacing.sm) {
-            if !isCompact, KanbanBoardLayout.usesProjectLayout(for: board), !projectHeaderTabs.isEmpty {
-                projectHeaderTabsView
-            } else {
-                boardTitleView(board, mode: mode)
-            }
+            boardTitleView(board, mode: mode)
 
             Spacer(minLength: Spacing.md)
 
@@ -1320,13 +1314,6 @@ struct KanbanBoardView: View {
         }
         .frame(minWidth: 0, maxWidth: isCompact ? 210 : nil, alignment: .leading)
         .layoutPriority(isCompact ? 0 : 1)
-    }
-
-    private var projectHeaderTabsView: some View {
-        ProjectWorkspaceLocalTabStrip(
-            tabs: projectHeaderTabs,
-            onSelect: onSelectProjectHeaderTab
-        )
     }
 
     private func boardScanStrip(_ board: KanbanBoard) -> some View {
