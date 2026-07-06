@@ -474,6 +474,34 @@ extension CiderPanelView {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
             .transition(.opacity)
+        } else if isJournalDetailOpen {
+            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+            GenericItemDetailPanel(
+                title: "Journal",
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                scrollsContent: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode,
+                toolbarExtra: { EmptyView() },
+                trailingExtra: {
+                    JournalNavigationToggleButton(isVisible: $journalNavigationVisible) {
+                        showJournalNavigationRail()
+                    }
+                    ItemMetadataToggleButton(
+                        isVisible: Binding(
+                            get: { journalMetadataVisible },
+                            set: { _ in showJournalMetadataRail() }
+                        )
+                    )
+                }
+            ) {
+                journalDetailBody(projection: projection)
+            }
+            .padding(BookmarksDesign.detailsSlideOutFloatInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
+            .transition(.opacity)
         }
     }
 
@@ -481,7 +509,7 @@ extension CiderPanelView {
     var detailPageView: some View {
         if let draft = detailsDraft {
             bookmarkDetailPageView(draft: draft)
-        } else if selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil {
+        } else if selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil || isJournalDetailOpen {
             genericDetailPageView
         } else if isNoteDetailPageMode {
             noteDetailPageView

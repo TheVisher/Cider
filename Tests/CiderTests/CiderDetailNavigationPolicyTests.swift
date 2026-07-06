@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Cider
 
@@ -25,5 +26,17 @@ struct CiderDetailNavigationPolicyTests {
         #expect(cleared.contains(.note))
         #expect(cleared.contains(.todo))
         #expect(!cleared.contains(.kanban))
+    }
+
+    @Test("journal page mode routes to the generic detail page body")
+    func journalPageModeRoutesToGenericDetailPageBody() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let source = try String(
+            contentsOf: repoRoot.appendingPathComponent("Sources/Cider/Views/CiderPanelView+DetailViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("selectedVaultFile != nil || isJournalDetailOpen"))
+        #expect(source.contains("} else if isJournalDetailOpen {\n            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)"))
     }
 }
