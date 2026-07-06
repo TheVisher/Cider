@@ -8,6 +8,7 @@ enum CiderDetailSurfaceKind: CaseIterable, Hashable {
     case contact
     case todo
     case vaultFile
+    case journal
     case kanban
 }
 
@@ -63,7 +64,7 @@ extension CiderPanelView {
     }
 
     var isGenericDetailOpen: Bool {
-        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen || selectedVaultFile != nil
+        selectedDateCard != nil || selectedContact != nil || isTodoDetailOpen || selectedVaultFile != nil || isJournalDetailOpen
     }
 
     var isAnyDetailOpen: Bool {
@@ -72,15 +73,15 @@ extension CiderPanelView {
 
     var isGenericDetailSlideOut: Bool {
         // Todos always use slide-out regardless of detailViewMode
-        isTodoDetailOpen || ((selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .slideOut)
+        isTodoDetailOpen || ((selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil || isJournalDetailOpen) && detailViewMode == .slideOut)
     }
 
     var isGenericDetailFullPanel: Bool {
-        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .fullPanel
+        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil || isJournalDetailOpen) && detailViewMode == .fullPanel
     }
 
     var isGenericDetailPageMode: Bool {
-        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil) && detailViewMode == .page
+        !isTodoDetailOpen && (selectedDateCard != nil || selectedContact != nil || selectedVaultFile != nil || isJournalDetailOpen) && detailViewMode == .page
     }
 
     var isAnyDetailPageMode: Bool {
@@ -139,6 +140,9 @@ extension CiderPanelView {
     func floatVaultFileDetail() {
         guard let vaultFile = selectedVaultFile else { return }
         requestFloat(.vaultFile(vaultFile.id))
+    }
+
+    func floatJournalDetail() {
     }
 
     func floatNoteDetail() {
@@ -404,6 +408,42 @@ extension CiderPanelView {
         }
     }
 
+    func openJournalDetail() {
+        if isSearchPaletteVisible { isSearchPaletteVisible = false }
+        if isNoteDetailOpen { notesViewModel.flushSave() }
+        if isDetailOpen { saveBookmarkDetails() }
+        let wasExpanded = isAnyDetailOpen
+        clearDetailSelectionState(except: .journal)
+
+        let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+        isJournalDetailOpen = true
+        journalNavigationVisible = true
+        journalMetadataVisible = false
+        selectedJournalEntryID = projection.defaultSelection?.id
+
+        if !wasExpanded, detailViewMode == .slideOut {
+            NotificationCenter.default.post(
+                name: .expandCiderPanelForSlideOut,
+                object: nil,
+                userInfo: ["minimumWidth": BookmarksDesign.detailsSlideOutExpandedPanelMinWidth]
+            )
+        }
+    }
+
+    func showJournalNavigationRail() {
+        journalNavigationVisible.toggle()
+        if journalNavigationVisible {
+            journalMetadataVisible = false
+        }
+    }
+
+    func showJournalMetadataRail() {
+        journalMetadataVisible.toggle()
+        if journalMetadataVisible {
+            journalNavigationVisible = false
+        }
+    }
+
     func openKanbanCardDetail(boardID: String, cardID: String) {
         openKanbanCardDetail(boardID: boardID, cardID: cardID, metadataVisible: true)
     }
@@ -469,6 +509,13 @@ extension CiderPanelView {
             selectedVaultFile = nil
         }
 
+        if surfacesToClear.contains(.journal) {
+            isJournalDetailOpen = false
+            journalNavigationVisible = false
+            journalMetadataVisible = false
+            selectedJournalEntryID = nil
+        }
+
         if surfacesToClear.contains(.kanban) {
             saveKanbanCardDraft()
             selectedKanbanBoardID = nil
@@ -483,6 +530,10 @@ extension CiderPanelView {
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        isJournalDetailOpen = false
+        journalNavigationVisible = false
+        journalMetadataVisible = false
+        selectedJournalEntryID = nil
         selectedKanbanBoardID = nil
         selectedKanbanCardID = nil
         kanbanCardDraft = nil

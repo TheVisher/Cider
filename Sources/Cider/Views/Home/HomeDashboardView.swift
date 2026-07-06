@@ -21,6 +21,7 @@ struct HomeDashboardView: View {
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onOpenTodo: (TodoCard) -> Void = { _ in }
     var onOpenVaultFile: (VaultFile) -> Void = { _ in }
+    var onOpenJournal: () -> Void = {}
     var onlyUnassigned: Bool = false
     var activeLabelIDs: Set<UUID> = []
     var maxVisibleItems: Int?
@@ -265,6 +266,8 @@ struct HomeDashboardView: View {
     @ViewBuilder
     private func comingUpCard(_ item: LibraryItemV2) -> some View {
         switch item {
+        case .journal:
+            EmptyView()
         case .dateCard(let dateCard):
             DateCardCardView(
                 dateCard: dateCard,
@@ -323,6 +326,15 @@ struct HomeDashboardView: View {
         masonryCardWidth: CGFloat? = nil
     ) -> some View {
         switch item {
+        case .journal(let journal):
+            JournalLibraryCardView(
+                container: journal,
+                onOpen: { handleNormalAction { onOpenJournal() } },
+                isSelected: isItemSelected(item),
+                isFocused: focusedItemID == item.id,
+                onSelect: { handleSelect(item: item) },
+                onShiftSelect: { handleShiftSelect(item: item) }
+            )
         case .bookmark(let bookmark):
             BookmarkCard(
                 bookmark: bookmark,
@@ -529,6 +541,8 @@ struct HomeDashboardView: View {
                    let uuid = UUID(uuidString: String(id.dropFirst("bookmark-".count))),
                    let bookmark = bookmarksSnapshot.first(where: { $0.id == uuid }) {
                     allTrashItems.append(contentsOf: VaultBookmarkService.shared.removeAll([bookmark]))
+                } else if id.hasPrefix("journal-") {
+                    continue
                 } else if id.hasPrefix("note-"),
                           let uuid = UUID(uuidString: String(id.dropFirst("note-".count))),
                           let note = notesSnapshot.first(where: { $0.id == uuid }) {
@@ -631,6 +645,8 @@ struct HomeDashboardView: View {
 
     private func handleContinueOpen(_ item: LibraryItemV2) {
         switch item {
+        case .journal:
+            onOpenJournal()
         case .bookmark(let bookmark): onShowBookmarkDetails(bookmark)
         case .note(let note): openNoteInPanel(note)
         case .dateCard(let dateCard): presentDateCardDetail(dateCard)
@@ -643,6 +659,7 @@ struct HomeDashboardView: View {
 
     private func continueDragProvider(for item: LibraryItemV2) -> (() -> NSItemProvider)? {
         switch item {
+        case .journal: return nil
         case .bookmark(let bookmark): return bookmarkDragProvider(for: bookmark)
         case .note(let note): return noteDragProvider(for: note)
         case .dateCard, .contact, .todo, .vaultFile: return nil

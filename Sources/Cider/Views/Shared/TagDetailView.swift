@@ -18,6 +18,7 @@ struct TagDetailView: View {
     var onOpenContact: (ContactCard) -> Void = { _ in }
     var onOpenTodo: (TodoCard) -> Void = { _ in }
     var onOpenVaultFile: (VaultFile) -> Void = { _ in }
+    var onOpenJournal: () -> Void = {}
     var onSelectTag: (UUID) -> Void = { _ in }
     var onBack: () -> Void = {}
     var onToggleLabelBulk: ((UUID) -> Void)? = nil
@@ -344,6 +345,7 @@ struct TagDetailView: View {
                 onOpenContact: onOpenContact,
                 onOpenTodo: onOpenTodo,
                 onOpenVaultFile: onOpenVaultFile,
+                onOpenJournal: onOpenJournal,
                 activeLabelIDs: tagIDs,
                 onToggleLabelBulk: onToggleLabelBulk,
                 showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .tagDetail),

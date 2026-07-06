@@ -387,6 +387,7 @@ enum HomeOverviewDataProvider {
 
     private static func typeLabel(for item: LibraryItemV2) -> String {
         switch item {
+        case .journal: return "Journal"
         case .bookmark: return "Bookmark"
         case .note: return "Note"
         case .dateCard: return "Date"
@@ -398,6 +399,8 @@ enum HomeOverviewDataProvider {
 
     private static func sourceTypeLabel(for item: LibraryItemV2) -> String {
         switch item {
+        case .journal:
+            return "Journal"
         case .bookmark:
             return "URL"
         case .note:
@@ -980,6 +983,8 @@ enum HomeOverviewDataProvider {
 
     private static func itemUUID(for item: LibraryItemV2) -> UUID? {
         switch item {
+        case .journal:
+            return nil
         case .bookmark(let bookmark):
             return bookmark.id
         case .note(let note):
@@ -1112,6 +1117,8 @@ enum HomeOverviewDataProvider {
 
     private static func triageItem(for item: LibraryItemV2) -> HomeTriageItem? {
         switch item {
+        case .journal:
+            return nil
         case .bookmark(let bookmark):
             if bookmarkNeedsEnrichment(bookmark) {
                 return HomeTriageItem(

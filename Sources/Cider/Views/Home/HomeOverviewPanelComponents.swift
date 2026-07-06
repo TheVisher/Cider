@@ -590,6 +590,7 @@ struct HomeOverviewEmptyStateCard: View {
 extension LibraryItemV2 {
     var dashboardSymbol: String {
         switch self {
+        case .journal: "book.closed"
         case .bookmark: "bookmark.fill"
         case .note: "note.text"
         case .dateCard: "calendar"
@@ -601,6 +602,7 @@ extension LibraryItemV2 {
 
     var dashboardAccentColor: Color {
         switch self {
+        case .journal: CiderColors.controlAccent
         case .bookmark: CiderColors.warning
         case .note: CiderColors.controlAccent
         case .dateCard: CiderColors.warning
@@ -612,6 +614,8 @@ extension LibraryItemV2 {
 
     var dashboardSubtitle: String {
         switch self {
+        case .journal(let journal):
+            return "\(journal.entryCount) daily entries"
         case .bookmark(let bookmark):
             return bookmark.hostDisplay
         case .note(let note):
@@ -629,6 +633,8 @@ extension LibraryItemV2 {
 
     var dashboardActivityTitle: String {
         switch self {
+        case .journal(let journal):
+            return journal.title
         case .bookmark(let bookmark):
             return bookmark.title
         case .note(let note):

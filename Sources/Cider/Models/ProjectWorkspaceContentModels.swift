@@ -69,6 +69,8 @@ enum ProjectReferenceProvider {
 
     private static func relativePath(for item: LibraryItemV2) -> String? {
         switch item {
+        case .journal:
+            nil
         case .bookmark(let bookmark):
             bookmark.relativePath
         case .note(let note):
@@ -908,6 +910,11 @@ enum ProjectWorkspaceOverviewProvider {
 extension LibraryItemV2 {
     var entityRef: LibraryEntityRef {
         switch self {
+        case .journal:
+            return LibraryEntityRef(
+                type: .note,
+                entityID: UUID(uuidString: "00000000-0000-0000-0000-000000000700")!
+            )
         case .bookmark(let bookmark):
             return LibraryEntityRef(type: .bookmark, entityID: bookmark.id)
         case .note(let note):

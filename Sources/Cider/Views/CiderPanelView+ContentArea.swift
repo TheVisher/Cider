@@ -80,6 +80,7 @@ extension CiderPanelView {
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
                 onOpenVaultFile: { openVaultFileDetail($0) },
+                onOpenJournal: { openJournalDetail() },
 
                 onSelectTag: { id in
                     navigateToWorkspaceRoute(.library(.tag(id)))
@@ -165,6 +166,7 @@ extension CiderPanelView {
                 onOpenContact: { openContactDetail($0) },
                 onOpenTodo: { openTodoDetail($0) },
                 onOpenVaultFile: { openVaultFileDetail($0) },
+                onOpenJournal: { openJournalDetail() },
                 onlyUnassigned: libraryRouteFeed.onlyUnassigned,
                 onToggleLabelBulk: { toggleTagOnSelected($0) },
                 showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .library),
@@ -452,6 +454,7 @@ extension CiderPanelView {
                     onOpenContact: { openContactDetail($0) },
                     onOpenTodo: { openTodoDetail($0) },
                     onOpenVaultFile: { openVaultFileDetail($0) },
+                    onOpenJournal: { openJournalDetail() },
     
                     onToggleLabelBulk: { toggleTagOnSelected($0) },
                     showComingUp: LibraryFeedPresentationPolicy.showsComingUpSection(on: .searchResults),
@@ -480,6 +483,7 @@ extension CiderPanelView {
                     onOpenContact: { openContactDetail($0) },
                     onOpenTodo: { openTodoDetail($0) },
                     onOpenVaultFile: { openVaultFileDetail($0) },
+                    onOpenJournal: { openJournalDetail() },
     
                     onSelectTag: { id in
                         navigateToWorkspaceRoute(.library(.tag(id)))
@@ -719,6 +723,8 @@ extension CiderPanelView {
 
     func openDashboardItem(_ item: LibraryItemV2) {
         switch item {
+        case .journal:
+            openJournalDetail()
         case .bookmark(let bookmark):
             openBookmarkDetails(bookmark)
         case .note(let note):

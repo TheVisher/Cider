@@ -1,6 +1,7 @@
 import Foundation
 
 enum LibraryItemV2: Identifiable, Hashable {
+    case journal(JournalLibraryContainer)
     case bookmark(Bookmark)
     case note(Note)
     case dateCard(DateCard)
@@ -10,6 +11,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var id: String {
         switch self {
+        case .journal:
+            "journal-\(JournalLibraryContainer.id)"
         case .bookmark(let bookmark):
             "bookmark-\(bookmark.id.uuidString)"
         case .note(let note):
@@ -27,6 +30,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var entityType: LibraryEntityType {
         switch self {
+        case .journal:
+            .note
         case .bookmark:
             .bookmark
         case .note:
@@ -44,6 +49,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var createdDate: Date {
         switch self {
+        case .journal(let journal):
+            journal.createdDate
         case .bookmark(let bookmark):
             bookmark.createdAt
         case .note(let note):
@@ -61,6 +68,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var updatedDate: Date {
         switch self {
+        case .journal(let journal):
+            journal.updatedDate
         case .bookmark(let bookmark):
             bookmark.updatedAt
         case .note(let note):
@@ -78,6 +87,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var title: String {
         switch self {
+        case .journal(let journal):
+            journal.title
         case .bookmark(let bookmark):
             bookmark.title
         case .note(let note):
@@ -95,6 +106,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var folderID: UUID? {
         switch self {
+        case .journal:
+            nil
         case .bookmark(let bookmark):
             bookmark.folderID
         case .note(let note):
@@ -112,6 +125,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var isInboxItem: Bool {
         switch self {
+        case .journal:
+            return true
         case .bookmark(let bookmark):
             return isInboxPath(bookmark.relativePath) || (bookmark.relativePath?.isEmpty != false && bookmark.folderID == nil)
         case .note(let note):
@@ -129,6 +144,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var labelIDs: Set<UUID> {
         switch self {
+        case .journal:
+            return []
         case .bookmark(let bookmark):
             return Set(bookmark.labelIDs)
         case .note(let note):
@@ -151,6 +168,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var dateAnchor: Date? {
         switch self {
+        case .journal:
+            return nil
         case .dateCard(let dateCard):
             return dateCard.startAt
         case .contact(let contact):
@@ -164,6 +183,8 @@ enum LibraryItemV2: Identifiable, Hashable {
 
     var isCompleted: Bool {
         switch self {
+        case .journal:
+            return false
         case .dateCard(let dateCard):
             return dateCard.isCompleted
         case .todo(let todo):

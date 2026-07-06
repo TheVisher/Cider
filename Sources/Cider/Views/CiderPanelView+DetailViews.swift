@@ -220,6 +220,58 @@ extension CiderPanelView {
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
+        } else if isJournalDetailOpen {
+            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+            GenericItemDetailPanel(
+                title: "Journal",
+                detailViewMode: detailViewMode,
+                width: min(detailSlideOutWidth, maxSlideOutWidth),
+                maxWidth: maxSlideOutWidth,
+                scrollsContent: false,
+                onResize: { newWidth in
+                    let clamped = min(max(BookmarksDesign.detailsSlideOutMinWidth, newWidth), maxSlideOutWidth)
+                    detailSlideOutWidth = clamped
+                },
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode,
+                toolbarExtra: { EmptyView() },
+                trailingExtra: {
+                    JournalNavigationToggleButton(isVisible: $journalNavigationVisible) {
+                        showJournalNavigationRail()
+                    }
+                    ItemMetadataToggleButton(
+                        isVisible: Binding(
+                            get: { journalMetadataVisible },
+                            set: { _ in showJournalMetadataRail() }
+                        )
+                    )
+                }
+            ) {
+                journalDetailBody(projection: projection)
+            }
+        }
+    }
+
+    @ViewBuilder
+    func journalDetailBody(projection: JournalLibraryReadModel) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            JournalDetailContentView(
+                projection: projection,
+                selectedEntryID: $selectedJournalEntryID
+            )
+
+            if journalNavigationVisible {
+                JournalNavigationPanelView(
+                    projection: projection,
+                    selectedEntryID: $selectedJournalEntryID
+                )
+                .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+                .transition(.detailSlideOutSidebar(style: DetailSlideOutMotionPolicy.sidebarTransitionStyle()))
+            } else if journalMetadataVisible {
+                JournalMetadataPanelView(projection: projection)
+                    .frame(width: BookmarksDesign.detailsSidebarFixedWidth)
+                    .transition(.detailSlideOutSidebar(style: DetailSlideOutMotionPolicy.sidebarTransitionStyle()))
+            }
         }
     }
 
@@ -501,6 +553,7 @@ extension CiderPanelView {
         if let contact = selectedContact { return contact.displayName }
         if let todoCard = selectedTodoCard { return todoCard.title }
         if let vaultFile = selectedVaultFile { return vaultFile.filename }
+        if isJournalDetailOpen { return "Journal" }
         if isNoteDetailPageMode {
             return notesViewModel.selectedNote?.title ?? selectedNote?.title ?? "Untitled"
         }
@@ -631,6 +684,32 @@ extension CiderPanelView {
                 }
             ) {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.md)
+        } else if isJournalDetailOpen {
+            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+            GenericItemDetailPanel(
+                title: "Journal",
+                detailViewMode: detailViewMode,
+                showDragHandle: false,
+                scrollsContent: false,
+                onClose: closeGenericDetail,
+                onModeChange: changeDetailViewMode,
+                toolbarExtra: { EmptyView() },
+                trailingExtra: {
+                    JournalNavigationToggleButton(isVisible: $journalNavigationVisible) {
+                        showJournalNavigationRail()
+                    }
+                    ItemMetadataToggleButton(
+                        isVisible: Binding(
+                            get: { journalMetadataVisible },
+                            set: { _ in showJournalMetadataRail() }
+                        )
+                    )
+                }
+            ) {
+                journalDetailBody(projection: projection)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)

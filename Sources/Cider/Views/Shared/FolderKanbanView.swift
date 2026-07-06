@@ -347,6 +347,11 @@ struct FolderKanbanView: View {
     @ViewBuilder
     private func cardSubtitle(_ item: LibraryItemV2) -> some View {
         switch item {
+        case .journal(let journal):
+            Text("\(journal.entryCount) daily entries")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
         case .bookmark(let bookmark):
             Text(bookmark.hostDisplay)
                 .font(CiderFont.caption)

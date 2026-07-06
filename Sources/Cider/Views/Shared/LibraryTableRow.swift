@@ -195,6 +195,7 @@ struct LibraryTableRow: View {
 
     private var typeLabel: String {
         switch item {
+        case .journal: "Journal"
         case .bookmark: "Bookmark"
         case .note: "Note"
         case .dateCard: "Event"
@@ -211,6 +212,8 @@ struct LibraryTableRow: View {
 
     private var wordCountLabel: String {
         switch item {
+        case .journal(let journal):
+            return journal.entryCount > 0 ? "\(journal.entryCount)" : "-"
         case .note(let note):
             // Word count from title as approximation (full content requires async load)
             let words = note.title.split(separator: " ").count
@@ -227,6 +230,10 @@ struct LibraryTableRow: View {
     @ViewBuilder
     private var itemIcon: some View {
         switch item {
+        case .journal:
+            Image(systemName: "book.closed")
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(CiderColors.secondary)
         case .bookmark(let bookmark):
             BookmarkTableIcon(bookmark: bookmark)
         case .note:

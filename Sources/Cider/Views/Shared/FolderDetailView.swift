@@ -78,6 +78,7 @@ struct FolderDetailView: View {
             if let scopeTypes = scope.entityTypes {
                 all = all.filter { item in
                     switch item {
+                    case .journal:      return scopeTypes.contains(.note)
                     case .bookmark:     return scopeTypes.contains(.bookmark)
                     case .note:         return scopeTypes.contains(.note)
                     case .dateCard:     return scopeTypes.contains(.dateCard)
@@ -903,6 +904,8 @@ struct FolderDetailView: View {
         masonryCardWidth: CGFloat? = nil
     ) -> some View {
         switch item {
+        case .journal:
+            EmptyView()
         case .bookmark(let bookmark):
             BookmarkCard(
                 bookmark: bookmark,
@@ -1100,6 +1103,8 @@ struct FolderDetailView: View {
                    let uuid = UUID(uuidString: String(id.dropFirst("bookmark-".count))),
                    let bookmark = bookmarksSnapshot.first(where: { $0.id == uuid }) {
                     allTrashItems.append(contentsOf: VaultBookmarkService.shared.removeAll([bookmark]))
+                } else if id.hasPrefix("journal-") {
+                    continue
                 } else if id.hasPrefix("note-"),
                           let uuid = UUID(uuidString: String(id.dropFirst("note-".count))),
                           let note = notesSnapshot.first(where: { $0.id == uuid }) {
@@ -1174,6 +1179,7 @@ struct FolderDetailView: View {
 
     private func openItem(_ item: LibraryItemV2) {
         switch item {
+        case .journal: break
         case .bookmark(let bookmark): onShowBookmarkDetails?(bookmark)
         case .note(let note): openNoteInPanel(note)
         case .dateCard(let dateCard): onOpenDateCard?(dateCard)
@@ -1287,7 +1293,7 @@ struct FolderDetailView: View {
         switch item {
         case .bookmark(let b): return .bookmark(b)
         case .note(let n): return .note(n)
-        case .dateCard, .contact, .todo, .vaultFile: return nil
+        case .journal, .dateCard, .contact, .todo, .vaultFile: return nil
         }
     }
 }

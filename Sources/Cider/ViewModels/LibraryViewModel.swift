@@ -41,9 +41,14 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func rebuildItems() {
+        let journalProjection = JournalLibraryReadModel.build(from: NotesStorage.shared.notes)
+        let journalItems: [LibraryItemV2] = journalProjection.entries.isEmpty
+            ? []
+            : [.journal(journalProjection.container)]
         let bookmarkItems = VaultBookmarkService.shared.bookmarks.map { LibraryItemV2.bookmark($0) }
         let noteItems = NotesStorage.shared.notes
             .filter { !$0.isProjectArtifact }
+            .filter { !$0.isDailyJournalNote }
             .map { LibraryItemV2.note($0) }
         let dateCardItems = DateCardStorage.shared.dateCards.map { LibraryItemV2.dateCard($0) }
         let contactItems = ContactStorage.shared.contacts.map { LibraryItemV2.contact($0) }
@@ -52,7 +57,7 @@ final class LibraryViewModel: ObservableObject {
             .filter { !$0.isProjectArtifact }
             .map { LibraryItemV2.vaultFile($0) }
 
-        let all = bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems
+        let all = journalItems + bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
@@ -77,6 +82,7 @@ final class LibraryViewModel: ObservableObject {
             if let scopeTypes = scope?.entityTypes {
                 let entityMatch: Bool
                 switch item {
+                case .journal:      entityMatch = scopeTypes.contains(.note)
                 case .bookmark:     entityMatch = scopeTypes.contains(.bookmark)
                 case .note:         entityMatch = scopeTypes.contains(.note)
                 case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
@@ -194,6 +200,11 @@ final class LibraryViewModel: ObservableObject {
 
         let fields: [String]
         switch item {
+        case .journal:
+            let journalNotes = NotesStorage.shared.notes.filter(\.isDailyJournalNote)
+            fields = ["Journal", "Daily Journal"] + journalNotes.flatMap { note in
+                [note.title, NotesStorage.shared.loadContent(for: note)]
+            }
         case .bookmark(let bookmark):
             var bFields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
             if let ocr = bookmark.ocrText { bFields.append(ocr) }

@@ -65,6 +65,17 @@ struct ItemMetadataPanel<Content: View, Footer: View>: View {
     }
 }
 
+extension ItemMetadataPanel where Footer == EmptyView {
+    init(
+        width: CGFloat = BookmarksDesign.detailsSidebarFixedWidth,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.width = width
+        self.content = content
+        self.footer = { EmptyView() }
+    }
+}
+
 struct ItemMetadataDivider: View {
     var body: some View {
         Divider()

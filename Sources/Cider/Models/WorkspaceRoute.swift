@@ -111,6 +111,8 @@ enum WorkspaceVisibleItemScopePolicy {
 
     private static func searchableFields(for item: LibraryItemV2) -> [String] {
         switch item {
+        case .journal:
+            return ["Journal", "Daily Journal"]
         case .bookmark(let bookmark):
             var fields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
             if let ocrText = bookmark.ocrText { fields.append(ocrText) }

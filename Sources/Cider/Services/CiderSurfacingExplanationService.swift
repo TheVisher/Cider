@@ -50,6 +50,8 @@ enum CiderSurfacingExplanationService {
 
     private static func recentCaptureSuggestedAction(for item: LibraryItemV2) -> String {
         switch item {
+        case .journal:
+            return "Open"
         case .bookmark(let bookmark):
             if bookmarkGenericTitleReason(bookmark) != nil { return "Clean up title" }
             if bookmarkNeedsEnrichment(bookmark) { return "Needs enrichment" }
@@ -71,6 +73,8 @@ enum CiderSurfacingExplanationService {
 
     private static func recentCaptureReason(for item: LibraryItemV2) -> String {
         switch item {
+        case .journal:
+            return "Recent journal entries"
         case .bookmark(let bookmark):
             if let reason = bookmarkGenericTitleReason(bookmark) { return reason }
             if bookmarkNeedsEnrichment(bookmark) { return "Bookmark needs enrichment" }

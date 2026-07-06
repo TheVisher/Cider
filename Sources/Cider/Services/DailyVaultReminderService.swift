@@ -266,6 +266,8 @@ struct DailyVaultReminderService {
     private static func formatRecentItem(_ item: LibraryItemV2, now: Date) -> String {
         let kind: String
         switch item {
+        case .journal:
+            kind = "Journal"
         case .bookmark:
             kind = "Bookmark"
         case .note:

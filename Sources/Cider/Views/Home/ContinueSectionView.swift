@@ -129,6 +129,7 @@ private struct ContinueRow: View {
 extension LibraryItemV2 {
     var iconName: String {
         switch self {
+        case .journal: "book.closed"
         case .bookmark: "bookmark"
         case .note: "note.text"
         case .dateCard(let dc): dc.isCompleted ? "checkmark.circle.fill" : "calendar"
@@ -140,6 +141,7 @@ extension LibraryItemV2 {
 
     var iconColor: Color {
         switch self {
+        case .journal: CiderColors.controlAccent
         case .bookmark, .note, .vaultFile: CiderColors.tertiary
         case .dateCard(let dc): dc.isCompleted ? CiderColors.controlAccent : CiderColors.tertiary
         case .contact: CiderColors.controlAccent
@@ -150,6 +152,11 @@ extension LibraryItemV2 {
     @ViewBuilder
     var subtitleView: some View {
         switch self {
+        case .journal(let journal):
+            Text("\(journal.entryCount) daily entries")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+                .lineLimit(1)
         case .bookmark(let b):
             if b.hasURL {
                 Text(b.hostDisplay)

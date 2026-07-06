@@ -49,6 +49,10 @@ struct CiderPanelView: View {
     @State var selectedContact: ContactCard?
     @State var selectedTodoCard: TodoCard?
     @State var selectedVaultFile: VaultFile?
+    @State var isJournalDetailOpen = false
+    @State var journalNavigationVisible: Bool = true
+    @State var journalMetadataVisible: Bool = false
+    @State var selectedJournalEntryID: String?
     @State var selectedKanbanBoardID: String?
     @State var selectedKanbanCardID: String?
     @State var kanbanMilestoneFilterByBoardID: [String: String] = [:]

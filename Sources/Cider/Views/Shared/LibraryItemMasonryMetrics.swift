@@ -8,6 +8,8 @@ enum LibraryItemMasonryMetrics {
         cardSizing: LibraryCardSizing
     ) -> CGFloat {
         switch item {
+        case .journal:
+            return max(132, columnWidth * 0.55)
         case .bookmark(let bookmark):
             let bookmarkSizing = cardSizing.bookmarkSizing
             let thumbnailHeight = estimatedBookmarkThumbnailHeight(
