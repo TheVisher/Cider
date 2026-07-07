@@ -186,6 +186,18 @@ struct CiderItemRelatedSavedPlacesSummary: Equatable {
     var safeNextCommands: [String]
 }
 
+struct CiderItemRelatedSavedPlacesSearchHint: Codable, Equatable {
+    var readOnly: Bool
+    var changed: Bool
+    var truthBoundary: String
+    var acceptedAsTruth: Bool
+    var groupCount: Int
+    var relatedSavedPlaceCandidateCount: Int
+    var candidateCount: Int
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+}
+
 struct CiderItemAgentContextPacket: Equatable {
     var item: CiderItemSummary
     var owner: SecondBrainOwnerRef
@@ -268,6 +280,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var searchScope: CiderItemSearchScope
     var captureProvenance: [CiderItemCaptureProvenance]
     var matchProvenance: CiderItemSearchMatchProvenance
+    var relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint?
 
     init(
         id: String,
@@ -282,7 +295,8 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         rankFactors: [String] = [],
         searchScope: CiderItemSearchScope = .all,
         captureProvenance: [CiderItemCaptureProvenance] = [],
-        matchProvenance: CiderItemSearchMatchProvenance = CiderItemSearchMatchProvenance()
+        matchProvenance: CiderItemSearchMatchProvenance = CiderItemSearchMatchProvenance(),
+        relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -297,6 +311,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         self.searchScope = searchScope
         self.captureProvenance = captureProvenance
         self.matchProvenance = matchProvenance
+        self.relatedSavedPlacesHint = relatedSavedPlacesHint
     }
 }
 
@@ -1294,12 +1309,52 @@ final class CiderItemContextService {
             return scoped
         }
 
-        return scopedCandidates
+        return try scopedCandidates
             .sorted { lhs, rhs in
                 searchResult(lhs, shouldSortBefore: rhs, sort: sort)
             }
             .prefix(boundedLimit)
-            .map { $0 }
+            .map { result in
+                var hinted = result
+                hinted.relatedSavedPlacesHint = try relatedSavedPlacesSearchHint(for: result, limit: 5)
+                return hinted
+            }
+    }
+
+    private func relatedSavedPlacesSearchHint(
+        for result: CiderItemSearchResult,
+        limit: Int
+    ) throws -> CiderItemRelatedSavedPlacesSearchHint? {
+        guard let item = result.item,
+              item.type == .note,
+              result.owner.ownerType == item.type.rawValue,
+              result.owner.ownerID == item.id.uuidString else {
+            return nil
+        }
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: database)
+            .reciprocalPreview(ownerSelector: result.owner.ownerID, limit: max(1, limit))
+        guard !report.groups.isEmpty else { return nil }
+
+        let candidateCount = report.groups.flatMap(\.candidates).count
+        let contextCommand = "cider-cli item context \(result.owner.ownerType) \(result.owner.ownerID) --json"
+        let replayCommand = "cider-cli item preference-saved-place-links --owner \(result.owner.ownerID) --json"
+        let safeCommands = orderedUnique(
+            [contextCommand, replayCommand]
+                + report.safeVerificationCommands
+                + report.groups.flatMap(\.safeVerificationCommands)
+                + report.groups.flatMap(\.safeNextCommands)
+        )
+        return CiderItemRelatedSavedPlacesSearchHint(
+            readOnly: report.readOnly,
+            changed: report.changed,
+            truthBoundary: report.truthBoundary,
+            acceptedAsTruth: false,
+            groupCount: report.groups.count,
+            relatedSavedPlaceCandidateCount: candidateCount,
+            candidateCount: candidateCount,
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
     }
 
     private func searchResult(

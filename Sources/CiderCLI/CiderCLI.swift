@@ -28291,6 +28291,9 @@ struct CiderCLI {
         if !result.captureProvenance.isEmpty {
             dict["captureProvenance"] = result.captureProvenance.map(captureProvenanceToDict)
         }
+        if let relatedSavedPlacesHint = result.relatedSavedPlacesHint {
+            dict["relatedSavedPlacesHint"] = itemRelatedSavedPlacesSearchHintToDict(relatedSavedPlacesHint)
+        }
         dict["matchProvenance"] = itemSearchMatchProvenanceToDict(result.matchProvenance)
         dict["temporal"] = itemSearchTemporalMetadata(result)
         dict["provenance"] = itemSearchProvenanceMetadata(result)
@@ -28342,7 +28345,23 @@ struct CiderCLI {
             itemSearchResultContextCommands(result)
                 + itemSearchResultVerificationCommands(result)
                 + itemSearchResultSafeNextCommands(result)
+                + (result.relatedSavedPlacesHint?.safeVerificationCommands ?? [])
+                + (result.relatedSavedPlacesHint?.safeNextCommands ?? [])
         )
+    }
+
+    private static func itemRelatedSavedPlacesSearchHintToDict(_ hint: CiderItemRelatedSavedPlacesSearchHint) -> [String: Any] {
+        [
+            "readOnly": hint.readOnly,
+            "changed": hint.changed,
+            "truthBoundary": hint.truthBoundary,
+            "acceptedAsTruth": hint.acceptedAsTruth,
+            "groupCount": hint.groupCount,
+            "relatedSavedPlaceCandidateCount": hint.relatedSavedPlaceCandidateCount,
+            "candidateCount": hint.candidateCount,
+            "safeVerificationCommands": hint.safeVerificationCommands,
+            "safeNextCommands": hint.safeNextCommands,
+        ]
     }
 
     static func naturalPreferenceRecallResponseToDict(_ response: CiderNaturalPreferenceRecallResponse) -> [String: Any] {
@@ -28596,10 +28615,10 @@ struct CiderCLI {
         else {
             return []
         }
-        return [
+        return orderedUniqueStrings([
             "cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json",
             "cider-cli item hub \(item.type.rawValue) \(item.id.uuidString) --json",
-        ]
+        ] + (result.relatedSavedPlacesHint?.safeNextCommands ?? []))
     }
 
     private static func itemSearchResultContextCommands(_ result: CiderItemSearchResult) -> [String] {
