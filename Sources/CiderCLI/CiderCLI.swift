@@ -241,12 +241,17 @@ struct CiderCLI {
     static func itemRecallHelpContractPayload(subcommand rawSubcommand: String?) -> [String: Any]? {
         guard let subcommand = rawSubcommand?.lowercased() else { return nil }
         switch subcommand {
-        case "preference-recall":
+        case "preference-recall", "natural-recall", "item-recall":
+            let isAlias = subcommand != "preference-recall"
+            let usageName = subcommand
             return recallHelpContractPayload(
-                command: "item.preference-recall.help",
-                subcommand: "preference-recall",
-                usage: "cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]",
-                description: "Read-only source-backed natural preference/item recall over journaled and captured items.",
+                command: "item.\(subcommand).help",
+                subcommand: subcommand,
+                aliasOf: isAlias ? "item.preference-recall" : nil,
+                usage: "cider-cli item \(usageName) <natural question>|--query <natural question> [--limit <n>] [--json]",
+                description: isAlias
+                    ? "Read-only alias for source-backed natural preference/item recall over journaled and captured items."
+                    : "Read-only source-backed natural preference/item recall over journaled and captured items.",
                 options: [
                     optionContract("--query", value: "<natural question>", description: "Natural language preference or saved-item question."),
                     optionContract("--limit", value: "<n>", description: "Maximum candidate count to inspect. Defaults to 8."),
@@ -254,16 +259,21 @@ struct CiderCLI {
                     optionContract("--help", description: "Show this command contract."),
                 ],
                 safeVerificationCommands: [
-                    "cider-cli item preference-recall --help --json",
+                    "cider-cli item \(usageName) --help --json",
                     "cider-cli item preference-recall \"why did I save <item>?\" --json",
                 ]
             )
-        case "recall-context":
+        case "recall-context", "context-bundle", "recall-bundle":
+            let isAlias = subcommand != "recall-context"
+            let usageName = subcommand
             return recallHelpContractPayload(
-                command: "item.recall-context.help",
-                subcommand: "recall-context",
-                usage: "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]",
-                description: "Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata.",
+                command: "item.\(subcommand).help",
+                subcommand: subcommand,
+                aliasOf: isAlias ? "item.recall-context" : nil,
+                usage: "cider-cli item \(usageName) (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]",
+                description: isAlias
+                    ? "Read-only alias for source-backed recall bundles with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata."
+                    : "Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata.",
                 options: [
                     optionContract("--item", value: "<type> <id-or-ref>", description: "Anchor recall context on one resolved item."),
                     optionContract("--query", value: "<topic>", description: "Search for recall anchors or refine an explicit item bundle."),
@@ -279,7 +289,7 @@ struct CiderCLI {
                     optionContract("--help", description: "Show this command contract."),
                 ],
                 safeVerificationCommands: [
-                    "cider-cli item recall-context --help --json",
+                    "cider-cli item \(usageName) --help --json",
                     "cider-cli item recall-context --query <topic> --json",
                 ]
             )
@@ -291,12 +301,13 @@ struct CiderCLI {
     static func recallHelpContractPayload(
         command: String,
         subcommand: String,
+        aliasOf: String? = nil,
         usage: String,
         description: String,
         options: [[String: Any]],
         safeVerificationCommands: [String]
     ) -> [String: Any] {
-        [
+        var payload: [String: Any] = [
             "ok": true,
             "status": "ok",
             "command": command,
@@ -313,6 +324,10 @@ struct CiderCLI {
             "safeVerificationCommands": safeVerificationCommands,
             "truthBoundary": "This help JSON proves the command contract only; it is not memory truth and does not assert any recall result.",
         ]
+        if let aliasOf {
+            payload["aliasOf"] = aliasOf
+        }
+        return payload
     }
 
     static func optionContract(_ name: String, value: String? = nil, description: String) -> [String: Any] {

@@ -202,18 +202,41 @@ struct CiderCLIAgentSafetyTests {
 
     @Test("recall help json exposes machine readable read only contracts")
     func recallHelpJSONExposesMachineReadableReadOnlyContracts() throws {
-        let cases: [(args: [String], command: String, subcommand: String, usage: String)] = [
+        let cases: [(args: [String], command: String, subcommand: String, aliasOf: String?, usage: String)] = [
             (
                 ["item", "preference-recall", "--help", "--json"],
                 "item.preference-recall.help",
                 "preference-recall",
+                nil,
                 "cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]"
             ),
             (
                 ["item", "recall-context", "--help", "--json"],
                 "item.recall-context.help",
                 "recall-context",
+                nil,
                 "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]"
+            ),
+            (
+                ["item", "natural-recall", "--help", "--json"],
+                "item.natural-recall.help",
+                "natural-recall",
+                "item.preference-recall",
+                "cider-cli item natural-recall <natural question>|--query <natural question> [--limit <n>] [--json]"
+            ),
+            (
+                ["item", "context-bundle", "--help", "--json"],
+                "item.context-bundle.help",
+                "context-bundle",
+                "item.recall-context",
+                "cider-cli item context-bundle (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]"
+            ),
+            (
+                ["item", "recall-bundle", "--help", "--json"],
+                "item.recall-bundle.help",
+                "recall-bundle",
+                "item.recall-context",
+                "cider-cli item recall-bundle (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]"
             ),
         ]
 
@@ -234,6 +257,11 @@ struct CiderCLIAgentSafetyTests {
             #expect(payload["changed"] as? Bool == false)
             #expect(payload["command"] as? String == testCase.command)
             #expect(payload["subcommand"] as? String == testCase.subcommand)
+            if let aliasOf = testCase.aliasOf {
+                #expect(payload["aliasOf"] as? String == aliasOf)
+            } else {
+                #expect(payload["aliasOf"] == nil)
+            }
             #expect(payload["usage"] as? String == testCase.usage)
             #expect((payload["description"] as? String)?.contains("Read-only") == true)
             #expect((payload["options"] as? [[String: Any]])?.isEmpty == false)
@@ -255,6 +283,18 @@ struct CiderCLIAgentSafetyTests {
             ),
             (
                 ["item", "recall-context", "--help"],
+                "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>)"
+            ),
+            (
+                ["item", "natural-recall", "--help"],
+                "cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]"
+            ),
+            (
+                ["item", "context-bundle", "--help"],
+                "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>)"
+            ),
+            (
+                ["item", "recall-bundle", "--help"],
                 "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>)"
             ),
         ]
