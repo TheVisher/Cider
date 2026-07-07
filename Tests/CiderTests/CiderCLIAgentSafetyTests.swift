@@ -200,6 +200,73 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("recall help json exposes machine readable read only contracts")
+    func recallHelpJSONExposesMachineReadableReadOnlyContracts() throws {
+        let cases: [(args: [String], command: String, subcommand: String, usage: String)] = [
+            (
+                ["item", "preference-recall", "--help", "--json"],
+                "item.preference-recall.help",
+                "preference-recall",
+                "cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]"
+            ),
+            (
+                ["item", "recall-context", "--help", "--json"],
+                "item.recall-context.help",
+                "recall-context",
+                "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]"
+            ),
+        ]
+
+        for testCase in cases {
+            let vault = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-recall-help-json-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: vault) }
+
+            let result = try runCLI(args: testCase.args, vault: vault)
+            #expect(result.status == 0)
+            #expect(result.stdout.first == "{")
+
+            let payload = try parseJSONObject(result.stdout)
+            #expect(payload["ok"] as? Bool == true)
+            #expect(payload["status"] as? String == "ok")
+            #expect(payload["readOnly"] as? Bool == true)
+            #expect(payload["changed"] as? Bool == false)
+            #expect(payload["command"] as? String == testCase.command)
+            #expect(payload["subcommand"] as? String == testCase.subcommand)
+            #expect(payload["usage"] as? String == testCase.usage)
+            #expect((payload["description"] as? String)?.contains("Read-only") == true)
+            #expect((payload["options"] as? [[String: Any]])?.isEmpty == false)
+            #expect((payload["safeVerificationHints"] as? [String])?.contains(where: { $0.contains("--help --json") }) == true)
+            #expect((payload["truthBoundary"] as? String)?.contains("command contract") == true)
+            #expect((payload["truthBoundary"] as? String)?.contains("not memory truth") == true)
+
+            let vaultContents = try FileManager.default.contentsOfDirectory(atPath: vault.path)
+            #expect(vaultContents.isEmpty, "JSON help command \(testCase.args.joined(separator: " ")) should not create vault data")
+        }
+    }
+
+    @Test("recall help without json remains plain text usage")
+    func recallHelpWithoutJSONRemainsPlainTextUsage() throws {
+        let cases: [(args: [String], usage: String)] = [
+            (
+                ["item", "preference-recall", "--help"],
+                "cider-cli item preference-recall <natural question>|--query <natural question> [--limit <n>] [--json]"
+            ),
+            (
+                ["item", "recall-context", "--help"],
+                "cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>)"
+            ),
+        ]
+
+        for testCase in cases {
+            let result = try runCLI(args: testCase.args)
+            #expect(result.status == 0)
+            #expect(result.stdout.contains(testCase.usage))
+            #expect(result.stdout.first != "{")
+        }
+    }
+
     @Test("reminder mutation result exposes shared action receipt")
     func reminderMutationResultExposesSharedActionReceipt() throws {
         let id = UUID()
