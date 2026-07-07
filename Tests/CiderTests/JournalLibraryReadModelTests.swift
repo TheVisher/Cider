@@ -120,6 +120,31 @@ struct JournalLibraryReadModelTests {
         #expect(entry.content == content)
     }
 
+    @Test("journal display timestamp cache keeps formatting display only")
+    func journalDisplayTimestampCacheKeepsFormattingDisplayOnly() throws {
+        let content = """
+        # Journal 07-04-2026
+
+        ## 19:27 evening entry
+        Stored markdown stays source-backed.
+        """
+        let note = Note(
+            title: "Journal 07-04-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 07-04-2026.md"
+        )
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+
+        #expect(entry.cachedDisplayContent(timestampFormat: .twelveHour) == nil)
+
+        let formatted = entry.preparedDisplayContent(timestampFormat: .twelveHour)
+
+        #expect(formatted.contains("## 7:27 PM evening entry"))
+        #expect(entry.cachedDisplayContent(timestampFormat: .twelveHour) == formatted)
+        #expect(entry.preparedDisplayContent(timestampFormat: .twentyFourHour) == content)
+        #expect(entry.content == content)
+    }
+
     @Test("journal migration preview classifies canonical legacy personal excluded and ambiguous notes")
     func migrationPreviewClassifiesKnownJournalExamples() throws {
         let notes = [

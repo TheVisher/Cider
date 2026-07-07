@@ -64,6 +64,9 @@ struct JournalDetailContentView: View {
     @Binding var selectedEntryID: String?
 
     @AppStorage(CiderConfig.storageKey) private var configData: Data = Data()
+    @State private var displayedEntryID: String?
+    @State private var displayedTimestampFormat: JournalTimestampFormat = CiderConfig.default.journalTimestampFormat
+    @State private var displayedContent: String = ""
 
     private var selectedEntry: JournalLibraryEntry? {
         projection.entries.first { $0.id == selectedEntryID } ?? projection.defaultSelection
@@ -75,6 +78,13 @@ struct JournalDetailContentView: View {
             return CiderConfig.default.journalTimestampFormat
         }
         return config.journalTimestampFormat
+    }
+
+    private var displayContentTaskID: String {
+        guard let selectedEntry else {
+            return "none-\(journalTimestampFormat.rawValue)"
+        }
+        return "\(selectedEntry.id)-\(journalTimestampFormat.rawValue)-\(selectedEntry.content.count)-\(selectedEntry.content.hashValue)"
     }
 
     var body: some View {
@@ -92,7 +102,7 @@ struct JournalDetailContentView: View {
                 }
 
                 ScrollView {
-                    Text(selectedEntry.content.isEmpty ? "No journal content for this day." : selectedEntry.displayContent(timestampFormat: journalTimestampFormat))
+                    Text(selectedEntry.content.isEmpty ? "No journal content for this day." : displayContent(for: selectedEntry))
                         .font(CiderFont.body)
                         .foregroundColor(CiderColors.primary)
                         .textSelection(.enabled)
@@ -109,6 +119,59 @@ struct JournalDetailContentView: View {
         .onAppear {
             selectedEntryID = selectedEntryID ?? projection.defaultSelection?.id
         }
+        .task(id: displayContentTaskID) {
+            await prepareDisplayContent()
+        }
+    }
+
+    private func displayContent(for entry: JournalLibraryEntry) -> String {
+        if displayedEntryID == entry.id,
+           displayedTimestampFormat == journalTimestampFormat,
+           !displayedContent.isEmpty {
+            return displayedContent
+        }
+
+        return entry.cachedDisplayContent(timestampFormat: journalTimestampFormat) ?? entry.content
+    }
+
+    private func prepareDisplayContent() async {
+        guard let entry = selectedEntry else {
+            await MainActor.run {
+                displayedEntryID = nil
+                displayedContent = ""
+            }
+            return
+        }
+
+        let timestampFormat = journalTimestampFormat
+        if let cached = entry.cachedDisplayContent(timestampFormat: timestampFormat) {
+            updateDisplayContent(cached, entryID: entry.id, timestampFormat: timestampFormat)
+            return
+        }
+
+        let entryID = entry.id
+        let content = entry.content
+        let prepared = await Task.detached(priority: .utility) {
+            JournalLibraryReadModel.preparedDisplayContent(
+                entryID: entryID,
+                content: content,
+                timestampFormat: timestampFormat
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+        updateDisplayContent(prepared, entryID: entryID, timestampFormat: timestampFormat)
+    }
+
+    @MainActor
+    private func updateDisplayContent(
+        _ content: String,
+        entryID: String,
+        timestampFormat: JournalTimestampFormat
+    ) {
+        displayedEntryID = entryID
+        displayedTimestampFormat = timestampFormat
+        displayedContent = content
     }
 }
 

@@ -23,8 +23,24 @@ struct JournalLibraryEntry: Identifiable, Hashable {
     let dateLabel: String
     let content: String
 
+    func cachedDisplayContent(timestampFormat: JournalTimestampFormat) -> String? {
+        JournalLibraryReadModel.cachedDisplayContent(
+            entryID: id,
+            content: content,
+            timestampFormat: timestampFormat
+        )
+    }
+
+    func preparedDisplayContent(timestampFormat: JournalTimestampFormat) -> String {
+        JournalLibraryReadModel.preparedDisplayContent(
+            entryID: id,
+            content: content,
+            timestampFormat: timestampFormat
+        )
+    }
+
     func displayContent(timestampFormat: JournalTimestampFormat) -> String {
-        JournalLibraryReadModel.formatJournalTimestamps(in: content, format: timestampFormat)
+        preparedDisplayContent(timestampFormat: timestampFormat)
     }
 }
 
@@ -44,6 +60,8 @@ struct JournalNavigationNode: Identifiable, Hashable {
 }
 
 struct JournalLibraryReadModel: Hashable {
+    private static let displayContentCache = JournalDisplayContentCache()
+
     var container: JournalLibraryContainer
     var entries: [JournalLibraryEntry]
     var navigation: [JournalNavigationNode]
@@ -86,6 +104,43 @@ struct JournalLibraryReadModel: Hashable {
             .components(separatedBy: .newlines)
             .map { formatJournalTimestampLine($0) }
             .joined(separator: "\n")
+    }
+
+    static func cachedDisplayContent(
+        entryID: String,
+        content: String,
+        timestampFormat: JournalTimestampFormat
+    ) -> String? {
+        guard timestampFormat == .twelveHour else { return content }
+        return displayContentCache.value(for: displayCacheKey(
+            entryID: entryID,
+            content: content,
+            timestampFormat: timestampFormat
+        ))
+    }
+
+    static func preparedDisplayContent(
+        entryID: String,
+        content: String,
+        timestampFormat: JournalTimestampFormat
+    ) -> String {
+        guard timestampFormat == .twelveHour else { return content }
+        let key = displayCacheKey(entryID: entryID, content: content, timestampFormat: timestampFormat)
+        if let cached = displayContentCache.value(for: key) {
+            return cached
+        }
+
+        let formatted = formatJournalTimestamps(in: content, format: timestampFormat)
+        displayContentCache.setValue(formatted, for: key)
+        return formatted
+    }
+
+    private static func displayCacheKey(
+        entryID: String,
+        content: String,
+        timestampFormat: JournalTimestampFormat
+    ) -> String {
+        "\(entryID)|\(timestampFormat.rawValue)|\(content.count)|\(content.hashValue)"
     }
 
     private static func formatJournalTimestampLine(_ line: String) -> String {
@@ -216,4 +271,21 @@ struct JournalLibraryReadModel: Hashable {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         return calendar
     }()
+}
+
+private final class JournalDisplayContentCache: @unchecked Sendable {
+    private var values: [String: String] = [:]
+    private let lock = NSLock()
+
+    func value(for key: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[key]
+    }
+
+    func setValue(_ value: String, for key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        values[key] = value
+    }
 }

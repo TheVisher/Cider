@@ -90,7 +90,7 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
     }
 }
 
-enum JournalTimestampFormat: String, Codable, CaseIterable {
+enum JournalTimestampFormat: String, Codable, CaseIterable, Sendable {
     case twelveHour
     case twentyFourHour
 
