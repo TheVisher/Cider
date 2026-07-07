@@ -394,6 +394,87 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(evidenceRejectedSamples.contains { $0["reasonCode"] as? String == "negative_or_non_preference_food_mention" })
     }
 
+    @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
+    func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let acceptedNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let rejectedNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let ramenPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let acceptedContent = "Lunch notes. I love ramen for rainy weeknight dinners. End."
+        let acceptedPhrase = "I love ramen for rainy weeknight dinners"
+        let rejectedContent = "Queue triage. Funny ramen recipe clip, not a preference. End."
+        let rejectedPhrase = "Funny ramen recipe clip, not a preference"
+        try insertNoteItem(
+            owner: acceptedNote,
+            title: "Daily Journal - 2026-07-06",
+            content: acceptedContent,
+            into: db
+        )
+        try insertNoteItem(
+            owner: rejectedNote,
+            title: "Recipe Clip Notes",
+            content: rejectedContent,
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: ramenPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .preview(limit: 10)
+
+        let acceptedRow = try #require(report.diagnostics.evidenceSamples.first {
+            $0.owner == acceptedNote && $0.reasonCode == "usable_food_preference_evidence"
+        })
+        let acceptedSpan = try #require(acceptedRow.sourceSpan)
+        #expect(acceptedSpan.sourceItemRef == acceptedNote.canonicalRef)
+        #expect(acceptedSpan.sourceField == "notes.content")
+        #expect(acceptedSpan.matchedText == acceptedPhrase)
+        #expect(acceptedSpan.snippet.contains(acceptedPhrase))
+        #expect(acceptedSpan.startOffset == acceptedContent.characterOffset(of: acceptedPhrase))
+        #expect(acceptedSpan.endOffset == acceptedSpan.startOffset + acceptedPhrase.count)
+        #expect(acceptedContent.substring(characterStart: acceptedSpan.startOffset, characterEnd: acceptedSpan.endOffset) == acceptedPhrase)
+        #expect(acceptedSpan.selector == "char:\(acceptedSpan.startOffset)..\(acceptedSpan.endOffset)")
+        #expect(acceptedSpan.sourceEvidenceRef == nil)
+        #expect(acceptedSpan.syntheticSourceEvidenceRef == "synthetic_source_span:note:\(acceptedNote.ownerID):\(acceptedSpan.startOffset)-\(acceptedSpan.endOffset)")
+        #expect(acceptedSpan.truthBoundary == "read_only_source_selector_not_accepted_truth")
+        #expect(acceptedRow.safeVerificationCommands.contains("cider-cli item context note \(acceptedNote.ownerID) --json"))
+
+        let rejectedRow = try #require(report.diagnostics.evidenceRejectedSamples.first {
+            $0.owner == rejectedNote && $0.reasonCode == "negative_or_non_preference_food_mention"
+        })
+        let rejectedSpan = try #require(rejectedRow.sourceSpan)
+        #expect(rejectedSpan.sourceItemRef == rejectedNote.canonicalRef)
+        #expect(rejectedSpan.sourceField == "notes.content")
+        #expect(rejectedSpan.matchedText == rejectedPhrase)
+        #expect(rejectedSpan.snippet.contains(rejectedPhrase))
+        #expect(rejectedContent.substring(characterStart: rejectedSpan.startOffset, characterEnd: rejectedSpan.endOffset) == rejectedPhrase)
+        #expect(rejectedSpan.selector == "char:\(rejectedSpan.startOffset)..\(rejectedSpan.endOffset)")
+        #expect(rejectedSpan.truthBoundary == "read_only_source_selector_not_accepted_truth")
+        #expect(rejectedRow.safeVerificationCommands.contains("cider-cli item context note \(rejectedNote.ownerID) --json"))
+
+        let payload = CiderCLI.savedPlacePreferenceLinkPreviewPayload(report)
+        let diagnostics = try #require(payload["diagnostics"] as? [String: Any])
+        let evidenceSamples = try #require(diagnostics["evidenceSamples"] as? [[String: Any]])
+        let acceptedDict = try #require(evidenceSamples.first { $0["ownerRef"] as? String == acceptedNote.canonicalRef })
+        let acceptedSpanDict = try #require(acceptedDict["sourceSpan"] as? [String: Any])
+        #expect(acceptedSpanDict["sourceItemRef"] as? String == acceptedNote.canonicalRef)
+        #expect(acceptedSpanDict["matchedText"] as? String == acceptedPhrase)
+        #expect(acceptedSpanDict["selector"] as? String == "char:\(acceptedSpan.startOffset)..\(acceptedSpan.endOffset)")
+        #expect((acceptedDict["safeVerificationCommands"] as? [String])?.contains("cider-cli item context note \(acceptedNote.ownerID) --json") == true)
+
+        let rejectedSamples = try #require(diagnostics["evidenceRejectedSamples"] as? [[String: Any]])
+        let rejectedDict = try #require(rejectedSamples.first { $0["ownerRef"] as? String == rejectedNote.canonicalRef })
+        let rejectedSpanDict = try #require(rejectedDict["sourceSpan"] as? [String: Any])
+        #expect(rejectedSpanDict["matchedText"] as? String == rejectedPhrase)
+        #expect(rejectedSpanDict["truthBoundary"] as? String == "read_only_source_selector_not_accepted_truth")
+    }
+
     private func insertNoteItem(
         owner: SecondBrainOwnerRef,
         title: String,
@@ -452,5 +533,18 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
             counts[table] = stmt.int(at: 0)
         }
         return counts
+    }
+}
+
+private extension String {
+    func characterOffset(of needle: String) -> Int {
+        guard let range = range(of: needle) else { return -1 }
+        return distance(from: startIndex, to: range.lowerBound)
+    }
+
+    func substring(characterStart: Int, characterEnd: Int) -> String {
+        let start = index(startIndex, offsetBy: characterStart)
+        let end = index(startIndex, offsetBy: characterEnd)
+        return String(self[start..<end])
     }
 }

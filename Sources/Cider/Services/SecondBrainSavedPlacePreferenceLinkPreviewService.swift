@@ -7,6 +7,20 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewSource: Codable, Equatable {
     var url: String?
     var relativePath: String?
     var sourceEvidenceRef: String?
+    var sourceSpan: SecondBrainSavedPlacePreferenceLinkSourceSpan?
+}
+
+struct SecondBrainSavedPlacePreferenceLinkSourceSpan: Codable, Equatable {
+    var sourceItemRef: String
+    var sourceField: String
+    var snippet: String
+    var matchedText: String
+    var startOffset: Int
+    var endOffset: Int
+    var selector: String
+    var sourceEvidenceRef: String?
+    var syntheticSourceEvidenceRef: String?
+    var truthBoundary: String
 }
 
 struct SecondBrainSavedPlacePreferenceLinkCandidate: Identifiable, Codable, Equatable {
@@ -29,6 +43,8 @@ struct SecondBrainSavedPlacePreferenceLinkDiagnosticRow: Codable, Equatable {
     var reasonCode: String
     var matchedTerms: [String]
     var sourceRefs: [String]
+    var sourceSpan: SecondBrainSavedPlacePreferenceLinkSourceSpan?
+    var safeVerificationCommands: [String]
 }
 
 struct SecondBrainSavedPlacePreferenceLinkDiagnostics: Codable, Equatable {
@@ -77,6 +93,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         var evidence: String
         var confidence: Double
         var sourceEvidenceRef: String?
+        var sourceSpan: SecondBrainSavedPlacePreferenceLinkSourceSpan?
         var sourceRefs: [String]
         var terms: [String]
     }
@@ -285,6 +302,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                     evidence: output.evidence,
                     confidence: output.confidence ?? 0.78,
                     sourceEvidenceRef: evidenceRef,
+                    sourceSpan: nil,
                     sourceRefs: [output.owner.canonicalRef, "graph_candidate:\(output.id)", evidenceRef].compactMap { $0 },
                     terms: terms
                 )
@@ -328,28 +346,38 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             let title = stmt.string(at: 1)
             let content = stmt.optionalString(at: 2) ?? ""
             for sentence in foodEvidenceSentences(in: content) {
-                let terms = cuisineTerms(in: sentence)
+                let terms = cuisineTerms(in: sentence.text)
                 guard !terms.isEmpty else { continue }
-                if isNoisyOrNegativeFoodPreferenceSentence(sentence) {
+                let sourceSpan = sourceSpan(
+                    owner: owner,
+                    sourceField: "notes.content",
+                    content: content,
+                    sentence: sentence,
+                    sourceEvidenceRef: nil
+                )
+                let sourceRefs = [owner.canonicalRef, sourceSpan.syntheticSourceEvidenceRef].compactMap { $0 }
+                if isNoisyOrNegativeFoodPreferenceSentence(sentence.text) {
                     rejectedSamples.append(
                         diagnosticRow(
                             owner: owner,
                             title: title,
                             reasonCode: "negative_or_non_preference_food_mention",
                             matchedTerms: terms,
-                            sourceRefs: [owner.canonicalRef]
+                            sourceRefs: sourceRefs,
+                            sourceSpan: sourceSpan
                         )
                     )
                     continue
                 }
-                guard hasFoodPreferenceCue(sentence) else {
+                guard hasFoodPreferenceCue(sentence.text) else {
                     rejectedSamples.append(
                         diagnosticRow(
                             owner: owner,
                             title: title,
                             reasonCode: "food_mention_without_preference_cue",
                             matchedTerms: terms,
-                            sourceRefs: [owner.canonicalRef]
+                            sourceRefs: sourceRefs,
+                            sourceSpan: sourceSpan
                         )
                     )
                     continue
@@ -361,10 +389,11 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                         owner: owner,
                         title: title,
                         value: displayPreferenceValue(terms: terms),
-                        evidence: sentence,
+                        evidence: sentence.text,
                         confidence: 0.76,
                         sourceEvidenceRef: nil,
-                        sourceRefs: [owner.canonicalRef],
+                        sourceSpan: sourceSpan,
+                        sourceRefs: sourceRefs,
                         terms: terms
                     )
                 )
@@ -374,7 +403,8 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                         title: title,
                         reasonCode: "usable_food_preference_evidence",
                         matchedTerms: terms,
-                        sourceRefs: [owner.canonicalRef]
+                        sourceRefs: sourceRefs,
+                        sourceSpan: sourceSpan
                     )
                 )
             }
@@ -449,7 +479,9 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 title: bookmark.title,
                 snippet: "\(bookmark.title) - \(bookmark.url)",
                 url: bookmark.url,
-                relativePath: bookmark.relativePath
+                relativePath: bookmark.relativePath,
+                sourceEvidenceRef: nil,
+                sourceSpan: nil
             ),
             evidenceItem: SecondBrainSavedPlacePreferenceLinkPreviewSource(
                 owner: preference.owner,
@@ -457,7 +489,8 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 snippet: preference.evidence,
                 url: nil,
                 relativePath: nil,
-                sourceEvidenceRef: preference.sourceEvidenceRef
+                sourceEvidenceRef: preference.sourceEvidenceRef,
+                sourceSpan: preference.sourceSpan
             ),
             preferenceValue: preference.value,
             confidence: match.confidence,
@@ -482,14 +515,17 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         title: String,
         reasonCode: String,
         matchedTerms: [String],
-        sourceRefs: [String]
+        sourceRefs: [String],
+        sourceSpan: SecondBrainSavedPlacePreferenceLinkSourceSpan? = nil
     ) -> SecondBrainSavedPlacePreferenceLinkDiagnosticRow {
         SecondBrainSavedPlacePreferenceLinkDiagnosticRow(
             owner: owner,
             title: title,
             reasonCode: reasonCode,
             matchedTerms: orderedUnique(matchedTerms),
-            sourceRefs: orderedUnique(sourceRefs)
+            sourceRefs: orderedUnique(sourceRefs),
+            sourceSpan: sourceSpan,
+            safeVerificationCommands: ["cider-cli item context \(owner.ownerType) \(owner.ownerID) --json"]
         )
     }
 
@@ -631,10 +667,71 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         return term.capitalized
     }
 
-    private func foodEvidenceSentences(in text: String) -> [String] {
-        text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+    private struct SourceSentence {
+        var text: String
+        var startOffset: Int
+        var endOffset: Int
+    }
+
+    private func foodEvidenceSentences(in text: String) -> [SourceSentence] {
+        var sentences: [SourceSentence] = []
+        var segmentStart = text.startIndex
+
+        func appendSegment(endingAt segmentEnd: String.Index) {
+            var trimmedStart = segmentStart
+            var trimmedEnd = segmentEnd
+            while trimmedStart < trimmedEnd, text[trimmedStart].isWhitespace {
+                trimmedStart = text.index(after: trimmedStart)
+            }
+            while trimmedEnd > trimmedStart {
+                let beforeEnd = text.index(before: trimmedEnd)
+                guard text[beforeEnd].isWhitespace else { break }
+                trimmedEnd = beforeEnd
+            }
+            guard trimmedStart < trimmedEnd else { return }
+            sentences.append(
+                SourceSentence(
+                    text: String(text[trimmedStart..<trimmedEnd]),
+                    startOffset: text.distance(from: text.startIndex, to: trimmedStart),
+                    endOffset: text.distance(from: text.startIndex, to: trimmedEnd)
+                )
+            )
+        }
+
+        var index = text.startIndex
+        while index < text.endIndex {
+            if ".!?\n".contains(text[index]) {
+                appendSegment(endingAt: index)
+                segmentStart = text.index(after: index)
+            }
+            index = text.index(after: index)
+        }
+        appendSegment(endingAt: text.endIndex)
+        return sentences
+    }
+
+    private func sourceSpan(
+        owner: SecondBrainOwnerRef,
+        sourceField: String,
+        content: String,
+        sentence: SourceSentence,
+        sourceEvidenceRef: String?
+    ) -> SecondBrainSavedPlacePreferenceLinkSourceSpan {
+        let contextStart = max(0, sentence.startOffset - 80)
+        let contextEnd = min(content.count, sentence.endOffset + 80)
+        let syntheticRef = sourceEvidenceRef ?? "synthetic_source_span:\(owner.ownerType):\(owner.ownerID):\(sentence.startOffset)-\(sentence.endOffset)"
+        return SecondBrainSavedPlacePreferenceLinkSourceSpan(
+            sourceItemRef: owner.canonicalRef,
+            sourceField: sourceField,
+            snippet: content.substring(characterStart: contextStart, characterEnd: contextEnd),
+            matchedText: sentence.text,
+            startOffset: sentence.startOffset,
+            endOffset: sentence.endOffset,
+            selector: "char:\(sentence.startOffset)..\(sentence.endOffset)",
+            sourceEvidenceRef: sourceEvidenceRef,
+            syntheticSourceEvidenceRef: sourceEvidenceRef == nil ? syntheticRef : nil,
+            truthBoundary: "read_only_source_selector_not_accepted_truth"
+        )
     }
 
     private func hasFoodPreferenceCue(_ sentence: String) -> Bool {
@@ -677,5 +774,15 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             result.append(value)
         }
         return result
+    }
+}
+
+private extension String {
+    func substring(characterStart: Int, characterEnd: Int) -> String {
+        let safeStart = max(0, min(count, characterStart))
+        let safeEnd = max(safeStart, min(count, characterEnd))
+        let start = index(startIndex, offsetBy: safeStart)
+        let end = index(startIndex, offsetBy: safeEnd)
+        return String(self[start..<end])
     }
 }

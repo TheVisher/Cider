@@ -27293,14 +27293,17 @@ struct CiderCLI {
     }
 
     static func savedPlacePreferenceLinkDiagnosticRowToDict(_ row: SecondBrainSavedPlacePreferenceLinkDiagnosticRow) -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "owner": ownerToDict(row.owner),
             "ownerRef": row.owner.canonicalRef,
             "title": row.title,
             "reasonCode": row.reasonCode,
             "matchedTerms": row.matchedTerms,
             "sourceRefs": row.sourceRefs,
+            "safeVerificationCommands": row.safeVerificationCommands,
         ]
+        if let sourceSpan = row.sourceSpan { dict["sourceSpan"] = savedPlacePreferenceLinkSourceSpanToDict(sourceSpan) }
+        return dict
     }
 
     static func savedPlacePreferenceLinkCandidateToDict(_ candidate: SecondBrainSavedPlacePreferenceLinkCandidate) -> [String: Any] {
@@ -27334,6 +27337,25 @@ struct CiderCLI {
         if let url = source.url { dict["url"] = url }
         if let relativePath = source.relativePath { dict["relativePath"] = relativePath }
         if let sourceEvidenceRef = source.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let sourceSpan = source.sourceSpan { dict["sourceSpan"] = savedPlacePreferenceLinkSourceSpanToDict(sourceSpan) }
+        return dict
+    }
+
+    static func savedPlacePreferenceLinkSourceSpanToDict(_ span: SecondBrainSavedPlacePreferenceLinkSourceSpan) -> [String: Any] {
+        var dict: [String: Any] = [
+            "sourceItemRef": span.sourceItemRef,
+            "sourceField": span.sourceField,
+            "snippet": span.snippet,
+            "matchedText": span.matchedText,
+            "startOffset": span.startOffset,
+            "endOffset": span.endOffset,
+            "selector": span.selector,
+            "truthBoundary": span.truthBoundary,
+        ]
+        if let sourceEvidenceRef = span.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
+        if let syntheticSourceEvidenceRef = span.syntheticSourceEvidenceRef {
+            dict["syntheticSourceEvidenceRef"] = syntheticSourceEvidenceRef
+        }
         return dict
     }
 
