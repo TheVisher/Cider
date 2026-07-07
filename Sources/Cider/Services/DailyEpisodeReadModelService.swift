@@ -105,9 +105,8 @@ final class DailyEpisodeReadModelService {
     }
 
     private func dailyJournalSourceItem(for date: String) -> DailyEpisodeSourceItem? {
-        let title = "Daily Journal \(date)"
         guard let note = notesStorage.notes.first(where: {
-            $0.title.localizedCaseInsensitiveCompare(title) == .orderedSame
+            $0.dailyJournalDateLabel == date
         }) else {
             return nil
         }
@@ -135,8 +134,7 @@ final class DailyEpisodeReadModelService {
     ) -> [DailyEpisodeEntry] {
         let lines = content.components(separatedBy: .newlines)
         var parsed: [DailyEpisodeEntry] = []
-        for (index, line) in lines.enumerated() {
-            guard let slice = Self.parseJournalEntryLine(line) else { continue }
+        for slice in Self.parseJournalEntrySlices(lines: lines) {
             let matchingProvenance = provenance.filter { ref in
                 ref.metadata["date"] == date
                     && ref.metadata["time"] == slice.time
@@ -144,13 +142,13 @@ final class DailyEpisodeReadModelService {
                         || ref.sourceText == nil)
             }
             parsed.append(DailyEpisodeEntry(
-                id: "\(date)-\(slice.time)-line-\(index + 1)",
+                id: "\(date)-\(slice.time)-line-\(slice.line)",
                 date: date,
                 time: slice.time,
-                heading: nil,
+                heading: slice.heading,
                 snippet: Self.snippet(from: slice.body),
                 sourceItemRef: sourceItemRef,
-                sourceLine: index + 1,
+                sourceLine: slice.line,
                 provenanceRefs: matchingProvenance
             ))
         }
@@ -166,6 +164,48 @@ final class DailyEpisodeReadModelService {
                 return lhs.sourceLine < rhs.sourceLine
             }
         }
+    }
+
+    private static func parseJournalEntrySlices(lines: [String]) -> [(time: String, heading: String?, body: String, line: Int)] {
+        var slices: [(time: String, heading: String?, body: String, line: Int)] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            if let legacy = parseJournalEntryLine(line) {
+                slices.append((time: legacy.time, heading: nil, body: legacy.body, line: index + 1))
+                index += 1
+                continue
+            }
+
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("## ") else {
+                index += 1
+                continue
+            }
+            let heading = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let time = String(heading.prefix(5))
+            guard time.range(of: #"^\d{2}:\d{2}$"#, options: .regularExpression) != nil else {
+                index += 1
+                continue
+            }
+
+            let sourceLine = index + 1
+            index += 1
+            var bodyLines: [String] = []
+            while index < lines.count {
+                let next = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                if next.hasPrefix("## ") { break }
+                if !next.isEmpty && !next.localizedCaseInsensitiveContains("source:") {
+                    bodyLines.append(lines[index])
+                }
+                index += 1
+            }
+            let body = bodyLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty {
+                slices.append((time: time, heading: heading, body: body, line: sourceLine))
+            }
+        }
+        return slices
     }
 
     private static func parseJournalEntryLine(_ line: String) -> (time: String, body: String)? {

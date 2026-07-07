@@ -416,8 +416,8 @@ struct SecondBrainFoundationTests {
         try requireAgentFacingCaptureState(noteFilePayload, expectedOriginalText: sourceFile.path)
     }
 
-    @Test("capture add journal appends to daily journal with strict JSON")
-    func captureAddJournalAppendsToDailyJournalWithStrictJSON() throws {
+    @Test("capture add journal appends to canonical journal day note with strict JSON")
+    func captureAddJournalAppendsToCanonicalJournalDayNoteWithStrictJSON() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-capture-journal-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
@@ -448,9 +448,11 @@ struct SecondBrainFoundationTests {
         let firstItem = try #require(firstPayload["item"] as? [String: Any])
         let noteID = try #require(firstItem["id"] as? String)
         #expect(firstItem["type"] as? String == "note")
-        #expect(firstItem["title"] as? String == "Daily Journal 2026-05-28")
+        #expect(firstItem["title"] as? String == "Journal 05-28-2026")
         let firstContent = try #require(firstPayload["content"] as? String)
-        #expect(firstContent.contains("- 08:15 - Morning driving reflection"))
+        #expect(firstContent.contains("## 08:15"))
+        #expect(firstContent.contains("Source: capture.add"))
+        #expect(firstContent.contains("Morning driving reflection"))
         let firstSource = try #require(firstPayload["source"] as? [String: Any])
         #expect(firstSource["kind"] as? String == "text")
         #expect(firstSource["text"] as? String == "Morning driving reflection")
@@ -468,8 +470,10 @@ struct SecondBrainFoundationTests {
         let secondItem = try #require(secondPayload["item"] as? [String: Any])
         #expect(secondItem["id"] as? String == noteID)
         let secondContent = try #require(secondPayload["content"] as? String)
-        #expect(secondContent.contains("- 08:15 - Morning driving reflection"))
-        #expect(secondContent.contains("- 17:45 - Evening commute note"))
+        #expect(secondContent.contains("## 08:15"))
+        #expect(secondContent.contains("Morning driving reflection"))
+        #expect(secondContent.contains("## 17:45"))
+        #expect(secondContent.contains("Evening commute note"))
 
         let getPayload = try jsonObject(from: runCLI([
             "item", "get", "note", noteID, "--json",
@@ -492,7 +496,7 @@ struct SecondBrainFoundationTests {
             "item", "search", "Evening commute note", "--json",
         ], vaultURL: vault))
         #expect(searchPayload.contains { result in
-            result["title"] as? String == "Daily Journal 2026-05-28"
+            result["title"] as? String == "Journal 05-28-2026"
         })
     }
 
@@ -683,7 +687,7 @@ struct SecondBrainFoundationTests {
         let date = try #require(payload["date"] as? String)
         #expect(date.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil)
         let item = try #require(payload["item"] as? [String: Any])
-        #expect(item["title"] as? String == "Daily Journal \(date)")
+        #expect(item["title"] as? String == JournalTitle.canonicalTitle(forISODate: date))
 
         let empty = try runCLIResult([
             "capture", "add",

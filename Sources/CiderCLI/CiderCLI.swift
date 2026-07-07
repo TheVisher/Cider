@@ -283,6 +283,7 @@ struct CiderCLI {
       cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
       cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
       cider-cli item graph-candidate <candidate-id> [--json]
+      cider-cli item journal-migration-preview [--json]
       cider-cli item journal-candidate-reconcile <owner-type> <owner-id-or-ref> [--dry-run] [--apply --candidate <id>] [--text-file <path>] [--date YYYY-MM-DD] [--time HH:mm] [--json]
       cider-cli item journal-candidate-source-span-audit <owner-type> <owner-id-or-ref> [--text-file <path>] [--limit <n>] [--json]
       cider-cli item journal-candidate-source-span-backfill <owner-type> <owner-id-or-ref> --candidate <id-or-ref> [--text-file <path>] [--actor <name>] [--reason <text>] [--json]
@@ -473,6 +474,8 @@ struct CiderCLI {
             return "cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]"
         case "backfill-journals", "journal-backfill", "backfill-daily-journals":
             return "cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]"
+        case "journal-migration-preview", "journal-naming-preview", "journal-preview-migration":
+            return "cider-cli item journal-migration-preview [--json]"
         case "sync-project", "project-sync":
             return "cider-cli item sync-project <project-id-or-name> [--json]"
         case "daily-tracker", "tracker-daily", "daily-signals":
@@ -3764,7 +3767,7 @@ struct CiderCLI {
 
     static func captureAddJournalPayload(rawContent: String, args: [String], storage: NotesStorage) throws -> [String: Any] {
         let result = try appendDailyNoteEntry(
-            spec: DailyNoteKindSpec(kind: "journal", titlePrefix: "Daily Journal"),
+            spec: DailyNoteKindSpec(kind: "journal", titlePrefix: "Journal"),
             dateRaw: parseFlag("--date", from: args),
             timeRaw: parseFlag("--time", from: args),
             rawContent: rawContent,
@@ -3803,7 +3806,9 @@ struct CiderCLI {
             throw CaptureAddArgumentError.message(emptyContentMessage)
         }
 
-        let title = "\(spec.titlePrefix) \(dateString)"
+        let title = spec.kind == "journal"
+            ? JournalTitle.canonicalTitle(forISODate: dateString)
+            : "\(spec.titlePrefix) \(dateString)"
         let existing = storage.notes.first { note in
             note.title.localizedCaseInsensitiveCompare(title) == .orderedSame
         }
@@ -3818,7 +3823,9 @@ struct CiderCLI {
         }
         let before = MutationAuditSnapshots.note(note)
         let existingContent = storage.loadContent(for: note)
-        let entry = "- \(timeString) - \(body)"
+        let entry = spec.kind == "journal"
+            ? JournalTitle.appendSection(time: timeString, source: source, body: body)
+            : "- \(timeString) - \(body)"
         var updated = note
         updated.content = dailyNoteContentByAppending(entry: entry, to: existingContent, title: title)
         storage.save(note: updated)
@@ -4021,7 +4028,7 @@ struct CiderCLI {
             "enrichment": [
                 "status": "not_applicable",
                 "isEnriching": false,
-                "titleState": "daily_journal",
+                "titleState": "canonical_journal",
                 "graphCandidateCount": graphCandidates["count"] as? Int ?? 0,
             ],
             "graphCandidates": graphCandidates,
@@ -4031,7 +4038,7 @@ struct CiderCLI {
             "routing": [
                 "reviewNeeded": false,
                 "confidence": 1,
-                "reason": "Daily journal append does not require folder routing review.",
+                "reason": "Journal append does not require folder routing review.",
                 "reviewState": "ok",
                 "status": "recorded",
             ],
@@ -4229,7 +4236,7 @@ struct CiderCLI {
         switch raw.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
             .replacingOccurrences(of: "_", with: "-") {
         case "journal", "daily", "daily-journal":
-            return DailyNoteKindSpec(kind: "journal", titlePrefix: "Daily Journal")
+            return DailyNoteKindSpec(kind: "journal", titlePrefix: "Journal")
         case "food", "food-log":
             return DailyNoteKindSpec(kind: "food-log", titlePrefix: "Food Log")
         default:
@@ -6599,6 +6606,9 @@ struct CiderCLI {
 
         case "journal-candidate-reconcile", "reconcile-journal-candidates":
             handleJournalCandidateReconciliationCommand(args: args)
+
+        case "journal-migration-preview", "journal-naming-preview", "journal-preview-migration":
+            printJournalMigrationPreview(args: args)
 
         case "journal-candidate-source-span-audit", "journal-candidate-span-audit", "audit-journal-candidate-source-spans":
             handleJournalCandidateSourceSpanAuditCommand(args: args)
@@ -24074,6 +24084,57 @@ struct CiderCLI {
             "cider-cli item graph-candidates --json",
             "cider-cli capture review-queue --json",
         ]
+    }
+
+    static func printJournalMigrationPreview(args: [String]) {
+        let jsonOutput = args.contains("--json")
+        let preview = JournalMigrationPreviewService().preview(notes: NotesStorage.shared.notes)
+        let payload = journalMigrationPreviewToDict(preview)
+        if jsonOutput {
+            outputJSON(payload)
+            return
+        }
+
+        print("Journal migration preview: \(preview.rows.count) journal-like note(s), no live mutation")
+        for key in JournalMigrationPreviewClassification.allReportCases {
+            let count = preview.countsByClassification[key] ?? 0
+            print("  \(key.rawValue): \(count)")
+        }
+        print("Run with --json for row details.")
+    }
+
+    static func journalMigrationPreviewToDict(_ preview: JournalMigrationPreview) -> [String: Any] {
+        var counts: [String: Int] = [:]
+        for key in JournalMigrationPreviewClassification.allReportCases {
+            counts[key.rawValue] = preview.countsByClassification[key] ?? 0
+        }
+        return [
+            "ok": true,
+            "command": "item.journal-migration-preview",
+            "readOnly": true,
+            "changed": false,
+            "mutatesLiveNotes": preview.mutatesLiveNotes,
+            "counts": counts,
+            "rows": preview.rows.map(journalMigrationPreviewRowToDict),
+            "safeNextCommands": [
+                "cider-cli item journal-migration-preview --json",
+            ],
+        ] as [String: Any]
+    }
+
+    static func journalMigrationPreviewRowToDict(_ row: JournalMigrationPreviewRow) -> [String: Any] {
+        [
+            "note": [
+                "id": row.note.id.uuidString,
+                "title": row.note.title,
+                "relativePath": row.note.relativePath,
+            ],
+            "classification": row.classification.rawValue,
+            "reason": row.reason,
+            "proposedCanonicalTitle": row.proposedCanonicalTitle as Any,
+            "proposedISODate": row.proposedISODate as Any,
+            "preservedCaptureHints": row.preservedCaptureHints,
+        ] as [String: Any]
     }
 
     static func handleJournalCandidateReconciliationCommand(args: [String]) {

@@ -5345,8 +5345,10 @@ struct CiderCLIAgentSafetyTests {
         #expect(journal["kind"] as? String == "journal")
         #expect(journal["created"] as? Bool == true)
         let journalContent = try #require(journal["content"] as? String)
-        #expect(journalContent.contains("Daily Journal 2026-05-28"))
-        #expect(journalContent.contains("- 20:00 - Evening reflection"))
+        #expect(journalContent.contains("Journal 05-28-2026"))
+        #expect(journalContent.contains("## 20:00"))
+        #expect(journalContent.contains("Source: discord"))
+        #expect(journalContent.contains("Evening reflection"))
 
         let inspectResult = try runCLI(args: ["item", "get", "note", noteID, "--json"], vault: vault)
         let inspected = try parseJSONObject(inspectResult.stdout)

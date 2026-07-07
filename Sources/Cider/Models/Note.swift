@@ -78,15 +78,11 @@ struct Note: Identifiable, Hashable {
     }
 
     var isDailyJournalNote: Bool {
-        title.range(
-            of: #"^Daily Journal \d{4}-\d{2}-\d{2}$"#,
-            options: .regularExpression
-        ) != nil
+        journalTitle != nil
     }
 
     var dailyJournalDateLabel: String? {
-        guard isDailyJournalNote else { return nil }
-        return String(title.dropFirst("Daily Journal ".count))
+        journalTitle?.isoDate
     }
 
     var journalCaptureSubtitle: String? {
@@ -95,6 +91,10 @@ struct Note: Identifiable, Hashable {
             return "Journal capture - \(dailyJournalDateLabel)"
         }
         return "Journal capture"
+    }
+
+    var journalTitle: JournalTitle? {
+        JournalTitle.parse(title)
     }
 
     // MARK: - Computed Properties for Card Display
