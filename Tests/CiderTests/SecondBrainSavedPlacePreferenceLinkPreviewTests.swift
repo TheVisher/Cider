@@ -592,6 +592,74 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(safeCommands.contains("cider-cli item preference-saved-place-links --owner \(preferenceNote.ownerID.prefix(8)) --json"))
     }
 
+    @Test("item context surfaces compact reciprocal saved places for source-backed preference notes")
+    func itemContextSurfacesCompactReciprocalSavedPlacesForPreferenceNotes() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let preferenceNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let unrelatedNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let phoPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let ramenPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let preferenceContent = "Dinner log. I love Asian food, especially pho and ramen when it is cold. Done."
+        try insertNoteItem(
+            owner: preferenceNote,
+            title: "Daily Journal - 2026-07-06",
+            content: preferenceContent,
+            into: db
+        )
+        try insertNoteItem(
+            owner: unrelatedNote,
+            title: "Daily Journal - 2026-07-07",
+            content: "Quiet day. I fixed a layout bug and took a walk.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: phoPlace,
+            title: "Lotus Pho Restaurant",
+            url: "https://example.com/saved/lotus-pho-seattle",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: ramenPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+
+        let before = try mutationCounts(in: db)
+        let service = CiderItemContextService(database: db)
+        let packet = try service.agentContext(for: LibraryEntityRef(type: .note, entityID: UUID(uuidString: preferenceNote.ownerID)!))
+        let payload = CiderCLI.itemAgentContextPacketToDict(packet)
+        let unrelatedPacket = try service.agentContext(for: LibraryEntityRef(type: .note, entityID: UUID(uuidString: unrelatedNote.ownerID)!))
+        let unrelatedPayload = CiderCLI.itemAgentContextPacketToDict(unrelatedPacket)
+        let after = try mutationCounts(in: db)
+
+        #expect(after == before)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let relatedSavedPlaces = try #require(payload["relatedSavedPlaces"] as? [String: Any])
+        #expect(relatedSavedPlaces["readOnly"] as? Bool == true)
+        #expect(relatedSavedPlaces["changed"] as? Bool == false)
+        #expect(relatedSavedPlaces["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(relatedSavedPlaces["acceptedAsTruth"] as? Bool == false)
+        #expect(relatedSavedPlaces["groupCount"] as? Int == 1)
+        #expect(relatedSavedPlaces["candidateCount"] as? Int == 2)
+        let safeCommands = try #require(relatedSavedPlaces["safeNextCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item preference-saved-place-links --owner \(preferenceNote.ownerID) --json"))
+        #expect(safeCommands.contains("cider-cli item context note \(preferenceNote.ownerID) --json"))
+        let topPlaces = try #require(relatedSavedPlaces["topRelatedSavedPlaces"] as? [[String: Any]])
+        #expect(topPlaces.count == 2)
+        #expect(topPlaces.contains { $0["savedItemRef"] as? String == phoPlace.canonicalRef })
+        #expect(topPlaces.contains { $0["savedItemRef"] as? String == ramenPlace.canonicalRef })
+        #expect(topPlaces.allSatisfy { $0["truthBoundary"] as? String == "reviewable_candidate_not_truth" })
+        #expect(topPlaces.allSatisfy { $0["acceptedAsTruth"] as? Bool == false })
+        let evidenceRefs = try #require(relatedSavedPlaces["evidenceRefs"] as? [String])
+        #expect(evidenceRefs.contains(preferenceNote.canonicalRef))
+
+        #expect(unrelatedPayload["relatedSavedPlaces"] == nil)
+    }
+
     @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
     func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
         let (db, url) = try makeTestDB()

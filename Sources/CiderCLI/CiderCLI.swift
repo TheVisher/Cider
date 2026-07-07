@@ -28093,6 +28093,9 @@ struct CiderCLI {
         if let review = packet.review {
             dict["review"] = itemAgentReviewStateToDict(review)
         }
+        if let relatedSavedPlaces = packet.relatedSavedPlaces {
+            dict["relatedSavedPlaces"] = itemRelatedSavedPlacesSummaryToDict(relatedSavedPlaces)
+        }
         return dict
     }
 
@@ -28184,6 +28187,44 @@ struct CiderCLI {
         if let confidence = review.confidence { dict["confidence"] = confidence }
         if let targetPath = review.targetPath { dict["targetPath"] = targetPath }
         return dict
+    }
+
+    static func itemRelatedSavedPlacesSummaryToDict(_ summary: CiderItemRelatedSavedPlacesSummary) -> [String: Any] {
+        [
+            "readOnly": summary.readOnly,
+            "changed": summary.changed,
+            "truthBoundary": summary.truthBoundary,
+            "acceptedAsTruth": summary.acceptedAsTruth,
+            "groupCount": summary.groupCount,
+            "candidateCount": summary.candidateCount,
+            "evidenceItem": savedPlacePreferenceLinkSourceToDict(summary.evidenceItem),
+            "evidenceItemRef": summary.evidenceItem.owner.canonicalRef,
+            "preferenceValues": summary.preferenceValues,
+            "evidenceRefs": summary.evidenceRefs,
+            "sourceRefs": summary.sourceRefs,
+            "topRelatedSavedPlaces": summary.topRelatedSavedPlaces.map(itemRelatedSavedPlaceSummaryToDict),
+            "safeVerificationCommands": summary.safeVerificationCommands,
+            "safeNextCommands": summary.safeNextCommands,
+        ]
+    }
+
+    static func itemRelatedSavedPlaceSummaryToDict(_ summary: CiderItemRelatedSavedPlaceSummary) -> [String: Any] {
+        [
+            "id": summary.id,
+            "candidateRef": summary.id,
+            "savedItem": savedPlacePreferenceLinkSourceToDict(summary.savedItem),
+            "savedItemRef": summary.savedItem.owner.canonicalRef,
+            "preferenceValue": summary.preferenceValue,
+            "confidence": summary.confidence,
+            "reason": summary.reason,
+            "reasonCodes": summary.reasonCodes,
+            "sourceRefs": summary.sourceRefs,
+            "truthBoundary": summary.truthBoundary,
+            "reviewState": "suggested",
+            "acceptedAsTruth": false,
+            "safeVerificationCommands": summary.safeVerificationCommands,
+            "safeNextCommands": summary.safeNextCommands,
+        ]
     }
 
     static func itemAgentContextHistoryToDict(_ entry: CiderItemAgentContextHistoryEntry) -> [String: Any] {

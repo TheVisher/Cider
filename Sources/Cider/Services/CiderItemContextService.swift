@@ -157,6 +157,35 @@ struct CiderItemAgentContextHistoryEntry: Identifiable, Equatable {
     var safeVerificationCommands: [String] = []
 }
 
+struct CiderItemRelatedSavedPlaceSummary: Identifiable, Equatable {
+    var id: String
+    var savedItem: SecondBrainSavedPlacePreferenceLinkPreviewSource
+    var preferenceValue: String
+    var confidence: Double
+    var reason: String
+    var reasonCodes: [String]
+    var sourceRefs: [String]
+    var truthBoundary: String
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+}
+
+struct CiderItemRelatedSavedPlacesSummary: Equatable {
+    var readOnly: Bool
+    var changed: Bool
+    var truthBoundary: String
+    var acceptedAsTruth: Bool
+    var groupCount: Int
+    var candidateCount: Int
+    var evidenceItem: SecondBrainSavedPlacePreferenceLinkPreviewSource
+    var preferenceValues: [String]
+    var evidenceRefs: [String]
+    var sourceRefs: [String]
+    var topRelatedSavedPlaces: [CiderItemRelatedSavedPlaceSummary]
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+}
+
 struct CiderItemAgentContextPacket: Equatable {
     var item: CiderItemSummary
     var owner: SecondBrainOwnerRef
@@ -171,6 +200,7 @@ struct CiderItemAgentContextPacket: Equatable {
     var memoryCandidates: [SecondBrainEnrichmentOutput]
     var captureProvenance: [CiderItemCaptureProvenance]
     var review: CiderItemAgentReviewState?
+    var relatedSavedPlaces: CiderItemRelatedSavedPlacesSummary?
     var surfacing: CiderSurfacingExplanation
     var recentHistory: [CiderItemAgentContextHistoryEntry]
     var safeCommands: [String]
@@ -439,6 +469,7 @@ final class CiderItemContextService {
             ),
             captureProvenance: Array(bundle.captureProvenance.prefix(normalizedLimits.maxHistory)),
             review: reviewState(for: bundle),
+            relatedSavedPlaces: relatedSavedPlaces(for: bundle, limit: normalizedLimits.maxRelated),
             surfacing: surfacingExplanation(for: bundle),
             recentHistory: recentHistory(for: bundle, limit: normalizedLimits.maxHistory),
             safeCommands: safeCommands(for: bundle),
@@ -3004,6 +3035,61 @@ final class CiderItemContextService {
             commands.append("cider-cli routing explain \(id) --json")
         }
         return commands
+    }
+
+    private func relatedSavedPlaces(
+        for bundle: CiderItemContextBundle,
+        limit: Int
+    ) -> CiderItemRelatedSavedPlacesSummary? {
+        guard bundle.item.type == .note else { return nil }
+        let boundedLimit = max(1, limit)
+        guard let report = try? SecondBrainSavedPlacePreferenceLinkPreviewService(database: database)
+            .reciprocalPreview(ownerSelector: bundle.owner.ownerID, limit: boundedLimit),
+              !report.groups.isEmpty else {
+            return nil
+        }
+
+        let groups = report.groups
+        let candidates = groups.flatMap(\.candidates)
+        guard let evidenceItem = groups.first?.evidenceItem else { return nil }
+        let replayCommand = "cider-cli item preference-saved-place-links --owner \(bundle.owner.ownerID) --json"
+        let contextCommand = "cider-cli item context \(bundle.owner.ownerType) \(bundle.owner.ownerID) --json"
+        let safeCommands = orderedUnique(
+            [replayCommand, contextCommand]
+                + report.safeVerificationCommands
+                + groups.flatMap(\.safeVerificationCommands)
+                + candidates.flatMap(\.safeVerificationCommands)
+        )
+        let topRelatedSavedPlaces = candidates.prefix(boundedLimit).map { candidate in
+            CiderItemRelatedSavedPlaceSummary(
+                id: candidate.id,
+                savedItem: candidate.savedItem,
+                preferenceValue: candidate.preferenceValue,
+                confidence: candidate.confidence,
+                reason: candidate.reason,
+                reasonCodes: candidate.reasonCodes,
+                sourceRefs: candidate.sourceRefs,
+                truthBoundary: candidate.truthBoundary,
+                safeVerificationCommands: candidate.safeVerificationCommands,
+                safeNextCommands: candidate.safeNextCommands
+            )
+        }
+
+        return CiderItemRelatedSavedPlacesSummary(
+            readOnly: report.readOnly,
+            changed: report.changed,
+            truthBoundary: report.truthBoundary,
+            acceptedAsTruth: false,
+            groupCount: groups.count,
+            candidateCount: candidates.count,
+            evidenceItem: evidenceItem,
+            preferenceValues: orderedUnique(groups.map(\.preferenceValue)),
+            evidenceRefs: orderedUnique([bundle.owner.canonicalRef] + groups.map { $0.evidenceItem.owner.canonicalRef }),
+            sourceRefs: orderedUnique(groups.flatMap(\.sourceRefs)),
+            topRelatedSavedPlaces: Array(topRelatedSavedPlaces),
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
     }
 
     private func normalize(_ limits: CiderItemAgentContextLimits) -> CiderItemAgentContextLimits {
