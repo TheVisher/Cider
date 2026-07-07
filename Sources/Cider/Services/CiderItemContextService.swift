@@ -228,6 +228,17 @@ struct CiderItemRelatedSavedPlacesSearchHint: Codable, Equatable {
     var safeNextCommands: [String]
 }
 
+struct CiderItemSavedPlacePreferenceEvidenceSearchHint: Codable, Equatable {
+    var readOnly: Bool
+    var changed: Bool
+    var truthBoundary: String
+    var acceptedAsTruth: Bool
+    var candidateCount: Int
+    var evidenceCount: Int
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+}
+
 struct CiderItemAgentContextPacket: Equatable {
     var item: CiderItemSummary
     var owner: SecondBrainOwnerRef
@@ -312,6 +323,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var captureProvenance: [CiderItemCaptureProvenance]
     var matchProvenance: CiderItemSearchMatchProvenance
     var relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint?
+    var savedPlacePreferenceEvidenceHint: CiderItemSavedPlacePreferenceEvidenceSearchHint?
 
     init(
         id: String,
@@ -327,7 +339,8 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         searchScope: CiderItemSearchScope = .all,
         captureProvenance: [CiderItemCaptureProvenance] = [],
         matchProvenance: CiderItemSearchMatchProvenance = CiderItemSearchMatchProvenance(),
-        relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint? = nil
+        relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint? = nil,
+        savedPlacePreferenceEvidenceHint: CiderItemSavedPlacePreferenceEvidenceSearchHint? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -343,6 +356,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         self.captureProvenance = captureProvenance
         self.matchProvenance = matchProvenance
         self.relatedSavedPlacesHint = relatedSavedPlacesHint
+        self.savedPlacePreferenceEvidenceHint = savedPlacePreferenceEvidenceHint
     }
 }
 
@@ -1349,8 +1363,43 @@ final class CiderItemContextService {
             .map { result in
                 var hinted = result
                 hinted.relatedSavedPlacesHint = try relatedSavedPlacesSearchHint(for: result, limit: 5)
+                hinted.savedPlacePreferenceEvidenceHint = try savedPlacePreferenceEvidenceSearchHint(for: result, limit: 5)
                 return hinted
             }
+    }
+
+    private func savedPlacePreferenceEvidenceSearchHint(
+        for result: CiderItemSearchResult,
+        limit: Int
+    ) throws -> CiderItemSavedPlacePreferenceEvidenceSearchHint? {
+        guard let item = result.item,
+              item.type == .bookmark,
+              result.owner.ownerType == item.type.rawValue,
+              result.owner.ownerID == item.id.uuidString else {
+            return nil
+        }
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: database)
+            .preview(ownerSelector: result.owner.ownerID, limit: max(1, limit))
+        guard !report.candidates.isEmpty else { return nil }
+
+        let contextCommand = "cider-cli item context \(result.owner.ownerType) \(result.owner.ownerID) --json"
+        let replayCommand = "cider-cli item saved-place-preference-links --owner \(result.owner.ownerID) --json"
+        let safeCommands = orderedUnique(
+            [contextCommand, replayCommand]
+                + report.safeVerificationCommands
+                + report.candidates.flatMap(\.safeVerificationCommands)
+                + report.candidates.flatMap(\.safeNextCommands)
+        )
+        return CiderItemSavedPlacePreferenceEvidenceSearchHint(
+            readOnly: report.readOnly,
+            changed: report.changed,
+            truthBoundary: report.truthBoundary,
+            acceptedAsTruth: false,
+            candidateCount: report.candidates.count,
+            evidenceCount: Set(report.candidates.map { $0.evidenceItem.owner.canonicalRef }).count,
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
     }
 
     private func relatedSavedPlacesSearchHint(

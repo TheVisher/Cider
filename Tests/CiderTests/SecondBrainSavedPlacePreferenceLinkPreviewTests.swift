@@ -786,6 +786,60 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(unrelatedPayload["savedPlacePreferenceEvidence"] == nil)
     }
 
+    @Test("item search hints compact preference evidence for saved place bookmarks")
+    func itemSearchHintsCompactPreferenceEvidenceForSavedPlaceBookmarks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let preferenceNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let savedPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let unrelatedBookmark = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(
+            owner: preferenceNote,
+            title: "Daily Journal - 2026-07-11",
+            content: "Dinner note. I love ramen and cozy noodle shops after long work days.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: savedPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: unrelatedBookmark,
+            title: "Trail running backpack",
+            url: "https://example.com/products/trail-running-backpack",
+            into: db
+        )
+
+        let before = try mutationCounts(in: db)
+        let service = CiderItemContextService(database: db)
+        let results = try service.search("Botan Trail", limit: 10, scope: .personalMemory)
+        let after = try mutationCounts(in: db)
+
+        #expect(after == before)
+        let savedPlaceResult = try #require(results.first { $0.owner == savedPlace })
+        let savedPlacePayload = CiderCLI.itemSearchResultToDict(savedPlaceResult)
+        let preferenceEvidenceHint = try #require(savedPlacePayload["savedPlacePreferenceEvidenceHint"] as? [String: Any])
+        #expect(preferenceEvidenceHint["readOnly"] as? Bool == true)
+        #expect(preferenceEvidenceHint["changed"] as? Bool == false)
+        #expect(preferenceEvidenceHint["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(preferenceEvidenceHint["acceptedAsTruth"] as? Bool == false)
+        #expect(preferenceEvidenceHint["candidateCount"] as? Int == 1)
+        #expect(preferenceEvidenceHint["evidenceCount"] as? Int == 1)
+        let safeNextCommands = try #require(preferenceEvidenceHint["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item context bookmark \(savedPlace.ownerID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item saved-place-preference-links --owner \(savedPlace.ownerID) --json"))
+        let safeVerificationCommands = try #require(preferenceEvidenceHint["safeVerificationCommands"] as? [String])
+        #expect(safeVerificationCommands.contains("cider-cli item context bookmark \(savedPlace.ownerID) --json"))
+        #expect(safeVerificationCommands.contains("cider-cli item saved-place-preference-links --owner \(savedPlace.ownerID) --json"))
+
+        let unrelatedResult = try #require(results.first { $0.owner == unrelatedBookmark })
+        let unrelatedPayload = CiderCLI.itemSearchResultToDict(unrelatedResult)
+        #expect(unrelatedPayload["savedPlacePreferenceEvidenceHint"] == nil)
+    }
+
     @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
     func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
         let (db, url) = try makeTestDB()

@@ -28341,6 +28341,9 @@ struct CiderCLI {
         if let relatedSavedPlacesHint = result.relatedSavedPlacesHint {
             dict["relatedSavedPlacesHint"] = itemRelatedSavedPlacesSearchHintToDict(relatedSavedPlacesHint)
         }
+        if let savedPlacePreferenceEvidenceHint = result.savedPlacePreferenceEvidenceHint {
+            dict["savedPlacePreferenceEvidenceHint"] = itemSavedPlacePreferenceEvidenceSearchHintToDict(savedPlacePreferenceEvidenceHint)
+        }
         dict["matchProvenance"] = itemSearchMatchProvenanceToDict(result.matchProvenance)
         dict["temporal"] = itemSearchTemporalMetadata(result)
         dict["provenance"] = itemSearchProvenanceMetadata(result)
@@ -28394,6 +28397,8 @@ struct CiderCLI {
                 + itemSearchResultSafeNextCommands(result)
                 + (result.relatedSavedPlacesHint?.safeVerificationCommands ?? [])
                 + (result.relatedSavedPlacesHint?.safeNextCommands ?? [])
+                + (result.savedPlacePreferenceEvidenceHint?.safeVerificationCommands ?? [])
+                + (result.savedPlacePreferenceEvidenceHint?.safeNextCommands ?? [])
         )
     }
 
@@ -28406,6 +28411,19 @@ struct CiderCLI {
             "groupCount": hint.groupCount,
             "relatedSavedPlaceCandidateCount": hint.relatedSavedPlaceCandidateCount,
             "candidateCount": hint.candidateCount,
+            "safeVerificationCommands": hint.safeVerificationCommands,
+            "safeNextCommands": hint.safeNextCommands,
+        ]
+    }
+
+    private static func itemSavedPlacePreferenceEvidenceSearchHintToDict(_ hint: CiderItemSavedPlacePreferenceEvidenceSearchHint) -> [String: Any] {
+        [
+            "readOnly": hint.readOnly,
+            "changed": hint.changed,
+            "truthBoundary": hint.truthBoundary,
+            "acceptedAsTruth": hint.acceptedAsTruth,
+            "candidateCount": hint.candidateCount,
+            "evidenceCount": hint.evidenceCount,
             "safeVerificationCommands": hint.safeVerificationCommands,
             "safeNextCommands": hint.safeNextCommands,
         ]
