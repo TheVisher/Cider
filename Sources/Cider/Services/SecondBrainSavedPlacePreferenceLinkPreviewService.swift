@@ -130,7 +130,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         self.database = database
     }
 
-    func preview(limit: Int = 20) throws -> SecondBrainSavedPlacePreferenceLinkPreviewReport {
+    func preview(ownerSelector: String? = nil, limit: Int = 20) throws -> SecondBrainSavedPlacePreferenceLinkPreviewReport {
         let boundedLimit = max(0, limit)
         guard boundedLimit > 0 else {
             return report(
@@ -149,12 +149,13 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         }
 
         let bookmarkScan = try savedPlaceBookmarks()
+        let selectedBookmarks = bookmarkScan.bookmarks.filter { bookmarkMatchesSelector($0, selector: ownerSelector) }
         let preferenceScan = try journalFoodPreferences()
         let preferences = preferenceScan.evidence
         var candidates: [SecondBrainSavedPlacePreferenceLinkCandidate] = []
         var noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
 
-        for bookmark in bookmarkScan.bookmarks {
+        for bookmark in selectedBookmarks {
             var matchedBookmark = false
             for preference in preferences {
                 guard let match = match(bookmark: bookmark, preference: preference) else { continue }
@@ -183,7 +184,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             candidates: boundedCandidates,
             diagnostics: diagnostics(
                 inspectedBookmarkCount: bookmarkScan.inspectedCount,
-                savedPlaceBookmarkCount: bookmarkScan.bookmarks.count,
+                savedPlaceBookmarkCount: selectedBookmarks.count,
                 preferenceEvidenceCount: preferences.count,
                 candidateCount: boundedCandidates.count,
                 skippedBookmarkSamples: bookmarkScan.skippedSamples,
@@ -369,6 +370,20 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             "\(preference.owner.ownerType):\(preference.owner.ownerID)",
             preference.id,
             preference.sourceEvidenceRef,
+        ].compactMap { $0 }
+        return candidates.contains { $0 == rawSelector || $0.hasPrefix(rawSelector) }
+    }
+
+    private func bookmarkMatchesSelector(_ bookmark: SavedBookmark, selector: String?) -> Bool {
+        guard let rawSelector = selector?.trimmingCharacters(in: .whitespacesAndNewlines), !rawSelector.isEmpty else {
+            return true
+        }
+        let candidates = [
+            bookmark.owner.ownerID,
+            bookmark.owner.canonicalRef,
+            "\(bookmark.owner.ownerType):\(bookmark.owner.ownerID)",
+            bookmark.url,
+            bookmark.relativePath,
         ].compactMap { $0 }
         return candidates.contains { $0 == rawSelector || $0.hasPrefix(rawSelector) }
     }

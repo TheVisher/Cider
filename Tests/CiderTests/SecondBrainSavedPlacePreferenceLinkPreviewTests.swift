@@ -722,6 +722,70 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(unrelatedPayload["relatedSavedPlacesHint"] == nil)
     }
 
+    @Test("item context surfaces compact preference evidence for saved place bookmarks")
+    func itemContextSurfacesCompactPreferenceEvidenceForSavedPlaceBookmarks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let preferenceNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let savedPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let unrelatedBookmark = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(
+            owner: preferenceNote,
+            title: "Daily Journal - 2026-07-10",
+            content: "Dinner note. I love ramen and keep looking for cozy noodle shops after work.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: savedPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: unrelatedBookmark,
+            title: "Trail running backpack",
+            url: "https://example.com/products/trail-running-backpack",
+            into: db
+        )
+
+        let before = try mutationCounts(in: db)
+        let service = CiderItemContextService(database: db)
+        let packet = try service.agentContext(for: LibraryEntityRef(type: .bookmark, entityID: UUID(uuidString: savedPlace.ownerID)!))
+        let payload = CiderCLI.itemAgentContextPacketToDict(packet)
+        let unrelatedPacket = try service.agentContext(for: LibraryEntityRef(type: .bookmark, entityID: UUID(uuidString: unrelatedBookmark.ownerID)!))
+        let unrelatedPayload = CiderCLI.itemAgentContextPacketToDict(unrelatedPacket)
+        let after = try mutationCounts(in: db)
+
+        #expect(after == before)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let evidence = try #require(payload["savedPlacePreferenceEvidence"] as? [String: Any])
+        #expect(evidence["readOnly"] as? Bool == true)
+        #expect(evidence["changed"] as? Bool == false)
+        #expect(evidence["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(evidence["acceptedAsTruth"] as? Bool == false)
+        #expect(evidence["candidateCount"] as? Int == 1)
+        #expect(evidence["evidenceCount"] as? Int == 1)
+        let topEvidence = try #require(evidence["topEvidence"] as? [[String: Any]])
+        #expect(topEvidence.count == 1)
+        #expect(topEvidence[0]["evidenceItemRef"] as? String == preferenceNote.canonicalRef)
+        #expect((topEvidence[0]["snippet"] as? String)?.contains("ramen") == true)
+        #expect(topEvidence[0]["savedItemRef"] as? String == savedPlace.canonicalRef)
+        #expect(topEvidence[0]["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(topEvidence[0]["acceptedAsTruth"] as? Bool == false)
+        let evidenceRefs = try #require(evidence["evidenceRefs"] as? [String])
+        #expect(evidenceRefs.contains(preferenceNote.canonicalRef))
+        let safeNextCommands = try #require(evidence["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item saved-place-preference-links --owner \(savedPlace.ownerID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item context bookmark \(savedPlace.ownerID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item context note \(preferenceNote.ownerID) --json"))
+        let safeVerificationCommands = try #require(evidence["safeVerificationCommands"] as? [String])
+        #expect(safeVerificationCommands.contains("cider-cli item saved-place-preference-links --owner \(savedPlace.ownerID) --json"))
+
+        #expect(unrelatedPayload["savedPlacePreferenceEvidence"] == nil)
+    }
+
     @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
     func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
         let (db, url) = try makeTestDB()

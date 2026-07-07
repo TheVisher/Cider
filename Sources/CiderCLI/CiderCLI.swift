@@ -281,7 +281,7 @@ struct CiderCLI {
       cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
         Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
       cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
-      cider-cli item saved-place-preference-links [--limit <n>] [--json]
+      cider-cli item saved-place-preference-links [--owner <bookmark-id-or-ref>] [--limit <n>] [--json]
       cider-cli item preference-saved-place-links [--owner <owner-ref-or-prefix>] [--limit <n>] [--json]
       cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
       cider-cli item graph-candidate <candidate-id> [--json]
@@ -479,7 +479,7 @@ struct CiderCLI {
         case "journal-migration-preview", "journal-naming-preview", "journal-preview-migration":
             return "cider-cli item journal-migration-preview [--json]"
         case "saved-place-preference-links", "place-preference-links", "saved-place-links":
-            return "cider-cli item saved-place-preference-links [--limit <n>] [--json]"
+            return "cider-cli item saved-place-preference-links [--owner <bookmark-id-or-ref>] [--limit <n>] [--json]"
         case "preference-saved-place-links", "journal-preference-saved-place-links", "reciprocal-saved-place-links":
             return "cider-cli item preference-saved-place-links [--owner <owner-ref-or-prefix>] [--limit <n>] [--json]"
         case "sync-project", "project-sync":
@@ -7067,8 +7067,11 @@ struct CiderCLI {
         case "saved-place-preference-links", "place-preference-links", "saved-place-links":
             do {
                 let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                let ownerSelector = parseFlag("--owner", from: args)
+                    ?? parseFlag("--owner-ref", from: args)
+                    ?? parseFlag("--item", from: args)
                 let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: .shared)
-                    .preview(limit: limit)
+                    .preview(ownerSelector: ownerSelector, limit: limit)
                 let payload = savedPlacePreferenceLinkPreviewPayload(report)
                 if jsonOutput {
                     outputJSON(payload)
@@ -28096,6 +28099,9 @@ struct CiderCLI {
         if let relatedSavedPlaces = packet.relatedSavedPlaces {
             dict["relatedSavedPlaces"] = itemRelatedSavedPlacesSummaryToDict(relatedSavedPlaces)
         }
+        if let savedPlacePreferenceEvidence = packet.savedPlacePreferenceEvidence {
+            dict["savedPlacePreferenceEvidence"] = itemSavedPlacePreferenceEvidenceToDict(savedPlacePreferenceEvidence)
+        }
         return dict
     }
 
@@ -28214,6 +28220,47 @@ struct CiderCLI {
             "candidateRef": summary.id,
             "savedItem": savedPlacePreferenceLinkSourceToDict(summary.savedItem),
             "savedItemRef": summary.savedItem.owner.canonicalRef,
+            "preferenceValue": summary.preferenceValue,
+            "confidence": summary.confidence,
+            "reason": summary.reason,
+            "reasonCodes": summary.reasonCodes,
+            "sourceRefs": summary.sourceRefs,
+            "truthBoundary": summary.truthBoundary,
+            "reviewState": "suggested",
+            "acceptedAsTruth": false,
+            "safeVerificationCommands": summary.safeVerificationCommands,
+            "safeNextCommands": summary.safeNextCommands,
+        ]
+    }
+
+    static func itemSavedPlacePreferenceEvidenceToDict(_ evidence: CiderItemSavedPlacePreferenceEvidence) -> [String: Any] {
+        [
+            "readOnly": evidence.readOnly,
+            "changed": evidence.changed,
+            "truthBoundary": evidence.truthBoundary,
+            "acceptedAsTruth": evidence.acceptedAsTruth,
+            "candidateCount": evidence.candidateCount,
+            "evidenceCount": evidence.evidenceCount,
+            "savedItem": savedPlacePreferenceLinkSourceToDict(evidence.savedItem),
+            "savedItemRef": evidence.savedItem.owner.canonicalRef,
+            "preferenceValues": evidence.preferenceValues,
+            "evidenceRefs": evidence.evidenceRefs,
+            "sourceRefs": evidence.sourceRefs,
+            "topEvidence": evidence.topEvidence.map(itemSavedPlacePreferenceEvidenceSummaryToDict),
+            "safeVerificationCommands": evidence.safeVerificationCommands,
+            "safeNextCommands": evidence.safeNextCommands,
+        ]
+    }
+
+    static func itemSavedPlacePreferenceEvidenceSummaryToDict(_ summary: CiderItemSavedPlacePreferenceEvidenceSummary) -> [String: Any] {
+        [
+            "id": summary.id,
+            "candidateRef": summary.id,
+            "savedItem": savedPlacePreferenceLinkSourceToDict(summary.savedItem),
+            "savedItemRef": summary.savedItem.owner.canonicalRef,
+            "evidenceItem": savedPlacePreferenceLinkSourceToDict(summary.evidenceItem),
+            "evidenceItemRef": summary.evidenceItem.owner.canonicalRef,
+            "snippet": summary.evidenceItem.snippet,
             "preferenceValue": summary.preferenceValue,
             "confidence": summary.confidence,
             "reason": summary.reason,
