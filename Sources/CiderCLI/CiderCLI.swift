@@ -24137,6 +24137,17 @@ struct CiderCLI {
             "proposedCanonicalTitle": row.proposedCanonicalTitle as Any,
             "proposedISODate": row.proposedISODate as Any,
             "preservedCaptureHints": row.preservedCaptureHints,
+            "dateEvidence": row.dateEvidence.map(journalMigrationDateEvidenceToDict),
+            "dateIneligibilityReason": row.dateIneligibilityReason as Any,
+        ] as [String: Any]
+    }
+
+    static func journalMigrationDateEvidenceToDict(_ evidence: JournalMigrationDateEvidence) -> [String: Any] {
+        [
+            "isoDate": evidence.isoDate,
+            "source": evidence.source.rawValue,
+            "kind": evidence.kind.rawValue,
+            "rawValue": evidence.rawValue,
         ] as [String: Any]
     }
 

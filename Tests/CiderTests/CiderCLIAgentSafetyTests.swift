@@ -6275,7 +6275,7 @@ struct CiderCLIAgentSafetyTests {
             vault: vault
         )
         _ = try createNote(
-            title: "Driving voice journal — 2026-05-29 midday",
+            title: "Driving voice journal from May 29, 2026",
             content: "Drove home and talked through the day.",
             vault: vault
         )
@@ -6314,10 +6314,17 @@ struct CiderCLIAgentSafetyTests {
             return (title, row)
         })
         #expect(rowsByTitle["Journal 05-30-2026"]?["journalLibraryEligible"] as? Bool == true)
-        #expect(rowsByTitle["Driving voice journal — 2026-05-29 midday"]?["journalLibraryEligible"] as? Bool == true)
-        #expect(rowsByTitle["Driving voice journal — 2026-05-29 midday"]?["proposedCanonicalTitle"] as? String == "Journal 05-29-2026")
+        #expect(rowsByTitle["Driving voice journal from May 29, 2026"]?["journalLibraryEligible"] as? Bool == true)
+        #expect(rowsByTitle["Driving voice journal from May 29, 2026"]?["proposedCanonicalTitle"] as? String == "Journal 05-29-2026")
+        #expect(rowsByTitle["Driving voice journal from May 29, 2026"]?["dateIneligibilityReason"] is NSNull)
+        let personalEvidence = try #require(rowsByTitle["Driving voice journal from May 29, 2026"]?["dateEvidence"] as? [[String: Any]])
+        #expect(personalEvidence.first?["isoDate"] as? String == "2026-05-29")
+        #expect(personalEvidence.first?["source"] as? String == "title")
+        #expect(personalEvidence.first?["kind"] as? String == "monthNameDate")
+        #expect(personalEvidence.first?["rawValue"] as? String == "May 29, 2026")
         #expect(rowsByTitle["Cider journal IA — dashboard module plus Notes filter or Journal sidebar"]?["journalLibraryEligible"] as? Bool == false)
         #expect(rowsByTitle["Research journal taxonomy"]?["journalLibraryEligible"] as? Bool == false)
+        #expect(rowsByTitle["Research journal taxonomy"]?["dateIneligibilityReason"] as? String == "No unambiguous source-backed date found in title or body.")
         #expect(try generatedSecondBrainRowCounts(vault: vault) == beforeCounts)
     }
 

@@ -227,6 +227,66 @@ struct JournalLibraryReadModelTests {
         #expect(preview.mutatesLiveNotes == false)
     }
 
+    @Test("journal migration preview explains source backed date eligibility without promoting ambiguous notes")
+    func migrationPreviewExplainsSourceBackedDateEligibility() throws {
+        let recoverable = Note(
+            title: "Driving voice journal from May 29, 2026",
+            content: "Drove home and talked through the day.",
+            createdAt: Self.date("2026-05-30T01:30:00Z"),
+            modifiedAt: Self.date("2026-05-30T02:00:00Z"),
+            relativePath: "Inbox/Files/driving-voice-journal.md"
+        )
+        let ambiguous = Note(
+            title: "Driving voice journal after lunch",
+            content: "I mentioned May 29 but did not write down a year.",
+            createdAt: Self.date("2026-05-31T19:30:00Z"),
+            modifiedAt: Self.date("2026-05-31T20:00:00Z"),
+            relativePath: "Inbox/Files/driving-voice-journal-after-lunch.md"
+        )
+        let product = Note(
+            title: "Cider journal IA 05/29/2026",
+            content: "Product IA notes should not become personal Journal entries.",
+            modifiedAt: Self.date("2026-05-31T09:00:00Z"),
+            relativePath: "Projects/Cider/Plans/journal-ia.md"
+        )
+
+        let preview = JournalMigrationPreviewService().preview(notes: [recoverable, ambiguous, product])
+        let rowsByTitle = Dictionary(uniqueKeysWithValues: preview.rows.map { ($0.note.title, $0) })
+
+        let recoverableRow = try #require(rowsByTitle[recoverable.title])
+        #expect(recoverableRow.classification == .safePersonalCandidate)
+        #expect(recoverableRow.proposedISODate == "2026-05-29")
+        #expect(recoverableRow.proposedCanonicalTitle == "Journal 05-29-2026")
+        let titleEvidence = recoverableRow.dateEvidence.first
+        #expect(titleEvidence?.isoDate == "2026-05-29")
+        #expect(titleEvidence?.source == .title)
+        #expect(titleEvidence?.kind == .monthNameDate)
+        #expect(titleEvidence?.rawValue == "May 29, 2026")
+        #expect(recoverableRow.dateIneligibilityReason == nil)
+        #expect(recoverableRow.isJournalLibraryEligible == true)
+
+        let ambiguousRow = try #require(rowsByTitle[ambiguous.title])
+        #expect(ambiguousRow.classification == .safePersonalCandidate)
+        #expect(ambiguousRow.proposedISODate == nil)
+        #expect(ambiguousRow.proposedCanonicalTitle == nil)
+        #expect(ambiguousRow.dateEvidence.isEmpty)
+        #expect(ambiguousRow.dateIneligibilityReason == "No unambiguous source-backed date found in title or body.")
+        #expect(ambiguousRow.isJournalLibraryEligible == false)
+
+        let productRow = try #require(rowsByTitle[product.title])
+        #expect(productRow.classification == .excludedProductOrDev)
+        #expect(productRow.proposedISODate == nil)
+        #expect(productRow.dateIneligibilityReason == "Excluded product/development journal context.")
+        #expect(productRow.isJournalLibraryEligible == false)
+
+        let projection = JournalLibraryReadModel.build(from: [recoverable, ambiguous, product])
+        #expect(projection.entries.map(\.note.id) == [recoverable.id])
+        #expect(projection.entries.first?.dateLabel == "2026-05-29")
+        #expect(projection.entries.first?.content == recoverable.content)
+        #expect(projection.entries.first?.note.createdAt == recoverable.createdAt)
+        #expect(projection.entries.first?.note.modifiedAt == recoverable.modifiedAt)
+    }
+
     private static func date(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
     }
