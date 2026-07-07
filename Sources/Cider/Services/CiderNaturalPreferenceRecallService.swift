@@ -139,6 +139,7 @@ struct CiderNaturalPreferenceRecallCandidate: Identifiable, Codable, Equatable {
     var truthBoundary: String
     var safeNextCommands: [String]
     var provenance: CiderNaturalPreferenceRecallProvenance?
+    var savedPlacePreferenceEvidenceHint: CiderItemSavedPlacePreferenceEvidenceSearchHint?
 }
 
 struct CiderNaturalPreferenceRecallExplanation: Codable, Equatable {
@@ -238,14 +239,15 @@ final class CiderNaturalPreferenceRecallService {
                 let quote = bestQuote(in: bundle, result: result, intent: intent, mode: mode)
                 guard qualifies(quote: quote, bundle: bundle, result: result, intent: intent, mode: mode) else { continue }
                 let key = bundle.owner.canonicalRef
-                let commands = [
+                let savedPlacePreferenceEvidenceHint = result.savedPlacePreferenceEvidenceHint
+                let commands = orderedUnique([
                     "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
                     "cider-cli item search \"\(escapedCommandArgument(step.query))\" --scope \(step.scope.rawValue) --sort \(step.sort.rawValue) --limit \(step.limit) --json",
-                ]
-                let verificationCommands = [
+                ] + (savedPlacePreferenceEvidenceHint?.safeNextCommands ?? []))
+                let verificationCommands = orderedUnique([
                     "cider-cli item context \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
                     "cider-cli item get \(bundle.item.type.rawValue) \(bundle.item.id.uuidString) --json",
-                ]
+                ] + (savedPlacePreferenceEvidenceHint?.safeVerificationCommands ?? []))
                 let sourceRef = "\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)"
                 let sortDate = sourceSortDate(bundle: bundle, result: result)
                 guard sourceDateMatchesTemporalRangeIfNeeded(sortDate, intent: intent) else { continue }
@@ -280,8 +282,11 @@ final class CiderNaturalPreferenceRecallService {
                         provenance.verificationCommands = orderedUnique(provenance.verificationCommands + verificationCommands)
                         candidate.provenance = provenance
                     }
-                    if evidenceKind == "source_backed_candidate" {
+                    if evidenceKind == "source_backed_candidate" || evidenceKind == "source_backed_saved_place_candidate" {
                         candidate.evidenceKind = evidenceKind
+                    }
+                    if candidate.savedPlacePreferenceEvidenceHint == nil {
+                        candidate.savedPlacePreferenceEvidenceHint = savedPlacePreferenceEvidenceHint
                     }
                     candidatesByOwner[key] = candidate
                 } else {
@@ -322,7 +327,8 @@ final class CiderNaturalPreferenceRecallService {
                             citationRefs: [sourceRef],
                             contextCommands: commands,
                             verificationCommands: verificationCommands
-                        )
+                        ),
+                        savedPlacePreferenceEvidenceHint: savedPlacePreferenceEvidenceHint
                     )
                 }
                 if citationsByOwner[key] == nil {
@@ -582,6 +588,9 @@ final class CiderNaturalPreferenceRecallService {
         intent: CiderNaturalPreferenceRecallIntent,
         mode: CiderNaturalRecallMode
     ) -> CiderItemSearchSort {
+        if mode == .preference, containsSavedCandidateIntent(intent.normalizedQuery) {
+            return .relevance
+        }
         if mode == .memory, isSpecificDateAnchorQuery(query, intent: intent) {
             return .relevance
         }
@@ -597,6 +606,9 @@ final class CiderNaturalPreferenceRecallService {
         mode: CiderNaturalRecallMode,
         requestedLimit: Int
     ) -> Int {
+        if mode == .preference, containsSavedCandidateIntent(intent.normalizedQuery) {
+            return max(requestedLimit, 20)
+        }
         if mode == .memory, isSpecificDateAnchorQuery(query, intent: intent) {
             return max(requestedLimit, 25)
         }
@@ -1502,6 +1514,8 @@ final class CiderNaturalPreferenceRecallService {
 
     private func extractSubject(from query: String) -> String? {
         let patterns = [
+            #"(?i)\bwhy\s+did\s+i\s+save\s+(.+?)(?:\?|$)"#,
+            #"(?i)\bwhy\s+did\s+i\s+bookmark\s+(.+?)(?:\?|$)"#,
             #"(?i)\bat\s+(.+?)(?:\s+before|\s+last\s+time|\?|$)"#,
             #"(?i)\bfrom\s+(.+?)(?:\s+i['’]?ve|\s+we['’]?ve|\?|$)"#,
         ]
@@ -1586,7 +1600,19 @@ final class CiderNaturalPreferenceRecallService {
         }
 
         if let subject = intent.subject?.lowercased(), !subject.isEmpty {
-            return quoteText.contains(subject) || searchable.contains(subject)
+            if quoteText.contains(subject) || searchable.contains(subject) {
+                return true
+            }
+            if containsSavedCandidateIntent(intent.normalizedQuery),
+               result.savedPlacePreferenceEvidenceHint != nil,
+               subjectMatchesSavedPlaceSurface(subject, searchable: searchable) {
+                return containsSavedCandidateSignal(searchable) || containsFoodSignal(searchable)
+            }
+            return false
+        }
+        if containsSavedCandidateIntent(intent.normalizedQuery),
+           result.savedPlacePreferenceEvidenceHint != nil {
+            return containsSavedCandidateSignal(searchable) || containsFoodSignal(searchable)
         }
         if intent.normalizedQuery.contains("food") {
             return containsFoodSignal(quoteText) && (containsPreferenceSignal(quoteText) || containsSavedCandidateSignal(searchable))
@@ -1656,6 +1682,9 @@ final class CiderNaturalPreferenceRecallService {
     ) -> String {
         if mode == .memory {
             return "source_backed_memory_observation"
+        }
+        if result.savedPlacePreferenceEvidenceHint != nil && containsSavedCandidateIntent(intent.normalizedQuery) {
+            return "source_backed_saved_place_candidate"
         }
         let text = [quote, result.title, result.snippet].joined(separator: "\n").lowercased()
         if containsSavedCandidateSignal(text) {
@@ -1965,11 +1994,32 @@ final class CiderNaturalPreferenceRecallService {
             || text.contains("saved to try")
             || text.contains("places did i save")
             || text.contains("place did i save")
+            || text.contains("why did i save")
+            || text.contains("why did i bookmark")
+    }
+
+    private func subjectMatchesSavedPlaceSurface(_ subject: String, searchable: String) -> Bool {
+        let normalizedSubject = normalizedSavedPlaceSubjectSurface(subject)
+        let normalizedSearchable = normalizedSavedPlaceSubjectSurface(searchable)
+        if normalizedSearchable.contains(normalizedSubject) { return true }
+        let tokens = significantQueryTokens(in: normalizedSubject)
+            .filter { !["bar", "food", "place", "restaurant"].contains($0) }
+        guard !tokens.isEmpty else { return false }
+        return tokens.allSatisfy { normalizedSearchable.contains($0) }
+    }
+
+    private func normalizedSavedPlaceSubjectSurface(_ text: String) -> String {
+        text
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func containsSavedCandidateSignal(_ text: String) -> Bool {
         text.contains("saved to try")
             || text.contains("save to try")
+            || text.contains("saved place")
             || text.contains("place to try")
             || text.contains("places to try")
             || text.contains("want to try")

@@ -840,6 +840,75 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(unrelatedPayload["savedPlacePreferenceEvidenceHint"] == nil)
     }
 
+    @Test("natural preference recall preserves compact preference evidence for saved place bookmarks")
+    func naturalPreferenceRecallPreservesCompactPreferenceEvidenceForSavedPlaceBookmarks() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let preferenceNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let savedPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let unrelatedBookmark = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(
+            owner: preferenceNote,
+            title: "Daily Journal - 2026-07-12",
+            content: "Dinner note. I love ramen and cozy noodle shops after long work days.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: savedPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            ocrText: "Saved place: Botan Trail Ramen & Bar. Why did I save Botan Trail as a cozy noodle shop to try?",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: unrelatedBookmark,
+            title: "Trail running backpack",
+            url: "https://example.com/products/trail-running-backpack",
+            into: db
+        )
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: savedPlace, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: savedPlace.ownerID,
+                source: "item_index.bookmark",
+                title: "Botan Ramen & Bar",
+                body: "Saved place: Botan Trail Ramen & Bar. Why did I save Botan Trail as a cozy noodle shop to try?",
+                chunkIndex: 0
+            ),
+        ])
+
+        let before = try mutationCounts(in: db)
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let response = try CiderNaturalPreferenceRecallService(contextService: service, database: db)
+            .answer("why did I save Botan Trail?", limit: 5)
+        let payload = CiderCLI.naturalPreferenceRecallResponseToDict(response)
+        let after = try mutationCounts(in: db)
+
+        #expect(after == before)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let candidates = try #require(payload["candidates"] as? [[String: Any]])
+        let savedPlaceCandidate = try #require(candidates.first { candidate in
+            candidate["itemType"] as? String == "bookmark"
+                && candidate["itemID"] as? String == savedPlace.ownerID
+        })
+        let preferenceEvidenceHint = try #require(savedPlaceCandidate["savedPlacePreferenceEvidenceHint"] as? [String: Any])
+        #expect(preferenceEvidenceHint["readOnly"] as? Bool == true)
+        #expect(preferenceEvidenceHint["changed"] as? Bool == false)
+        #expect(preferenceEvidenceHint["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(preferenceEvidenceHint["acceptedAsTruth"] as? Bool == false)
+        #expect(preferenceEvidenceHint["candidateCount"] as? Int == 1)
+        #expect(preferenceEvidenceHint["evidenceCount"] as? Int == 1)
+        let safeNextCommands = try #require(preferenceEvidenceHint["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item context bookmark \(savedPlace.ownerID) --json"))
+        #expect(safeNextCommands.contains("cider-cli item saved-place-preference-links --owner \(savedPlace.ownerID) --json"))
+        let payloadSafeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(payloadSafeNextCommands.contains("cider-cli item saved-place-preference-links --owner \(savedPlace.ownerID) --json"))
+        #expect(savedPlaceCandidate["truthBoundary"] as? String == "source_backed_observations_not_accepted_truth")
+    }
+
     @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
     func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
         let (db, url) = try makeTestDB()

@@ -20481,6 +20481,7 @@ struct CiderCLI {
         let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
         var warnings: [[String: Any]] = []
         var anchorRefs: [LibraryEntityRef] = []
+        var savedPlacePreferenceEvidenceHintsByOwner: [String: CiderItemSavedPlacePreferenceEvidenceSearchHint] = [:]
         if let itemSelector = parseRecallItemSelector(from: args) {
             do {
                 let type = try ItemLinkService.entityType(from: itemSelector.type)
@@ -20492,6 +20493,11 @@ struct CiderCLI {
         }
         if let query, !query.isEmpty {
             let results = try contextService.search(query, limit: limit)
+            for result in results {
+                if let hint = result.savedPlacePreferenceEvidenceHint {
+                    savedPlacePreferenceEvidenceHintsByOwner[result.owner.canonicalRef] = hint
+                }
+            }
             let refs = results.compactMap(\.item).map { LibraryEntityRef(type: $0.type, entityID: $0.id) }
             let payrollRefs: [LibraryEntityRef]
             if payrollHoursBreakdown(in: query) != nil || isPayrollRateRecallQuery(query) {
@@ -20541,13 +20547,20 @@ struct CiderCLI {
             let anchorReasons = scoringService.anchorReasons(bundle: bundle, query: query, explicitItem: explicitItemSelector)
             reasonKinds.append(contentsOf: anchorReasons.map(\.kind))
             surfacedRefs.append(bundle.owner.canonicalRef)
-            anchorDicts.append([
+            var anchorDict: [String: Any] = [
                 "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
                 "owner": ownerToDict(bundle.owner),
                 "citation": citation,
                 "recallScore": scoringService.score(anchorReasons),
                 "scoreReasons": scoreReasonsToDict(anchorReasons),
-            ])
+            ]
+            if let savedPlacePreferenceEvidenceHint = savedPlacePreferenceEvidenceHintsByOwner[bundle.owner.canonicalRef] {
+                anchorDict["savedPlacePreferenceEvidenceHint"] = itemSavedPlacePreferenceEvidenceSearchHintToDict(savedPlacePreferenceEvidenceHint)
+                safeCommands.append(contentsOf: savedPlacePreferenceEvidenceHint.safeNextCommands)
+                surfacedRefs.append(contentsOf: savedPlacePreferenceEvidenceHint.safeVerificationCommands)
+                reasonKinds.append("saved_place_preference_evidence_hint")
+            }
+            anchorDicts.append(anchorDict)
             if bundle.chunks.isEmpty {
                 warnings.append([
                     "kind": "missing_chunks",
@@ -28517,6 +28530,9 @@ struct CiderCLI {
                     dict["provenance"] = naturalPreferenceRecallProvenanceToDict(provenance)
                     dict["contextCommands"] = provenance.contextCommands
                     dict["verificationCommands"] = provenance.verificationCommands
+                }
+                if let savedPlacePreferenceEvidenceHint = candidate.savedPlacePreferenceEvidenceHint {
+                    dict["savedPlacePreferenceEvidenceHint"] = itemSavedPlacePreferenceEvidenceSearchHintToDict(savedPlacePreferenceEvidenceHint)
                 }
                 if let itemType = candidate.itemType { dict["itemType"] = itemType }
                 if let itemID = candidate.itemID {
