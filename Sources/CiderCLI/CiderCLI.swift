@@ -282,6 +282,7 @@ struct CiderCLI {
         Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
       cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
       cider-cli item saved-place-preference-links [--limit <n>] [--json]
+      cider-cli item preference-saved-place-links [--owner <owner-ref-or-prefix>] [--limit <n>] [--json]
       cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
       cider-cli item graph-candidate <candidate-id> [--json]
       cider-cli item journal-migration-preview [--json]
@@ -479,6 +480,8 @@ struct CiderCLI {
             return "cider-cli item journal-migration-preview [--json]"
         case "saved-place-preference-links", "place-preference-links", "saved-place-links":
             return "cider-cli item saved-place-preference-links [--limit <n>] [--json]"
+        case "preference-saved-place-links", "journal-preference-saved-place-links", "reciprocal-saved-place-links":
+            return "cider-cli item preference-saved-place-links [--owner <owner-ref-or-prefix>] [--limit <n>] [--json]"
         case "sync-project", "project-sync":
             return "cider-cli item sync-project <project-id-or-name> [--json]"
         case "daily-tracker", "tracker-daily", "daily-signals":
@@ -7082,6 +7085,34 @@ struct CiderCLI {
                         "changed": false,
                         "truthBoundary": "reviewable_candidate_not_truth",
                         "safeNextCommands": ["cider-cli item saved-place-preference-links --json"],
+                    ]
+                )
+            }
+
+        case "preference-saved-place-links", "journal-preference-saved-place-links", "reciprocal-saved-place-links":
+            do {
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                let ownerSelector = parseFlag("--owner", from: args)
+                    ?? parseFlag("--owner-ref", from: args)
+                    ?? parseFlag("--item", from: args)
+                let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: .shared)
+                    .reciprocalPreview(ownerSelector: ownerSelector, limit: limit)
+                let payload = savedPlacePreferenceReciprocalLinkPreviewPayload(report)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Preference saved place link groups: \(report.groups.count)")
+                    print("  Read-only preview; no graph truth was accepted.")
+                }
+            } catch {
+                printCLIError(
+                    error.localizedDescription,
+                    details: [
+                        "command": "item.preference-saved-place-links",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "reviewable_candidate_not_truth",
+                        "safeNextCommands": ["cider-cli item preference-saved-place-links --json"],
                     ]
                 )
             }
@@ -27276,6 +27307,58 @@ struct CiderCLI {
                 safeVerificationCommands: report.safeVerificationCommands,
                 safeNextCommands: report.safeNextCommands
             ),
+        ]
+    }
+
+    static func savedPlacePreferenceReciprocalLinkPreviewPayload(_ report: SecondBrainPreferenceSavedPlaceLinkPreviewReport) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.preference-saved-place-links",
+            "readOnly": report.readOnly,
+            "changed": report.changed,
+            "truthBoundary": report.truthBoundary,
+            "count": report.groups.count,
+            "groups": report.groups.map(savedPlacePreferenceReciprocalLinkGroupToDict),
+            "diagnostics": savedPlacePreferenceLinkDiagnosticsToDict(report.diagnostics),
+            "safeVerificationCommands": report.safeVerificationCommands,
+            "safeNextCommands": report.safeNextCommands,
+            "actionReceipt": agentActionReceiptToDict(
+                command: "item.preference-saved-place-links",
+                action: "preview_preference_saved_place_links",
+                actor: "cider-cli",
+                sourceRefs: report.groups.flatMap(\.sourceRefs),
+                evidenceRefs: report.groups.flatMap { group in
+                    group.sourceRefs.filter { $0.hasPrefix("source_evidence:") || $0.hasPrefix("graph_candidate:") || $0.hasPrefix("synthetic_source_span:") }
+                },
+                readOnly: true,
+                changed: false,
+                status: "succeeded",
+                after: [
+                    "groupCount": report.groups.count,
+                    "candidateCount": report.groups.flatMap(\.candidates).count,
+                    "truthBoundary": report.truthBoundary,
+                    "diagnostics": savedPlacePreferenceLinkDiagnosticsToDict(report.diagnostics),
+                ],
+                safeVerificationCommands: report.safeVerificationCommands,
+                safeNextCommands: report.safeNextCommands
+            ),
+        ]
+    }
+
+    static func savedPlacePreferenceReciprocalLinkGroupToDict(_ group: SecondBrainPreferenceSavedPlaceLinkGroup) -> [String: Any] {
+        [
+            "id": group.id,
+            "groupRef": group.id,
+            "evidenceItem": savedPlacePreferenceLinkSourceToDict(group.evidenceItem),
+            "evidenceItemRef": group.evidenceItem.owner.canonicalRef,
+            "preferenceValue": group.preferenceValue,
+            "sourceRefs": group.sourceRefs,
+            "candidates": group.candidates.map(savedPlacePreferenceLinkCandidateToDict),
+            "truthBoundary": group.truthBoundary,
+            "reviewState": "suggested",
+            "acceptedAsTruth": false,
+            "safeVerificationCommands": group.safeVerificationCommands,
+            "safeNextCommands": group.safeNextCommands,
         ]
     }
 

@@ -484,6 +484,114 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(report.candidates.allSatisfy { $0.evidenceItem.owner != auditNote })
     }
 
+    @Test("reciprocal preview groups source-backed preference evidence to related saved places")
+    func reciprocalPreviewGroupsSourceBackedPreferenceEvidenceToRelatedSavedPlaces() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let preferenceNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let planningNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let auditNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let phoPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let ramenPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let koreanPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let product = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let preferenceContent = "Dinner notes. I love pho, ramen, and Korean BBQ for rainy weeks. End."
+        let preferencePhrase = "I love pho, ramen, and Korean BBQ for rainy weeks"
+        try insertNoteItem(
+            owner: preferenceNote,
+            title: "Daily Journal - 2026-07-07",
+            content: preferenceContent,
+            into: db
+        )
+        try insertNoteItem(
+            owner: planningNote,
+            title: "Agent-native capture contract v1 audit",
+            content: "Problem: I love that Telegram currently converts inbound messages/photos into prompt text. Phone metadata and Photoshop edits are infrastructure details.",
+            into: db
+        )
+        try insertNoteItem(
+            owner: auditNote,
+            title: "2026-06-07-memory-trust-audit",
+            content: "| Existing bookmark | `favorite Korean restaurant Bobae noodle` | Bookmarks / Food | Other favorite bookmarks | Open bookmark |",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: phoPlace,
+            title: "Lotus Pho Restaurant",
+            url: "https://example.com/saved/lotus-pho-seattle",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: ramenPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: koreanPlace,
+            title: "Bb.Q Chicken Lynnwood",
+            url: "https://example.com/saved/bbq-chicken-lynnwood",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: product,
+            title: "Ceramic phone photo ramen bowl set",
+            url: "https://example.com/products/phone-photo-ramen-bowl-set",
+            into: db
+        )
+
+        let before = try mutationCounts(in: db)
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .reciprocalPreview(ownerSelector: preferenceNote.ownerID.prefix(8).description, limit: 10)
+        let after = try mutationCounts(in: db)
+
+        #expect(report.readOnly == true)
+        #expect(report.changed == false)
+        #expect(report.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(after == before)
+        #expect(report.groups.count == 1)
+
+        let group = try #require(report.groups.first)
+        #expect(group.evidenceItem.owner == preferenceNote)
+        #expect(group.evidenceItem.sourceSpan?.sourceItemRef == preferenceNote.canonicalRef)
+        #expect(group.evidenceItem.sourceSpan?.matchedText == preferencePhrase)
+        #expect(group.evidenceItem.sourceSpan?.selector == "char:\(preferenceContent.characterOffset(of: preferencePhrase))..\(preferenceContent.characterOffset(of: preferencePhrase) + preferencePhrase.count)")
+        #expect(group.sourceRefs.contains(preferenceNote.canonicalRef))
+        #expect(group.candidates.count == 3)
+        #expect(group.candidates.contains { $0.savedItem.owner == phoPlace })
+        #expect(group.candidates.contains { $0.savedItem.owner == ramenPlace })
+        #expect(group.candidates.contains { $0.savedItem.owner == koreanPlace })
+        #expect(group.candidates.allSatisfy { $0.evidenceItem.owner == preferenceNote })
+        #expect(group.candidates.allSatisfy { $0.truthBoundary == "reviewable_candidate_not_truth" })
+        #expect(group.candidates.allSatisfy { !$0.sourceRefs.contains(planningNote.canonicalRef) && !$0.sourceRefs.contains(auditNote.canonicalRef) })
+        #expect(group.candidates.allSatisfy { $0.savedItem.owner != product })
+        #expect(group.safeVerificationCommands.contains("cider-cli item context note \(preferenceNote.ownerID) --json"))
+        #expect(group.safeNextCommands.allSatisfy { !$0.contains("accept") && !$0.contains("reconcile") })
+        #expect(report.diagnostics.evidenceSamples.allSatisfy { $0.owner != planningNote && $0.owner != auditNote })
+        #expect(report.diagnostics.evidenceRejectedSamples.contains { $0.owner == auditNote && $0.reasonCode == "planning_or_audit_food_mention" })
+
+        let payload = CiderCLI.savedPlacePreferenceReciprocalLinkPreviewPayload(report)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(payload["command"] as? String == "item.preference-saved-place-links")
+        let groups = try #require(payload["groups"] as? [[String: Any]])
+        #expect(groups.count == 1)
+        let groupDict = groups[0]
+        #expect(groupDict["evidenceItemRef"] as? String == preferenceNote.canonicalRef)
+        let evidenceItem = try #require(groupDict["evidenceItem"] as? [String: Any])
+        let sourceSpan = try #require(evidenceItem["sourceSpan"] as? [String: Any])
+        #expect(sourceSpan["matchedText"] as? String == preferencePhrase)
+        let candidates = try #require(groupDict["candidates"] as? [[String: Any]])
+        #expect(candidates.count == 3)
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        #expect(receipt["readOnly"] as? Bool == true)
+        #expect(receipt["changed"] as? Bool == false)
+        let safeCommands = try #require(payload["safeVerificationCommands"] as? [String])
+        #expect(safeCommands.contains("cider-cli item preference-saved-place-links --owner \(preferenceNote.ownerID.prefix(8)) --json"))
+    }
+
     @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
     func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
         let (db, url) = try makeTestDB()

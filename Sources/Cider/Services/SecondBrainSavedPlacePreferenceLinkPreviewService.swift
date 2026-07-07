@@ -68,6 +68,27 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewReport: Codable, Equatable {
     var safeNextCommands: [String]
 }
 
+struct SecondBrainPreferenceSavedPlaceLinkGroup: Identifiable, Codable, Equatable {
+    var id: String
+    var evidenceItem: SecondBrainSavedPlacePreferenceLinkPreviewSource
+    var preferenceValue: String
+    var sourceRefs: [String]
+    var candidates: [SecondBrainSavedPlacePreferenceLinkCandidate]
+    var truthBoundary: String
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+}
+
+struct SecondBrainPreferenceSavedPlaceLinkPreviewReport: Codable, Equatable {
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var truthBoundary: String = "reviewable_candidate_not_truth"
+    var groups: [SecondBrainPreferenceSavedPlaceLinkGroup]
+    var diagnostics: SecondBrainSavedPlacePreferenceLinkDiagnostics
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+}
+
 @MainActor
 final class SecondBrainSavedPlacePreferenceLinkPreviewService {
     private struct SavedBookmark {
@@ -173,6 +194,83 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         )
     }
 
+    func reciprocalPreview(
+        ownerSelector: String? = nil,
+        limit: Int = 20
+    ) throws -> SecondBrainPreferenceSavedPlaceLinkPreviewReport {
+        let boundedLimit = max(0, limit)
+        guard boundedLimit > 0 else {
+            return reciprocalReport(
+                groups: [],
+                diagnostics: diagnostics(
+                    inspectedBookmarkCount: 0,
+                    savedPlaceBookmarkCount: 0,
+                    preferenceEvidenceCount: 0,
+                    candidateCount: 0,
+                    skippedBookmarkSamples: [],
+                    noMatchSamples: [],
+                    evidenceSamples: [],
+                    evidenceRejectedSamples: []
+                ),
+                ownerSelector: ownerSelector
+            )
+        }
+
+        let bookmarkScan = try savedPlaceBookmarks()
+        let preferenceScan = try journalFoodPreferences()
+        let selectedPreferences = preferenceScan.evidence.filter { preferenceMatchesSelector($0, selector: ownerSelector) }
+        var groups: [SecondBrainPreferenceSavedPlaceLinkGroup] = []
+        var noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
+
+        for preference in selectedPreferences {
+            var candidates: [SecondBrainSavedPlacePreferenceLinkCandidate] = []
+            for bookmark in bookmarkScan.bookmarks {
+                guard let match = match(bookmark: bookmark, preference: preference) else { continue }
+                candidates.append(candidate(bookmark: bookmark, preference: preference, match: match))
+            }
+            candidates.sort {
+                if $0.confidence != $1.confidence { return $0.confidence > $1.confidence }
+                return $0.savedItem.title.localizedCaseInsensitiveCompare($1.savedItem.title) == .orderedAscending
+            }
+            let boundedCandidates = Array(candidates.prefix(boundedLimit))
+            if boundedCandidates.isEmpty {
+                noMatchSamples.append(
+                    diagnosticRow(
+                        owner: preference.owner,
+                        title: preference.title,
+                        reasonCode: bookmarkScan.bookmarks.isEmpty ? "no_saved_place_candidates" : "no_related_saved_place_matches",
+                        matchedTerms: preference.terms,
+                        sourceRefs: preference.sourceRefs,
+                        sourceSpan: preference.sourceSpan
+                    )
+                )
+                continue
+            }
+            groups.append(reciprocalGroup(preference: preference, candidates: boundedCandidates, ownerSelector: ownerSelector))
+        }
+
+        groups.sort {
+            if $0.candidates.count != $1.candidates.count { return $0.candidates.count > $1.candidates.count }
+            return $0.evidenceItem.title.localizedCaseInsensitiveCompare($1.evidenceItem.title) == .orderedAscending
+        }
+        let boundedGroups = Array(groups.prefix(boundedLimit))
+        let returnedCandidateCount = boundedGroups.flatMap(\.candidates).count
+        return reciprocalReport(
+            groups: boundedGroups,
+            diagnostics: diagnostics(
+                inspectedBookmarkCount: bookmarkScan.inspectedCount,
+                savedPlaceBookmarkCount: bookmarkScan.bookmarks.count,
+                preferenceEvidenceCount: selectedPreferences.count,
+                candidateCount: returnedCandidateCount,
+                skippedBookmarkSamples: bookmarkScan.skippedSamples,
+                noMatchSamples: noMatchSamples,
+                evidenceSamples: preferenceScan.evidenceSamples.filter { diagnosticMatchesSelector($0, selector: ownerSelector) },
+                evidenceRejectedSamples: preferenceScan.rejectedSamples
+            ),
+            ownerSelector: ownerSelector
+        )
+    }
+
     private func report(
         candidates: [SecondBrainSavedPlacePreferenceLinkCandidate],
         diagnostics: SecondBrainSavedPlacePreferenceLinkDiagnostics
@@ -184,6 +282,27 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             safeVerificationCommands: safeCommands,
             safeNextCommands: safeCommands
         )
+    }
+
+    private func reciprocalReport(
+        groups: [SecondBrainPreferenceSavedPlaceLinkGroup],
+        diagnostics: SecondBrainSavedPlacePreferenceLinkDiagnostics,
+        ownerSelector: String?
+    ) -> SecondBrainPreferenceSavedPlaceLinkPreviewReport {
+        let safeCommands = [reciprocalCommand(ownerSelector: ownerSelector)]
+        return SecondBrainPreferenceSavedPlaceLinkPreviewReport(
+            groups: groups,
+            diagnostics: diagnostics,
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
+    }
+
+    private func reciprocalCommand(ownerSelector: String?) -> String {
+        if let ownerSelector, !ownerSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "cider-cli item preference-saved-place-links --owner \(ownerSelector) --json"
+        }
+        return "cider-cli item preference-saved-place-links --json"
     }
 
     private func diagnostics(
@@ -206,6 +325,60 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             evidenceSamples: Array(evidenceSamples.prefix(20)),
             evidenceRejectedSamples: Array(evidenceRejectedSamples.prefix(20))
         )
+    }
+
+    private func reciprocalGroup(
+        preference: PreferenceEvidence,
+        candidates: [SecondBrainSavedPlacePreferenceLinkCandidate],
+        ownerSelector: String?
+    ) -> SecondBrainPreferenceSavedPlaceLinkGroup {
+        let sourceRefs = orderedUnique(preference.sourceRefs + candidates.flatMap(\.sourceRefs))
+        let safeCommands = orderedUnique(
+            ["cider-cli item context \(preference.owner.ownerType) \(preference.owner.ownerID) --json"]
+                + graphCandidateCommand(for: preference)
+                + candidates.flatMap(\.safeVerificationCommands)
+                + [reciprocalCommand(ownerSelector: ownerSelector)]
+        )
+        return SecondBrainPreferenceSavedPlaceLinkGroup(
+            id: "preference_saved_places:\(preference.id)",
+            evidenceItem: SecondBrainSavedPlacePreferenceLinkPreviewSource(
+                owner: preference.owner,
+                title: preference.title,
+                snippet: preference.evidence,
+                url: nil,
+                relativePath: nil,
+                sourceEvidenceRef: preference.sourceEvidenceRef,
+                sourceSpan: preference.sourceSpan
+            ),
+            preferenceValue: preference.value,
+            sourceRefs: sourceRefs,
+            candidates: candidates,
+            truthBoundary: "reviewable_candidate_not_truth",
+            safeVerificationCommands: safeCommands,
+            safeNextCommands: safeCommands
+        )
+    }
+
+    private func preferenceMatchesSelector(_ preference: PreferenceEvidence, selector: String?) -> Bool {
+        guard let rawSelector = selector?.trimmingCharacters(in: .whitespacesAndNewlines), !rawSelector.isEmpty else {
+            return true
+        }
+        let candidates = [
+            preference.owner.ownerID,
+            preference.owner.canonicalRef,
+            "\(preference.owner.ownerType):\(preference.owner.ownerID)",
+            preference.id,
+            preference.sourceEvidenceRef,
+        ].compactMap { $0 }
+        return candidates.contains { $0 == rawSelector || $0.hasPrefix(rawSelector) }
+    }
+
+    private func diagnosticMatchesSelector(_ row: SecondBrainSavedPlacePreferenceLinkDiagnosticRow, selector: String?) -> Bool {
+        guard let rawSelector = selector?.trimmingCharacters(in: .whitespacesAndNewlines), !rawSelector.isEmpty else {
+            return true
+        }
+        let refs = [row.owner.ownerID, row.owner.canonicalRef, "\(row.owner.ownerType):\(row.owner.ownerID)"] + row.sourceRefs
+        return refs.contains { $0 == rawSelector || $0.hasPrefix(rawSelector) }
     }
 
     private func savedPlaceBookmarks() throws -> SavedBookmarkScan {
