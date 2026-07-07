@@ -72,6 +72,11 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         var sourceEvidenceRef: String?
     }
 
+    private struct SavedPlaceClassification {
+        var isPlace: Bool
+        var confidence: Double
+    }
+
     private let database: CiderDatabase
 
     init(database: CiderDatabase = .shared) {
@@ -170,7 +175,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
 
     private func savedPlaceBookmarks() throws -> SavedBookmarkScan {
         let stmt = try database.prepare("""
-            SELECT i.id, i.title, i.relative_path, b.url
+            SELECT i.id, i.title, i.relative_path, b.url, b.ocr_text
             FROM items i
             JOIN bookmarks b ON b.item_id = i.id
             WHERE i.type = 'bookmark'
@@ -186,27 +191,25 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             let title = stmt.string(at: 1)
             let relativePath = stmt.optionalString(at: 2)
             let url = stmt.string(at: 3)
+            let ocrText = stmt.optionalString(at: 4) ?? ""
             let extraction = SecondBrainBookmarkGraphCandidateExtractor().extract(
                 sourceOwner: owner,
                 urlString: url,
                 title: title
             )
-            guard let output = extraction.outputs.first else {
-                skippedSamples.append(
-                    diagnosticRow(owner: owner, title: title, reasonCode: "not_saved_place_candidate", matchedTerms: [], sourceRefs: [owner.canonicalRef])
-                )
-                continue
-            }
-            let objectTypes = DatabaseHelpers.decodeStringArray(
-                output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]
+            let classification = savedPlaceClassification(
+                title: title,
+                url: url,
+                ocrText: ocrText,
+                extractionOutput: extraction.outputs.first
             )
-            guard objectTypes.contains("restaurant") || objectTypes.contains("place") else {
+            guard classification.isPlace else {
                 skippedSamples.append(
                     diagnosticRow(owner: owner, title: title, reasonCode: "not_saved_place_candidate", matchedTerms: [], sourceRefs: [owner.canonicalRef])
                 )
                 continue
             }
-            let terms = cuisineTerms(in: "\(title) \(url)")
+            let terms = cuisineTerms(in: "\(title) \(url) \(ocrText)")
             guard !terms.isEmpty else {
                 skippedSamples.append(
                     diagnosticRow(owner: owner, title: title, reasonCode: "no_supported_cuisine_terms", matchedTerms: [], sourceRefs: [owner.canonicalRef])
@@ -220,7 +223,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                     url: url,
                     relativePath: relativePath,
                     placeTerms: terms,
-                    bookmarkConfidence: output.confidence ?? 0.72
+                    bookmarkConfidence: classification.confidence
                 )
             )
         }
@@ -361,12 +364,101 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         let normalized = " \(text.lowercased()) "
         let candidates = [
             "asian", "thai", "japanese", "korean", "chinese", "vietnamese",
-            "sushi", "ramen", "pho", "dim sum", "taco", "tacos", "mexican",
+            "sushi", "ramen", "pho", "dim sum", "udon", "taco", "tacos", "mexican",
             "italian", "pizza", "indian", "curry", "burger", "bbq"
         ]
-        return candidates.filter { term in
-            normalized.contains(" \(term) ") || normalized.contains("-\(term)-") || normalized.contains("/\(term)")
+        var terms = candidates.filter { term in
+            normalized.contains(" \(term) ")
+                || normalized.contains("-\(term)-")
+                || normalized.contains("/\(term)")
+                || normalized.contains("#\(term)")
         }
+        if normalized.contains("bb.q chicken") || normalized.contains("bbq-chicken") {
+            terms.append("korean")
+        }
+        if normalized.contains(" sando ") || normalized.contains("-sando") || normalized.contains("/sando") {
+            terms.append("japanese")
+        }
+        return orderedUnique(terms)
+    }
+
+    private func savedPlaceClassification(
+        title: String,
+        url: String,
+        ocrText: String,
+        extractionOutput: SecondBrainEnrichmentOutput?
+    ) -> SavedPlaceClassification {
+        let text = "\(title) \(url) \(ocrText)"
+        if isNoisyNonPlaceFoodSave(text) {
+            return SavedPlaceClassification(isPlace: false, confidence: 0)
+        }
+
+        if let extractionOutput {
+            let objectTypes = DatabaseHelpers.decodeStringArray(
+                extractionOutput.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]
+            )
+            if objectTypes.contains("restaurant") || objectTypes.contains("place") {
+                return SavedPlaceClassification(isPlace: true, confidence: extractionOutput.confidence ?? 0.72)
+            }
+        }
+
+        let normalized = text.lowercased()
+        let terms = cuisineTerms(in: text)
+        guard !terms.isEmpty else {
+            return SavedPlaceClassification(isPlace: false, confidence: 0)
+        }
+
+        let knownRestaurantHost = normalized.contains("toasttab.com")
+        let socialHost = normalized.contains("tiktok.com") || normalized.contains("instagram.com")
+        let socialFoodPlaceTitle = socialHost
+            && (normalized.contains("restaurant") || normalized.contains("place to try") || normalized.contains("places to try"))
+        let restaurantTitleSignal = containsAny(
+            normalized,
+            [
+                "restaurant", " ramen", "sushi", "pho ", "dim sum", "tacos",
+                "udon", "bar", "grill", "kitchen", "noodle", "food festival",
+                "bb.q chicken", "bbq chicken",
+            ]
+        )
+        let locationHint = containsAny(
+            normalized,
+            [
+                " seattle", " lynnwood", " bellevue", " redmond", " kirkland",
+                " cap hill", " capitol hill", " ballard", " fremont",
+            ]
+        )
+
+        if knownRestaurantHost && (restaurantTitleSignal || locationHint) {
+            return SavedPlaceClassification(isPlace: true, confidence: 0.74)
+        }
+        if socialHost && locationHint && containsAny(normalized, ["#food", "foodie", " pop up ", "popup"]) {
+            return SavedPlaceClassification(isPlace: true, confidence: 0.73)
+        }
+        if socialFoodPlaceTitle {
+            return SavedPlaceClassification(isPlace: true, confidence: 0.73)
+        }
+        if locationHint && normalized.contains("food festival") {
+            return SavedPlaceClassification(isPlace: true, confidence: 0.72)
+        }
+        if restaurantTitleSignal && (title.contains("&") || locationHint || normalized.contains("restaurant")) {
+            return SavedPlaceClassification(isPlace: true, confidence: 0.72)
+        }
+        return SavedPlaceClassification(isPlace: false, confidence: 0)
+    }
+
+    private func isNoisyNonPlaceFoodSave(_ text: String) -> Bool {
+        containsAny(
+            text.lowercased(),
+            [
+                "/products/", " product", " bowl set", " recipe", "/recipes/",
+                "homemade", "reaction clip", "funny ", " meme", "/memes/",
+                "game", "movie", "trailer",
+            ]
+        )
+    }
+
+    private func containsAny(_ text: String, _ needles: [String]) -> Bool {
+        needles.contains { text.contains($0) }
     }
 
     private func cuisineAliasMatch(

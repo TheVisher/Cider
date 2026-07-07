@@ -229,6 +229,98 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect((afterReceipt["diagnostics"] as? [String: Any])?["inspectedBookmarkCount"] as? Int == 3)
     }
 
+    @Test("preview inspects live-inspired restaurant saves without admitting noisy food media")
+    func previewInspectsLiveInspiredRestaurantSavesWithoutAdmittingNoisyFoodMedia() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let journal = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let titleOnlyRamen = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let toastRestaurant = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let socialRestaurant = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let noisySocialClip = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let recipe = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let product = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(owner: journal, title: "Daily Journal - 2026-07-07", into: db)
+        try insertBookmarkItem(
+            owner: titleOnlyRamen,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: toastRestaurant,
+            title: "Nom Nom Sando | Toast",
+            url: "https://www.toasttab.com/local/order/nom-nom-sando",
+            ocrText: "Nom Nom Sando 4744 University Way Northeast Seattle, WA 98105 Udon Fried Chicken Wings",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: socialRestaurant,
+            title: "Seattle day place to try from TikTok",
+            url: "https://www.tiktok.com/@foodfinder/video/123",
+            ocrText: "Trying viral pop up sushi in Seattle",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: noisySocialClip,
+            title: "funny ramen reaction clip",
+            url: "https://www.tiktok.com/@memes/video/456",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: recipe,
+            title: "Homemade ramen recipe for rainy days",
+            url: "https://example.com/recipes/homemade-ramen",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: product,
+            title: "Ceramic ramen bowl set",
+            url: "https://example.com/products/ceramic-ramen-bowl-set",
+            into: db
+        )
+
+        let preference = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: journal,
+            candidateKind: .objectRelation,
+            mentionText: "Asian food",
+            sourceQuote: "Asian food is usually the easiest dinner win for me.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.food],
+            relationGuesses: [.likesFood],
+            confidence: 0.84,
+            confidenceReason: "Journal sentence explicitly states a food preference.",
+            source: "graph_candidate.journal_capture"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(preference)
+
+        let before = try mutationCounts(in: db)
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .preview(limit: 10)
+        let after = try mutationCounts(in: db)
+
+        #expect(report.readOnly == true)
+        #expect(report.changed == false)
+        #expect(after == before)
+        #expect(report.diagnostics.inspectedBookmarkCount == 6)
+        #expect(report.diagnostics.savedPlaceBookmarkCount == 3)
+        #expect(report.candidates.contains { $0.savedItem.owner == titleOnlyRamen })
+        #expect(report.candidates.contains { $0.savedItem.owner == toastRestaurant })
+        #expect(report.candidates.contains { $0.savedItem.owner == socialRestaurant })
+        #expect(report.candidates.allSatisfy { $0.truthBoundary == "reviewable_candidate_not_truth" })
+        #expect(report.diagnostics.noMatchSamples.allSatisfy { $0.owner != titleOnlyRamen && $0.owner != toastRestaurant && $0.owner != socialRestaurant })
+        #expect(report.diagnostics.skippedBookmarkSamples.contains {
+            $0.owner == noisySocialClip && $0.reasonCode == "not_saved_place_candidate"
+        })
+        #expect(report.diagnostics.skippedBookmarkSamples.contains {
+            $0.owner == recipe && $0.reasonCode == "not_saved_place_candidate"
+        })
+        #expect(report.diagnostics.skippedBookmarkSamples.contains {
+            $0.owner == product && $0.reasonCode == "not_saved_place_candidate"
+        })
+    }
+
     private func insertNoteItem(owner: SecondBrainOwnerRef, title: String, into db: CiderDatabase) throws {
         let now = DatabaseHelpers.encode(Date())
         let itemStmt = try db.prepare("""
@@ -247,7 +339,13 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         try noteStmt.step()
     }
 
-    private func insertBookmarkItem(owner: SecondBrainOwnerRef, title: String, url: String, into db: CiderDatabase) throws {
+    private func insertBookmarkItem(
+        owner: SecondBrainOwnerRef,
+        title: String,
+        url: String,
+        ocrText: String? = nil,
+        into db: CiderDatabase
+    ) throws {
         let now = DatabaseHelpers.encode(Date())
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
@@ -260,9 +358,10 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
             .bind("Bookmarks/\(owner.ownerID).md", at: 5)
         try itemStmt.step()
 
-        let bookmarkStmt = try db.prepare("INSERT INTO bookmarks (item_id, url, notes) VALUES (?, ?, '');")
+        let bookmarkStmt = try db.prepare("INSERT INTO bookmarks (item_id, url, notes, ocr_text) VALUES (?, ?, '', ?);")
         bookmarkStmt.bind(owner.ownerID, at: 1)
             .bind(url, at: 2)
+            .bind(ocrText, at: 3)
         try bookmarkStmt.step()
     }
 
