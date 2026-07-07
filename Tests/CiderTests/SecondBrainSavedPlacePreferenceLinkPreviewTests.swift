@@ -394,6 +394,96 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(evidenceRejectedSamples.contains { $0["reasonCode"] as? String == "negative_or_non_preference_food_mention" })
     }
 
+    @Test("preview requires token boundaries for short cuisine aliases in raw notes")
+    func previewRequiresTokenBoundariesForShortCuisineAliasesInRawNotes() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let planningNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let phoNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let phoPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(
+            owner: planningNote,
+            title: "Agent-native capture contract v1 audit",
+            content: "Problem: I love that Telegram currently converts inbound messages/photos into prompt text. Phone metadata, Photoshop edits, and graph sync logs are infrastructure details.",
+            into: db
+        )
+        try insertNoteItem(
+            owner: phoNote,
+            title: "Daily Journal - 2026-07-07",
+            content: "I love pho for cold rainy evenings.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: phoPlace,
+            title: "Lotus Pho Restaurant",
+            url: "https://example.com/saved/lotus-pho-seattle",
+            into: db
+        )
+
+        let before = try mutationCounts(in: db)
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .preview(limit: 10)
+        let after = try mutationCounts(in: db)
+
+        #expect(report.readOnly == true)
+        #expect(report.changed == false)
+        #expect(after == before)
+        #expect(report.diagnostics.preferenceEvidenceCount == 1)
+        #expect(report.diagnostics.evidenceSamples.contains {
+            $0.owner == phoNote
+                && $0.reasonCode == "usable_food_preference_evidence"
+                && $0.matchedTerms == ["pho"]
+        })
+        #expect(report.diagnostics.evidenceSamples.allSatisfy { $0.owner != planningNote })
+        #expect(report.candidates.contains { $0.savedItem.owner == phoPlace && $0.evidenceItem.owner == phoNote })
+        #expect(report.candidates.allSatisfy { $0.evidenceItem.owner != planningNote })
+    }
+
+    @Test("preview rejects audit table food mentions unless they clearly describe a user preference")
+    func previewRejectsAuditTableFoodMentionsUnlessTheyClearlyDescribeUserPreference() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let auditNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let preferenceNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let koreanPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(
+            owner: auditNote,
+            title: "2026-06-07-memory-trust-audit",
+            content: "| Existing bookmark | `favorite Korean restaurant Bobae noodle` | Bookmarks / Food | Other favorite bookmarks | Open bookmark; optionally route to food/places |",
+            into: db
+        )
+        try insertNoteItem(
+            owner: preferenceNote,
+            title: "Tokuni — Lynnwood Asian food place to try",
+            content: "This fits Visher’s preference for Korean BBQ food and the current Alderwood food-planning thread.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: koreanPlace,
+            title: "Bb.Q Chicken Lynnwood",
+            url: "https://example.com/saved/bbq-chicken-lynnwood",
+            into: db
+        )
+
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .preview(limit: 10)
+
+        #expect(report.diagnostics.preferenceEvidenceCount == 1)
+        #expect(report.diagnostics.evidenceSamples.contains {
+            $0.owner == preferenceNote
+                && $0.reasonCode == "usable_food_preference_evidence"
+                && $0.matchedTerms.contains("korean")
+        })
+        #expect(report.diagnostics.evidenceSamples.allSatisfy { $0.owner != auditNote })
+        #expect(report.diagnostics.evidenceRejectedSamples.contains {
+            $0.owner == auditNote && $0.reasonCode == "planning_or_audit_food_mention"
+        })
+        #expect(report.candidates.contains { $0.savedItem.owner == koreanPlace && $0.evidenceItem.owner == preferenceNote })
+        #expect(report.candidates.allSatisfy { $0.evidenceItem.owner != auditNote })
+    }
+
     @Test("preview emits replayable source span diagnostics for accepted and rejected raw note evidence")
     func previewEmitsReplayableSourceSpanDiagnosticsForRawNoteEvidence() throws {
         let (db, url) = try makeTestDB()

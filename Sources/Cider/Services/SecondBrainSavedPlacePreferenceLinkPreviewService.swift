@@ -369,6 +369,19 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                     )
                     continue
                 }
+                if isPlanningOrAuditFoodMention(title: title, sentence: sentence.text) {
+                    rejectedSamples.append(
+                        diagnosticRow(
+                            owner: owner,
+                            title: title,
+                            reasonCode: "planning_or_audit_food_mention",
+                            matchedTerms: terms,
+                            sourceRefs: sourceRefs,
+                            sourceSpan: sourceSpan
+                        )
+                    )
+                    continue
+                }
                 guard hasFoodPreferenceCue(sentence.text) else {
                     rejectedSamples.append(
                         diagnosticRow(
@@ -530,27 +543,44 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
     }
 
     private func cuisineTerms(in text: String) -> [String] {
-        let normalized = " \(text.lowercased()) "
+        let normalized = text.lowercased()
         let candidates = [
             "asian", "thai", "japanese", "korean", "chinese", "vietnamese",
             "sushi", "ramen", "pho", "dim sum", "udon", "taco", "tacos", "mexican",
             "italian", "pizza", "indian", "curry", "burger", "bbq", "chicken",
             "sandwich", "sandwiches", "sando", "festival"
         ]
-        var terms = candidates.filter { term in
-            normalized.contains(" \(term) ")
-                || normalized.contains("-\(term)-")
-                || normalized.contains("/\(term)")
-                || normalized.contains("#\(term)")
-        }
+        var terms = candidates.filter { containsTokenBoundedTerm($0, in: normalized) }
         if normalized.contains("bb.q chicken") || normalized.contains("bbq-chicken") {
             terms.append("korean")
         }
-        if normalized.contains(" sando ") || normalized.contains("-sando") || normalized.contains("/sando") {
+        if containsTokenBoundedTerm("sando", in: normalized) {
             terms.append("japanese")
             terms.append("sandwich")
         }
         return orderedUnique(terms)
+    }
+
+    private func containsTokenBoundedTerm(_ term: String, in normalizedText: String) -> Bool {
+        var searchStart = normalizedText.startIndex
+        while let range = normalizedText.range(of: term, options: [], range: searchStart..<normalizedText.endIndex) {
+            if isTokenBoundary(before: range.lowerBound, in: normalizedText)
+                && isTokenBoundary(after: range.upperBound, in: normalizedText) {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    private func isTokenBoundary(before index: String.Index, in text: String) -> Bool {
+        guard index > text.startIndex else { return true }
+        return !text[text.index(before: index)].isAlphaNumeric
+    }
+
+    private func isTokenBoundary(after index: String.Index, in text: String) -> Bool {
+        guard index < text.endIndex else { return true }
+        return !text[index].isAlphaNumeric
     }
 
     private func savedPlaceClassification(
@@ -734,6 +764,33 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         )
     }
 
+    private func isPlanningOrAuditFoodMention(title: String, sentence: String) -> Bool {
+        let normalizedTitle = title.lowercased()
+        let trimmedSentence = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isPlanningSurface = containsAny(
+            normalizedTitle,
+            [
+                "agent", "audit", "contract", "implementation", "memory-trust",
+                "roadmap", "qa", "debug", "test"
+            ]
+        ) || trimmedSentence.hasPrefix("|")
+        return isPlanningSurface && !hasExplicitUserFoodPreferenceCue(sentence)
+    }
+
+    private func hasExplicitUserFoodPreferenceCue(_ sentence: String) -> Bool {
+        let normalized = " \(sentence.lowercased()) "
+        return containsAny(
+            normalized,
+            [
+                " i like ", " i love ", " we like ", " we love ",
+                " visher’s preference ", " visher's preference ",
+                " user preference ", " user's preference ",
+                " user likes ", " user loves ",
+                " want to try ", " wants to try ", " wanted to try "
+            ]
+        )
+    }
+
     private func hasFoodPreferenceCue(_ sentence: String) -> Bool {
         let normalized = " \(sentence.lowercased()) "
         return containsAny(
@@ -784,5 +841,11 @@ private extension String {
         let start = index(startIndex, offsetBy: safeStart)
         let end = index(startIndex, offsetBy: safeEnd)
         return String(self[start..<end])
+    }
+}
+
+private extension Character {
+    var isAlphaNumeric: Bool {
+        unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) }
     }
 }
