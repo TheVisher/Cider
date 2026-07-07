@@ -143,6 +143,92 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         #expect(after == before)
     }
 
+    @Test("preview matches obvious cuisine aliases and reports compact diagnostics")
+    func previewMatchesCuisineAliasesAndReportsDiagnostics() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let journal = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let tacoPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let ramenPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let noisySave = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(owner: journal, title: "Daily Journal - 2026-07-03", into: db)
+        try insertBookmarkItem(
+            owner: tacoPlace,
+            title: "El Camino Tacos Restaurant",
+            url: "https://www.yelp.com/biz/el-camino-tacos-seattle",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: ramenPlace,
+            title: "Rainy Day Ramen Restaurant",
+            url: "https://www.yelp.com/biz/rainy-day-ramen-seattle",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: noisySave,
+            title: "Compact camera bag",
+            url: "https://example.com/products/compact-camera-bag",
+            into: db
+        )
+
+        let preference = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: journal,
+            candidateKind: .objectRelation,
+            mentionText: "Mexican food",
+            sourceQuote: "I want more Mexican food in the weeknight rotation.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.food],
+            relationGuesses: [.likesFood],
+            confidence: 0.88,
+            confidenceReason: "Journal sentence explicitly states a food preference.",
+            source: "graph_candidate.journal_capture"
+        )
+        try SecondBrainEnrichmentOutputService(database: db).record(preference)
+
+        let before = try mutationCounts(in: db)
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .preview(limit: 10)
+        let after = try mutationCounts(in: db)
+
+        #expect(report.readOnly == true)
+        #expect(report.changed == false)
+        #expect(after == before)
+        #expect(report.candidates.count == 1)
+
+        let candidate = try #require(report.candidates.first)
+        #expect(candidate.savedItem.owner == tacoPlace)
+        #expect(candidate.preferenceValue == "Mexican food")
+        #expect(candidate.reasonCodes.contains("cuisine_alias_family_match"))
+        #expect(candidate.reason.contains("Mexican"))
+        #expect(candidate.sourceRefs.contains(tacoPlace.canonicalRef))
+        #expect(candidate.sourceRefs.contains(journal.canonicalRef))
+
+        #expect(report.diagnostics.inspectedBookmarkCount == 3)
+        #expect(report.diagnostics.savedPlaceBookmarkCount == 2)
+        #expect(report.diagnostics.preferenceEvidenceCount == 1)
+        #expect(report.diagnostics.candidateCount == 1)
+        #expect(report.diagnostics.skippedBookmarkSamples.contains {
+            $0.owner == noisySave && $0.reasonCode == "not_saved_place_candidate"
+        })
+        #expect(report.diagnostics.noMatchSamples.contains {
+            $0.owner == ramenPlace && $0.reasonCode == "no_shared_cuisine_alias"
+        })
+
+        let payload = CiderCLI.savedPlacePreferenceLinkPreviewPayload(report)
+        let diagnostics = try #require(payload["diagnostics"] as? [String: Any])
+        #expect(diagnostics["inspectedBookmarkCount"] as? Int == 3)
+        #expect(diagnostics["preferenceEvidenceCount"] as? Int == 1)
+        let skipped = try #require(diagnostics["skippedBookmarkSamples"] as? [[String: Any]])
+        #expect(skipped.contains { $0["reasonCode"] as? String == "not_saved_place_candidate" })
+        let noMatches = try #require(diagnostics["noMatchSamples"] as? [[String: Any]])
+        #expect(noMatches.contains { $0["reasonCode"] as? String == "no_shared_cuisine_alias" })
+        let receipt = try #require(payload["actionReceipt"] as? [String: Any])
+        let afterReceipt = try #require(receipt["after"] as? [String: Any])
+        #expect(afterReceipt["candidateCount"] as? Int == 1)
+        #expect((afterReceipt["diagnostics"] as? [String: Any])?["inspectedBookmarkCount"] as? Int == 3)
+    }
+
     private func insertNoteItem(owner: SecondBrainOwnerRef, title: String, into db: CiderDatabase) throws {
         let now = DatabaseHelpers.encode(Date())
         let itemStmt = try db.prepare("""

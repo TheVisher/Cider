@@ -27254,6 +27254,7 @@ struct CiderCLI {
             "truthBoundary": report.truthBoundary,
             "count": report.candidates.count,
             "candidates": report.candidates.map(savedPlacePreferenceLinkCandidateToDict),
+            "diagnostics": savedPlacePreferenceLinkDiagnosticsToDict(report.diagnostics),
             "safeVerificationCommands": report.safeVerificationCommands,
             "safeNextCommands": report.safeNextCommands,
             "actionReceipt": agentActionReceiptToDict(
@@ -27267,10 +27268,36 @@ struct CiderCLI {
                 readOnly: true,
                 changed: false,
                 status: "succeeded",
-                after: ["candidateCount": report.candidates.count, "truthBoundary": report.truthBoundary],
+                after: [
+                    "candidateCount": report.candidates.count,
+                    "truthBoundary": report.truthBoundary,
+                    "diagnostics": savedPlacePreferenceLinkDiagnosticsToDict(report.diagnostics),
+                ],
                 safeVerificationCommands: report.safeVerificationCommands,
                 safeNextCommands: report.safeNextCommands
             ),
+        ]
+    }
+
+    static func savedPlacePreferenceLinkDiagnosticsToDict(_ diagnostics: SecondBrainSavedPlacePreferenceLinkDiagnostics) -> [String: Any] {
+        [
+            "inspectedBookmarkCount": diagnostics.inspectedBookmarkCount,
+            "savedPlaceBookmarkCount": diagnostics.savedPlaceBookmarkCount,
+            "preferenceEvidenceCount": diagnostics.preferenceEvidenceCount,
+            "candidateCount": diagnostics.candidateCount,
+            "skippedBookmarkSamples": diagnostics.skippedBookmarkSamples.map(savedPlacePreferenceLinkDiagnosticRowToDict),
+            "noMatchSamples": diagnostics.noMatchSamples.map(savedPlacePreferenceLinkDiagnosticRowToDict),
+        ]
+    }
+
+    static func savedPlacePreferenceLinkDiagnosticRowToDict(_ row: SecondBrainSavedPlacePreferenceLinkDiagnosticRow) -> [String: Any] {
+        [
+            "owner": ownerToDict(row.owner),
+            "ownerRef": row.owner.canonicalRef,
+            "title": row.title,
+            "reasonCode": row.reasonCode,
+            "matchedTerms": row.matchedTerms,
+            "sourceRefs": row.sourceRefs,
         ]
     }
 

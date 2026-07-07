@@ -23,11 +23,29 @@ struct SecondBrainSavedPlacePreferenceLinkCandidate: Identifiable, Codable, Equa
     var safeNextCommands: [String]
 }
 
+struct SecondBrainSavedPlacePreferenceLinkDiagnosticRow: Codable, Equatable {
+    var owner: SecondBrainOwnerRef
+    var title: String
+    var reasonCode: String
+    var matchedTerms: [String]
+    var sourceRefs: [String]
+}
+
+struct SecondBrainSavedPlacePreferenceLinkDiagnostics: Codable, Equatable {
+    var inspectedBookmarkCount: Int
+    var savedPlaceBookmarkCount: Int
+    var preferenceEvidenceCount: Int
+    var candidateCount: Int
+    var skippedBookmarkSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+    var noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+}
+
 struct SecondBrainSavedPlacePreferenceLinkPreviewReport: Codable, Equatable {
     var readOnly: Bool = true
     var changed: Bool = false
     var truthBoundary: String = "reviewable_candidate_not_truth"
     var candidates: [SecondBrainSavedPlacePreferenceLinkCandidate]
+    var diagnostics: SecondBrainSavedPlacePreferenceLinkDiagnostics
     var safeVerificationCommands: [String]
     var safeNextCommands: [String]
 }
@@ -41,6 +59,12 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         var relativePath: String?
         var placeTerms: [String]
         var bookmarkConfidence: Double
+    }
+
+    private struct SavedBookmarkScan {
+        var inspectedCount: Int
+        var bookmarks: [SavedBookmark]
+        var skippedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
     }
 
     private struct PreferenceEvidence {
@@ -57,17 +81,41 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
     func preview(limit: Int = 20) throws -> SecondBrainSavedPlacePreferenceLinkPreviewReport {
         let boundedLimit = max(0, limit)
         guard boundedLimit > 0 else {
-            return report(candidates: [])
+            return report(
+                candidates: [],
+                diagnostics: diagnostics(
+                    inspectedBookmarkCount: 0,
+                    savedPlaceBookmarkCount: 0,
+                    preferenceEvidenceCount: 0,
+                    candidateCount: 0,
+                    skippedBookmarkSamples: [],
+                    noMatchSamples: []
+                )
+            )
         }
 
-        let bookmarks = try savedPlaceBookmarks()
+        let bookmarkScan = try savedPlaceBookmarks()
         let preferences = try journalFoodPreferences()
         var candidates: [SecondBrainSavedPlacePreferenceLinkCandidate] = []
+        var noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
 
-        for bookmark in bookmarks {
+        for bookmark in bookmarkScan.bookmarks {
+            var matchedBookmark = false
             for preference in preferences {
                 guard let match = match(bookmark: bookmark, preference: preference.output) else { continue }
                 candidates.append(candidate(bookmark: bookmark, preference: preference, match: match))
+                matchedBookmark = true
+            }
+            if !matchedBookmark {
+                noMatchSamples.append(
+                    diagnosticRow(
+                        owner: bookmark.owner,
+                        title: bookmark.title,
+                        reasonCode: preferences.isEmpty ? "no_preference_evidence" : "no_shared_cuisine_alias",
+                        matchedTerms: bookmark.placeTerms,
+                        sourceRefs: [bookmark.owner.canonicalRef]
+                    )
+                )
             }
         }
 
@@ -75,19 +123,52 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             if $0.confidence != $1.confidence { return $0.confidence > $1.confidence }
             return $0.savedItem.title.localizedCaseInsensitiveCompare($1.savedItem.title) == .orderedAscending
         }
-        return report(candidates: Array(candidates.prefix(boundedLimit)))
+        let boundedCandidates = Array(candidates.prefix(boundedLimit))
+        return report(
+            candidates: boundedCandidates,
+            diagnostics: diagnostics(
+                inspectedBookmarkCount: bookmarkScan.inspectedCount,
+                savedPlaceBookmarkCount: bookmarkScan.bookmarks.count,
+                preferenceEvidenceCount: preferences.count,
+                candidateCount: boundedCandidates.count,
+                skippedBookmarkSamples: bookmarkScan.skippedSamples,
+                noMatchSamples: noMatchSamples
+            )
+        )
     }
 
-    private func report(candidates: [SecondBrainSavedPlacePreferenceLinkCandidate]) -> SecondBrainSavedPlacePreferenceLinkPreviewReport {
+    private func report(
+        candidates: [SecondBrainSavedPlacePreferenceLinkCandidate],
+        diagnostics: SecondBrainSavedPlacePreferenceLinkDiagnostics
+    ) -> SecondBrainSavedPlacePreferenceLinkPreviewReport {
         let safeCommands = ["cider-cli item saved-place-preference-links --json"]
         return SecondBrainSavedPlacePreferenceLinkPreviewReport(
             candidates: candidates,
+            diagnostics: diagnostics,
             safeVerificationCommands: safeCommands,
             safeNextCommands: safeCommands
         )
     }
 
-    private func savedPlaceBookmarks() throws -> [SavedBookmark] {
+    private func diagnostics(
+        inspectedBookmarkCount: Int,
+        savedPlaceBookmarkCount: Int,
+        preferenceEvidenceCount: Int,
+        candidateCount: Int,
+        skippedBookmarkSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow],
+        noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+    ) -> SecondBrainSavedPlacePreferenceLinkDiagnostics {
+        SecondBrainSavedPlacePreferenceLinkDiagnostics(
+            inspectedBookmarkCount: inspectedBookmarkCount,
+            savedPlaceBookmarkCount: savedPlaceBookmarkCount,
+            preferenceEvidenceCount: preferenceEvidenceCount,
+            candidateCount: candidateCount,
+            skippedBookmarkSamples: Array(skippedBookmarkSamples.prefix(20)),
+            noMatchSamples: Array(noMatchSamples.prefix(20))
+        )
+    }
+
+    private func savedPlaceBookmarks() throws -> SavedBookmarkScan {
         let stmt = try database.prepare("""
             SELECT i.id, i.title, i.relative_path, b.url
             FROM items i
@@ -97,7 +178,10 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             """)
 
         var bookmarks: [SavedBookmark] = []
+        var skippedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
+        var inspectedCount = 0
         while try stmt.step() {
+            inspectedCount += 1
             let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: stmt.string(at: 0))
             let title = stmt.string(at: 1)
             let relativePath = stmt.optionalString(at: 2)
@@ -107,13 +191,28 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 urlString: url,
                 title: title
             )
-            guard let output = extraction.outputs.first else { continue }
+            guard let output = extraction.outputs.first else {
+                skippedSamples.append(
+                    diagnosticRow(owner: owner, title: title, reasonCode: "not_saved_place_candidate", matchedTerms: [], sourceRefs: [owner.canonicalRef])
+                )
+                continue
+            }
             let objectTypes = DatabaseHelpers.decodeStringArray(
                 output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]
             )
-            guard objectTypes.contains("restaurant") || objectTypes.contains("place") else { continue }
+            guard objectTypes.contains("restaurant") || objectTypes.contains("place") else {
+                skippedSamples.append(
+                    diagnosticRow(owner: owner, title: title, reasonCode: "not_saved_place_candidate", matchedTerms: [], sourceRefs: [owner.canonicalRef])
+                )
+                continue
+            }
             let terms = cuisineTerms(in: "\(title) \(url)")
-            guard !terms.isEmpty else { continue }
+            guard !terms.isEmpty else {
+                skippedSamples.append(
+                    diagnosticRow(owner: owner, title: title, reasonCode: "no_supported_cuisine_terms", matchedTerms: [], sourceRefs: [owner.canonicalRef])
+                )
+                continue
+            }
             bookmarks.append(
                 SavedBookmark(
                     owner: owner,
@@ -125,7 +224,11 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 )
             )
         }
-        return bookmarks
+        return SavedBookmarkScan(
+            inspectedCount: inspectedCount,
+            bookmarks: bookmarks,
+            skippedSamples: Array(skippedSamples.prefix(20))
+        )
     }
 
     private func journalFoodPreferences() throws -> [PreferenceEvidence] {
@@ -149,6 +252,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         var term: String
         var confidence: Double
         var reason: String
+        var reasonCodes: [String]
     }
 
     private func match(bookmark: SavedBookmark, preference: SecondBrainEnrichmentOutput) -> Match? {
@@ -160,16 +264,27 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 return Match(
                     term: term,
                     confidence: min(0.96, max(bookmark.bookmarkConfidence, preference.confidence ?? 0.78) - 0.05),
-                    reason: "Saved restaurant looks \(term.capitalized) and journal evidence says the user likes Asian food."
+                    reason: "Saved restaurant looks \(term.capitalized) and journal evidence says the user likes Asian food.",
+                    reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "cuisine_alias_family_match", "read_only_preview"]
                 )
             }
+        }
+
+        if let aliasMatch = cuisineAliasMatch(bookmarkTerms: bookmark.placeTerms, preferenceTerms: preferenceTerms) {
+            return Match(
+                term: aliasMatch.bookmarkTerm,
+                confidence: min(0.93, max(bookmark.bookmarkConfidence, preference.confidence ?? 0.76) - 0.06),
+                reason: "Saved restaurant looks \(aliasMatch.bookmarkDisplay) and journal evidence says the user likes \(aliasMatch.preferenceDisplay) food.",
+                reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "cuisine_alias_family_match", "read_only_preview"]
+            )
         }
 
         if let term = bookmark.placeTerms.first(where: { preferenceText.contains($0) || preferenceTerms.contains($0) }) {
             return Match(
                 term: term,
                 confidence: min(0.92, max(bookmark.bookmarkConfidence, preference.confidence ?? 0.76) - 0.08),
-                reason: "Saved restaurant and journal preference share '\(term)'."
+                reason: "Saved restaurant and journal preference share '\(term)'.",
+                reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "read_only_preview"]
             )
         }
         return nil
@@ -218,11 +333,27 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             preferenceValue: output.value,
             confidence: match.confidence,
             reason: match.reason,
-            reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "read_only_preview"],
+            reasonCodes: match.reasonCodes,
             sourceRefs: sourceRefs,
             truthBoundary: "reviewable_candidate_not_truth",
             safeVerificationCommands: safeVerificationCommands,
             safeNextCommands: safeNextCommands
+        )
+    }
+
+    private func diagnosticRow(
+        owner: SecondBrainOwnerRef,
+        title: String,
+        reasonCode: String,
+        matchedTerms: [String],
+        sourceRefs: [String]
+    ) -> SecondBrainSavedPlacePreferenceLinkDiagnosticRow {
+        SecondBrainSavedPlacePreferenceLinkDiagnosticRow(
+            owner: owner,
+            title: title,
+            reasonCode: reasonCode,
+            matchedTerms: orderedUnique(matchedTerms),
+            sourceRefs: orderedUnique(sourceRefs)
         )
     }
 
@@ -236,6 +367,36 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         return candidates.filter { term in
             normalized.contains(" \(term) ") || normalized.contains("-\(term)-") || normalized.contains("/\(term)")
         }
+    }
+
+    private func cuisineAliasMatch(
+        bookmarkTerms: [String],
+        preferenceTerms: [String]
+    ) -> (bookmarkTerm: String, bookmarkDisplay: String, preferenceDisplay: String)? {
+        let families: [(display: String, terms: Set<String>)] = [
+            ("Mexican", Set(["mexican", "taco", "tacos"])),
+            ("Italian", Set(["italian", "pizza"])),
+            ("Indian", Set(["indian", "curry"])),
+            ("BBQ", Set(["bbq"])),
+            ("Asian", Set(["asian", "thai", "japanese", "korean", "chinese", "vietnamese", "sushi", "ramen", "pho", "dim sum"])),
+        ]
+        for family in families {
+            guard let bookmarkTerm = bookmarkTerms.first(where: { family.terms.contains($0) }),
+                  preferenceTerms.contains(where: { family.terms.contains($0) }) else {
+                continue
+            }
+            return (
+                bookmarkTerm: bookmarkTerm,
+                bookmarkDisplay: displayName(for: bookmarkTerm),
+                preferenceDisplay: family.display
+            )
+        }
+        return nil
+    }
+
+    private func displayName(for term: String) -> String {
+        if term == "bbq" { return "BBQ" }
+        return term.capitalized
     }
 
     private func normalizedWords(_ text: String) -> Set<String> {
