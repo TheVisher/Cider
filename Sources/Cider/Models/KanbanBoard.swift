@@ -103,6 +103,23 @@ enum KanbanCardCommentKind: String, Codable, CaseIterable, Sendable {
     case qa
     case finalReport = "final_report"
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        let normalized = value.replacingOccurrences(of: "-", with: "_")
+        if normalized == "test_evidence" {
+            self = .test
+            return
+        }
+        guard let kind = Self(rawValue: normalized) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid Kanban card comment kind: \(value)."
+            )
+        }
+        self = kind
+    }
+
     var displayName: String {
         switch self {
         case .note: "Note"

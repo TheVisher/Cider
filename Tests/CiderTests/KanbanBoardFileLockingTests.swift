@@ -877,6 +877,53 @@ struct KanbanBoardFileLockingTests {
         #expect(decodeIssue["fileName"] as? String == "broken.yaml")
     }
 
+    @Test("board list and card inspect load legacy dash comment kinds")
+    func boardListAndCardInspectLoadLegacyDashCommentKinds() throws {
+        let cli = try #require(Self.ciderCLIURL())
+        let vault = try Self.makeTemporaryVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let boardsDirectory = vault.appendingPathComponent(".cider/boards", isDirectory: true)
+        try FileManager.default.createDirectory(at: boardsDirectory, withIntermediateDirectories: true)
+        try """
+        id: 2afee0
+        board: Cider
+        created: '2026-05-04'
+        columns:
+          - id: backlog
+            name: Backlog
+            cards:
+              - id: f706da
+                title: Legacy evidence card
+                comments:
+                  - id: final
+                    kind: final-report
+                    body: Final report persisted by an older agent.
+                    createdAt: '2026-07-07T03:40:38Z'
+                  - id: test
+                    kind: test-evidence
+                    body: Test evidence persisted by an older agent.
+                    createdAt: '2026-07-07T04:05:00Z'
+                created: '2026-07-06'
+        """.write(
+            to: boardsDirectory.appendingPathComponent("2afee0.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let listData = try Self.runCLIData(cli, vault: vault, args: ["board", "list", "--json"])
+        let listRoot = try #require(try JSONSerialization.jsonObject(with: listData) as? [String: Any])
+        let boards = try #require(listRoot["boards"] as? [[String: Any]])
+        #expect(boards.contains { $0["id"] as? String == "2afee0" && $0["name"] as? String == "Cider" })
+
+        let inspectData = try Self.runCLIData(cli, vault: vault, args: [
+            "board", "card", "inspect", "2afee0", "--card", "f706da", "--json",
+        ])
+        let inspectRoot = try #require(try JSONSerialization.jsonObject(with: inspectData) as? [String: Any])
+        #expect(inspectRoot["ok"] as? Bool == true)
+        let card = try #require(inspectRoot["card"] as? [String: Any])
+        #expect(card["id"] as? String == "f706da")
+    }
+
     @Test("board audit reports duplicate ids and parent cycles")
     func boardAuditReportsDuplicateIDsAndParentCycles() throws {
         let cli = try #require(Self.ciderCLIURL())
