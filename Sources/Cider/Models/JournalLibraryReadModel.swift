@@ -22,6 +22,10 @@ struct JournalLibraryEntry: Identifiable, Hashable {
     let date: Date
     let dateLabel: String
     let content: String
+
+    func displayContent(timestampFormat: JournalTimestampFormat) -> String {
+        JournalLibraryReadModel.formatJournalTimestamps(in: content, format: timestampFormat)
+    }
 }
 
 struct JournalNavigationNode: Identifiable, Hashable {
@@ -74,6 +78,52 @@ struct JournalLibraryReadModel: Hashable {
             entries: entries,
             navigation: Self.navigation(for: entries, calendar: calendar)
         )
+    }
+
+    static func formatJournalTimestamps(in content: String, format: JournalTimestampFormat) -> String {
+        guard format == .twelveHour else { return content }
+        return content
+            .components(separatedBy: .newlines)
+            .map { formatJournalTimestampLine($0) }
+            .joined(separator: "\n")
+    }
+
+    private static func formatJournalTimestampLine(_ line: String) -> String {
+        if let range = line.range(
+            of: #"^(\s*-\s)(\d{2}:\d{2})(\s-\s)"#,
+            options: .regularExpression
+        ) {
+            let match = String(line[range])
+            let time = String(match.drop { !$0.isNumber }.prefix(5))
+            guard let formatted = twelveHourDisplayTime(from: time) else { return line }
+            return line.replacingCharacters(in: range, with: match.replacingOccurrences(of: time, with: formatted))
+        }
+
+        if let range = line.range(
+            of: #"^(\s*##\s)(\d{2}:\d{2})(\b)"#,
+            options: .regularExpression
+        ) {
+            let match = String(line[range])
+            let time = String(match.drop { !$0.isNumber }.prefix(5))
+            guard let formatted = twelveHourDisplayTime(from: time) else { return line }
+            return line.replacingCharacters(in: range, with: match.replacingOccurrences(of: time, with: formatted))
+        }
+
+        return line
+    }
+
+    private static func twelveHourDisplayTime(from rawTime: String) -> String? {
+        let parts = rawTime.split(separator: ":")
+        guard parts.count == 2,
+              let hour = Int(parts[0]),
+              let minute = Int(parts[1]),
+              (0...23).contains(hour),
+              (0...59).contains(minute) else {
+            return nil
+        }
+        let suffix = hour < 12 ? "AM" : "PM"
+        let displayHour = hour % 12 == 0 ? 12 : hour % 12
+        return "\(displayHour):\(String(format: "%02d", minute)) \(suffix)"
     }
 
     private static func navigation(

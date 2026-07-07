@@ -63,8 +63,18 @@ struct JournalDetailContentView: View {
     let projection: JournalLibraryReadModel
     @Binding var selectedEntryID: String?
 
+    @AppStorage(CiderConfig.storageKey) private var configData: Data = Data()
+
     private var selectedEntry: JournalLibraryEntry? {
         projection.entries.first { $0.id == selectedEntryID } ?? projection.defaultSelection
+    }
+
+    private var journalTimestampFormat: JournalTimestampFormat {
+        guard !configData.isEmpty,
+              let config = try? JSONDecoder().decode(CiderConfig.self, from: configData) else {
+            return CiderConfig.default.journalTimestampFormat
+        }
+        return config.journalTimestampFormat
     }
 
     var body: some View {
@@ -82,7 +92,7 @@ struct JournalDetailContentView: View {
                 }
 
                 ScrollView {
-                    Text(selectedEntry.content.isEmpty ? "No journal content for this day." : selectedEntry.content)
+                    Text(selectedEntry.content.isEmpty ? "No journal content for this day." : selectedEntry.displayContent(timestampFormat: journalTimestampFormat))
                         .font(CiderFont.body)
                         .foregroundColor(CiderColors.primary)
                         .textSelection(.enabled)

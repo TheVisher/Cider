@@ -38,6 +38,9 @@ final class SettingsViewModel: ObservableObject {
     @Published var notesEditorTextSize: NotesEditorTextSize {
         didSet { saveConfig() }
     }
+    @Published var journalTimestampFormat: JournalTimestampFormat {
+        didSet { saveConfig() }
+    }
 
     // Bookmarks
     @Published var enableBookmarksHotkey: Bool {
@@ -157,6 +160,7 @@ final class SettingsViewModel: ObservableObject {
         self.activationSpeed = config.activationSpeed
         self.enableNotesHotkey = config.enableNotesHotkey
         self.notesEditorTextSize = config.notesEditorTextSize
+        self.journalTimestampFormat = config.journalTimestampFormat
         self.enableBookmarksHotkey = config.enableBookmarksHotkey
         self.enableBookmarksCaptureHotkey = config.enableBookmarksCaptureHotkey
         self.autoCaptureCopiedURLs = config.autoCaptureCopiedURLs
@@ -240,6 +244,7 @@ final class SettingsViewModel: ObservableObject {
         config.activationSpeed = activationSpeed
         config.enableNotesHotkey = enableNotesHotkey
         config.notesEditorTextSize = notesEditorTextSize
+        config.journalTimestampFormat = journalTimestampFormat
         config.enableBookmarksHotkey = enableBookmarksHotkey
         config.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey
         config.autoCaptureCopiedURLs = autoCaptureCopiedURLs

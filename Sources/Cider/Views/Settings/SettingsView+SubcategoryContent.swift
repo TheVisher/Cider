@@ -155,6 +155,14 @@ extension SettingsView {
                         options: NotesEditorTextSize.allCases,
                         label: { $0.displayName }
                     )
+
+                    SettingsPickerRow(
+                        title: "Journal timestamps",
+                        subtitle: "Choose how entry times appear in Journal readback",
+                        selection: $viewModel.journalTimestampFormat,
+                        options: JournalTimestampFormat.allCases,
+                        label: { $0.displayName }
+                    )
                 }
                 Spacer(minLength: 0)
             }

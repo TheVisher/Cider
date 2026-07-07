@@ -90,6 +90,20 @@ enum NotesEditorTextSize: String, Codable, CaseIterable {
     }
 }
 
+enum JournalTimestampFormat: String, Codable, CaseIterable {
+    case twelveHour
+    case twentyFourHour
+
+    var displayName: String {
+        switch self {
+        case .twelveHour:
+            "12-hour"
+        case .twentyFourHour:
+            "24-hour"
+        }
+    }
+}
+
 enum NoteEditorMode: String, Codable, CaseIterable {
     case rich
     case source
@@ -151,6 +165,7 @@ struct CiderConfig: Codable {
         case showCardDetailsOnHover
         case enableNotesHotkey
         case notesEditorTextSize
+        case journalTimestampFormat
         case noteEditorMode
         case enableBookmarksHotkey
         case enableBookmarksCaptureHotkey
@@ -229,6 +244,7 @@ struct CiderConfig: Codable {
     var showCardDetailsOnHover: Bool  // When card footers are hidden, reveal details on hover
     var enableNotesHotkey: Bool  // Enable Option+N to create note
     var notesEditorTextSize: NotesEditorTextSize  // Global display text size for note editor
+    var journalTimestampFormat: JournalTimestampFormat  // Presentation-only Journal entry timestamp format
     var noteEditorMode: NoteEditorMode  // Last-used note editor surface: rich text or Markdown source
     var enableBookmarksHotkey: Bool  // Enable Option+B to open bookmarks
     var enableBookmarksCaptureHotkey: Bool  // Enable Option+Shift+B to capture active browser tab
@@ -312,6 +328,7 @@ struct CiderConfig: Codable {
             showCardDetailsOnHover: true,
             enableNotesHotkey: true,
             notesEditorTextSize: .normal,
+            journalTimestampFormat: .twelveHour,
             noteEditorMode: .default,
             enableBookmarksHotkey: true,
             enableBookmarksCaptureHotkey: true,
@@ -413,6 +430,10 @@ struct CiderConfig: Codable {
             NotesEditorTextSize.self,
             forKey: .notesEditorTextSize
         ) ?? .normal
+        journalTimestampFormat = try container.decodeIfPresent(
+            JournalTimestampFormat.self,
+            forKey: .journalTimestampFormat
+        ) ?? .twelveHour
         noteEditorMode = try container.decodeIfPresent(NoteEditorMode.self, forKey: .noteEditorMode) ?? .default
         enableBookmarksHotkey = try container.decodeIfPresent(Bool.self, forKey: .enableBookmarksHotkey) ?? true
         enableBookmarksCaptureHotkey = try container.decodeIfPresent(
@@ -604,6 +625,7 @@ struct CiderConfig: Codable {
         showCardDetailsOnHover: Bool = true,
         enableNotesHotkey: Bool = true,
         notesEditorTextSize: NotesEditorTextSize = .normal,
+        journalTimestampFormat: JournalTimestampFormat = .twelveHour,
         noteEditorMode: NoteEditorMode = .default,
         enableBookmarksHotkey: Bool = true,
         enableBookmarksCaptureHotkey: Bool = true,
@@ -681,6 +703,7 @@ struct CiderConfig: Codable {
         self.showCardDetailsOnHover = showCardDetailsOnHover
         self.enableNotesHotkey = enableNotesHotkey
         self.notesEditorTextSize = notesEditorTextSize
+        self.journalTimestampFormat = journalTimestampFormat
         self.noteEditorMode = noteEditorMode
         self.enableBookmarksHotkey = enableBookmarksHotkey
         self.enableBookmarksCaptureHotkey = enableBookmarksCaptureHotkey

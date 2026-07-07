@@ -89,6 +89,37 @@ struct JournalLibraryReadModelTests {
         #expect(Set(dayNodes.compactMap(\.entryID)) == Set(projection.entries.map(\.id)))
     }
 
+    @Test("journal display timestamps can render as twelve hour without mutating source content")
+    func journalDisplayTimestampsCanRenderAsTwelveHourWithoutMutatingSourceContent() throws {
+        let content = """
+        # Journal 07-04-2026
+
+        ## Entries
+        - 00:05 - After midnight thought
+        - 12:30 - Lunch reflection
+        - 19:27 - Evening journal addendum
+
+        ## 23:59 late heading
+        Final note
+        """
+        let note = Note(
+            title: "Journal 07-04-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 07-04-2026.md"
+        )
+
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+        let twelveHour = entry.displayContent(timestampFormat: .twelveHour)
+        let twentyFourHour = entry.displayContent(timestampFormat: .twentyFourHour)
+
+        #expect(twelveHour.contains("- 12:05 AM - After midnight thought"))
+        #expect(twelveHour.contains("- 12:30 PM - Lunch reflection"))
+        #expect(twelveHour.contains("- 7:27 PM - Evening journal addendum"))
+        #expect(twelveHour.contains("## 11:59 PM late heading"))
+        #expect(twentyFourHour == content)
+        #expect(entry.content == content)
+    }
+
     @Test("journal migration preview classifies canonical legacy personal excluded and ambiguous notes")
     func migrationPreviewClassifiesKnownJournalExamples() throws {
         let notes = [

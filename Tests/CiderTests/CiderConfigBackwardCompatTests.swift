@@ -21,6 +21,7 @@ struct CiderConfigBackwardCompatTests {
         #expect(config.showCardDetailsOnHover == true)
         #expect(config.enableNotesHotkey == true)
         #expect(config.notesEditorTextSize == .normal)
+        #expect(config.journalTimestampFormat == .twelveHour)
         #expect(config.noteEditorMode == .default)
         #expect(config.enableBookmarksHotkey == true)
         #expect(config.enableBookmarksCaptureHotkey == true)
@@ -68,6 +69,7 @@ struct CiderConfigBackwardCompatTests {
         config.showMenuBarIcon = false
         config.textSize = .large
         config.activationMode = .singleTap
+        config.journalTimestampFormat = .twentyFourHour
         config.trashRetentionDays = 7
         config.enableSoundEffects = true
         config.syncEnabled = true
@@ -79,6 +81,7 @@ struct CiderConfigBackwardCompatTests {
         #expect(decoded.showMenuBarIcon == false)
         #expect(decoded.textSize == .large)
         #expect(decoded.activationMode == .singleTap)
+        #expect(decoded.journalTimestampFormat == .twentyFourHour)
         #expect(decoded.trashRetentionDays == 7)
         #expect(decoded.enableSoundEffects == true)
         #expect(decoded.syncEnabled == true)
