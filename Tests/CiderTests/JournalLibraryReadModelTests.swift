@@ -101,6 +101,18 @@ struct JournalLibraryReadModelTests {
             Note(title: "Cider journal IA — dashboard module plus Notes filter or Journal sidebar", content: "Product IA notes."),
             Note(title: "Cider journal storage design — note kind, attachments, transcript, dashboard filter", content: "Dev storage notes."),
             Note(title: "CID-wide feature validity audit loop batch 12", content: "Mentions journal in product QA.", relativePath: "Projects/Cider/QA/CID-wide feature validity audit loop batch 12.md"),
+            Note(
+                title: "North Star Backend Capability Audit + Second-Brain Graph Push",
+                content: """
+                Created: 2026-06-14 12:45 PDT
+                Operator: Cody implementation lane, Cider/Hermes verification lane
+                Recent related card: CID-506 - item backfill-journals landed in Testing.
+
+                Visher wants a long-running backend initiative that audits and improves Cider toward the North Star: a local-first second brain where journals, captures, bookmarks, files, reminders, people, places, projects, and agent conversations become reviewable, linked, provenance-preserving memory objects.
+                The backend should become capable enough that app/voice/chat surfaces are thin doors into shared truth, not one-off feature piles.
+                """,
+                relativePath: "Inbox/Notes/North Star Backend Capability Audit + Second-Brain Graph Push.md"
+            ),
             Note(title: "Research journal taxonomy", content: "Could be personal or product."),
         ]
 
@@ -116,6 +128,7 @@ struct JournalLibraryReadModelTests {
         #expect(rowsByTitle["Cider journal IA — dashboard module plus Notes filter or Journal sidebar"]?.classification == .excludedProductOrDev)
         #expect(rowsByTitle["Cider journal storage design — note kind, attachments, transcript, dashboard filter"]?.classification == .excludedProductOrDev)
         #expect(rowsByTitle["CID-wide feature validity audit loop batch 12"]?.classification == .excludedProductOrDev)
+        #expect(rowsByTitle["North Star Backend Capability Audit + Second-Brain Graph Push"]?.classification == .excludedProductOrDev)
         #expect(rowsByTitle["Research journal taxonomy"]?.classification == .ambiguous)
         #expect(rowsByTitle["Morning voice journal — 2026-05-28"]?.proposedCanonicalTitle == "Journal 05-28-2026")
         #expect(rowsByTitle["Driving voice journal — 2026-05-29 midday"]?.preservedCaptureHints.contains("driving") == true)

@@ -58,7 +58,7 @@ struct JournalMigrationPreviewService {
 
         guard combined.contains("journal") else { return nil }
 
-        if isProductOrDevelopmentJournalMention(note: note, lowerTitle: lowerTitle) {
+        if isProductOrDevelopmentJournalMention(note: note, lowerTitle: lowerTitle, lowerBody: lowerBody) {
             return JournalMigrationPreviewRow(
                 note: note,
                 classification: .excludedProductOrDev,
@@ -92,12 +92,18 @@ struct JournalMigrationPreviewService {
         )
     }
 
-    private func isProductOrDevelopmentJournalMention(note: Note, lowerTitle: String) -> Bool {
+    private func isProductOrDevelopmentJournalMention(note: Note, lowerTitle: String, lowerBody: String) -> Bool {
         if note.relativePath.localizedLowercase.hasPrefix("projects/cider/") { return true }
         if note.projectID?.localizedCaseInsensitiveCompare("Cider") == .orderedSame { return true }
         if lowerTitle.hasPrefix("cider journal") { return true }
+        let combined = "\(lowerTitle)\n\(lowerBody)"
         let productTerms = ["dashboard", "storage design", "note kind", "attachments", "transcript", "sidebar", "filter", " ia ", "product", "dev"]
-        return productTerms.contains { lowerTitle.contains($0) }
+        if productTerms.contains(where: { lowerTitle.contains($0) }) { return true }
+
+        let ciderContextTerms = ["cider", "hermes", "kanban", "cid-", "cody", "cider-cli"]
+        let productWorkTerms = ["north star", "backend", "second-brain", "second brain", "capability audit", "audit", "implementation lane", "verification lane", "product", "development", "review queue", "graph", "memory candidates"]
+        return ciderContextTerms.contains { combined.contains($0) }
+            && productWorkTerms.contains { combined.contains($0) }
     }
 
     private func isPersonalJournalCandidate(title: String, body: String, hints: [String], isoDate: String?) -> Bool {
