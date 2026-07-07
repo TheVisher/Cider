@@ -32,6 +32,21 @@ struct JournalMigrationPreview: Hashable {
     var countsByClassification: [JournalMigrationPreviewClassification: Int] {
         Dictionary(grouping: rows, by: \.classification).mapValues(\.count)
     }
+
+    var journalLibraryEligibleRowCount: Int {
+        rows.filter(\.isJournalLibraryEligible).count
+    }
+}
+
+extension JournalMigrationPreviewRow {
+    var isJournalLibraryEligible: Bool {
+        switch classification {
+        case .canonical, .legacyExact, .safePersonalCandidate:
+            return proposedISODate != nil
+        case .excludedProductOrDev, .ambiguous:
+            return false
+        }
+    }
 }
 
 struct JournalMigrationPreviewService {

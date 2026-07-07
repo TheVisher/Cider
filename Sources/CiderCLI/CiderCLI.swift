@@ -24096,6 +24096,7 @@ struct CiderCLI {
         }
 
         print("Journal migration preview: \(preview.rows.count) journal-like note(s), no live mutation")
+        print("  journalLibraryEligible: \(preview.journalLibraryEligibleRowCount)")
         for key in JournalMigrationPreviewClassification.allReportCases {
             let count = preview.countsByClassification[key] ?? 0
             print("  \(key.rawValue): \(count)")
@@ -24114,6 +24115,7 @@ struct CiderCLI {
             "readOnly": true,
             "changed": false,
             "mutatesLiveNotes": preview.mutatesLiveNotes,
+            "journalLibraryEligibleCount": preview.journalLibraryEligibleRowCount,
             "counts": counts,
             "rows": preview.rows.map(journalMigrationPreviewRowToDict),
             "safeNextCommands": [
@@ -24131,6 +24133,7 @@ struct CiderCLI {
             ],
             "classification": row.classification.rawValue,
             "reason": row.reason,
+            "journalLibraryEligible": row.isJournalLibraryEligible,
             "proposedCanonicalTitle": row.proposedCanonicalTitle as Any,
             "proposedISODate": row.proposedISODate as Any,
             "preservedCaptureHints": row.preservedCaptureHints,

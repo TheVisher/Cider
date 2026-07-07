@@ -6262,6 +6262,65 @@ struct CiderCLIAgentSafetyTests {
         #expect(try generatedSecondBrainRowCounts(vault: vault) == beforeCounts)
     }
 
+    @Test("item journal migration preview reports Journal card eligibility without mutation")
+    func itemJournalMigrationPreviewReportsJournalCardEligibilityWithoutMutation() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-journal-preview-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        _ = try createNote(
+            title: "Journal 05-30-2026",
+            content: "Already canonical.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Driving voice journal — 2026-05-29 midday",
+            content: "Drove home and talked through the day.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Cider journal IA — dashboard module plus Notes filter or Journal sidebar",
+            content: "Product IA notes should not become personal Journal entries.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Research journal taxonomy",
+            content: "Could be personal or product.",
+            vault: vault
+        )
+        let beforeCounts = try generatedSecondBrainRowCounts(vault: vault)
+
+        let preview = try assertStrictProcessJSON(
+            runCLI(args: ["item", "journal-migration-preview", "--json"], vault: vault),
+            command: "item.journal-migration-preview"
+        )
+
+        #expect(preview["readOnly"] as? Bool == true)
+        #expect(preview["changed"] as? Bool == false)
+        #expect(preview["mutatesLiveNotes"] as? Bool == false)
+        #expect(preview["journalLibraryEligibleCount"] as? Int == 2)
+        let counts = try #require(preview["counts"] as? [String: Any])
+        #expect(counts["canonical"] as? Int == 1)
+        #expect(counts["safePersonalCandidate"] as? Int == 1)
+        #expect(counts["excludedProductOrDev"] as? Int == 1)
+        #expect(counts["ambiguous"] as? Int == 1)
+        let rows = try #require(preview["rows"] as? [[String: Any]])
+        let rowsByTitle = Dictionary(uniqueKeysWithValues: rows.compactMap { row -> (String, [String: Any])? in
+            guard let note = row["note"] as? [String: Any],
+                  let title = note["title"] as? String else {
+                return nil
+            }
+            return (title, row)
+        })
+        #expect(rowsByTitle["Journal 05-30-2026"]?["journalLibraryEligible"] as? Bool == true)
+        #expect(rowsByTitle["Driving voice journal — 2026-05-29 midday"]?["journalLibraryEligible"] as? Bool == true)
+        #expect(rowsByTitle["Driving voice journal — 2026-05-29 midday"]?["proposedCanonicalTitle"] as? String == "Journal 05-29-2026")
+        #expect(rowsByTitle["Cider journal IA — dashboard module plus Notes filter or Journal sidebar"]?["journalLibraryEligible"] as? Bool == false)
+        #expect(rowsByTitle["Research journal taxonomy"]?["journalLibraryEligible"] as? Bool == false)
+        #expect(try generatedSecondBrainRowCounts(vault: vault) == beforeCounts)
+    }
+
     @Test("adjacent item migration help exits before vault access")
     func adjacentItemMigrationHelpExitsBeforeVaultAccess() throws {
         let commands: [[String]] = [

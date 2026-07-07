@@ -71,17 +71,19 @@ struct JournalLibraryReadModel: Hashable {
     }
 
     static func build(from notes: [Note], calendar: Calendar = Self.calendar) -> JournalLibraryReadModel {
-        let entries = notes.compactMap { note -> JournalLibraryEntry? in
-            guard let dateLabel = note.dailyJournalDateLabel,
+        let preview = JournalMigrationPreviewService().preview(notes: notes)
+        let entries = preview.rows.compactMap { row -> JournalLibraryEntry? in
+            guard row.isJournalLibraryEligible,
+                  let dateLabel = row.proposedISODate,
                   let date = Self.dayFormatter.date(from: dateLabel) else {
                 return nil
             }
             return JournalLibraryEntry(
-                id: "journal-entry-\(note.id.uuidString)",
-                note: note,
+                id: "journal-entry-\(row.note.id.uuidString)",
+                note: row.note,
                 date: date,
                 dateLabel: dateLabel,
-                content: note.resolvedContent
+                content: row.note.resolvedContent
             )
         }
         .sorted { lhs, rhs in

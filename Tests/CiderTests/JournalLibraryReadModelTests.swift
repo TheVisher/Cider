@@ -62,6 +62,42 @@ struct JournalLibraryReadModelTests {
         #expect(projection.container.entryCount == 2)
     }
 
+    @Test("journal library projection previews old personal journal captures without importing ambiguous notes")
+    func projectionPreviewsOldPersonalJournalCapturesWithoutImportingAmbiguousNotes() throws {
+        let oldPersonalCapture = Note(
+            title: "Driving voice journal — 2026-05-29 midday",
+            content: "Drove home and talked through the day.",
+            createdAt: Self.date("2026-05-29T19:30:00Z"),
+            modifiedAt: Self.date("2026-05-29T20:00:00Z"),
+            relativePath: "Inbox/Files/cider-driving-gas-station-desk-20260529.md"
+        )
+        let canonical = Note(
+            title: "Journal 05-30-2026",
+            content: "# Journal 05-30-2026\n\n## 08:15\nCanonical source.",
+            createdAt: Self.date("2026-05-30T08:15:00Z"),
+            modifiedAt: Self.date("2026-05-30T09:00:00Z"),
+            relativePath: "Inbox/Notes/Journal 05-30-2026.md"
+        )
+        let productDesign = Note(
+            title: "Cider journal IA — dashboard module plus Notes filter or Journal sidebar",
+            content: "Product IA notes should not become personal Journal entries.",
+            modifiedAt: Self.date("2026-05-31T09:00:00Z")
+        )
+        let ambiguous = Note(
+            title: "Research journal taxonomy",
+            content: "Could be personal or product.",
+            modifiedAt: Self.date("2026-05-31T10:00:00Z")
+        )
+
+        let projection = JournalLibraryReadModel.build(from: [ambiguous, productDesign, oldPersonalCapture, canonical])
+
+        #expect(projection.entries.map(\.note.id) == [canonical.id, oldPersonalCapture.id])
+        #expect(projection.entries.map(\.dateLabel) == ["2026-05-30", "2026-05-29"])
+        #expect(projection.entries.last?.content == oldPersonalCapture.content)
+        #expect(projection.entries.last?.note.title == oldPersonalCapture.title)
+        #expect(projection.container.entryCount == 2)
+    }
+
     @Test("journal navigation tree groups entries by year month week and day")
     func navigationTreeGroupsEntriesByCalendarLevels() throws {
         let first = Note(
