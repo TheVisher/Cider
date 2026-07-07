@@ -38,6 +38,8 @@ struct SecondBrainSavedPlacePreferenceLinkDiagnostics: Codable, Equatable {
     var candidateCount: Int
     var skippedBookmarkSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
     var noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+    var evidenceSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+    var evidenceRejectedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
 }
 
 struct SecondBrainSavedPlacePreferenceLinkPreviewReport: Codable, Equatable {
@@ -68,8 +70,15 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
     }
 
     private struct PreferenceEvidence {
-        var output: SecondBrainEnrichmentOutput
+        var id: String
+        var owner: SecondBrainOwnerRef
+        var title: String
+        var value: String
+        var evidence: String
+        var confidence: Double
         var sourceEvidenceRef: String?
+        var sourceRefs: [String]
+        var terms: [String]
     }
 
     private struct SavedPlaceClassification {
@@ -94,20 +103,23 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                     preferenceEvidenceCount: 0,
                     candidateCount: 0,
                     skippedBookmarkSamples: [],
-                    noMatchSamples: []
+                    noMatchSamples: [],
+                    evidenceSamples: [],
+                    evidenceRejectedSamples: []
                 )
             )
         }
 
         let bookmarkScan = try savedPlaceBookmarks()
-        let preferences = try journalFoodPreferences()
+        let preferenceScan = try journalFoodPreferences()
+        let preferences = preferenceScan.evidence
         var candidates: [SecondBrainSavedPlacePreferenceLinkCandidate] = []
         var noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
 
         for bookmark in bookmarkScan.bookmarks {
             var matchedBookmark = false
             for preference in preferences {
-                guard let match = match(bookmark: bookmark, preference: preference.output) else { continue }
+                guard let match = match(bookmark: bookmark, preference: preference) else { continue }
                 candidates.append(candidate(bookmark: bookmark, preference: preference, match: match))
                 matchedBookmark = true
             }
@@ -137,7 +149,9 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 preferenceEvidenceCount: preferences.count,
                 candidateCount: boundedCandidates.count,
                 skippedBookmarkSamples: bookmarkScan.skippedSamples,
-                noMatchSamples: noMatchSamples
+                noMatchSamples: noMatchSamples,
+                evidenceSamples: preferenceScan.evidenceSamples,
+                evidenceRejectedSamples: preferenceScan.rejectedSamples
             )
         )
     }
@@ -161,7 +175,9 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         preferenceEvidenceCount: Int,
         candidateCount: Int,
         skippedBookmarkSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow],
-        noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+        noMatchSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow],
+        evidenceSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow],
+        evidenceRejectedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
     ) -> SecondBrainSavedPlacePreferenceLinkDiagnostics {
         SecondBrainSavedPlacePreferenceLinkDiagnostics(
             inspectedBookmarkCount: inspectedBookmarkCount,
@@ -169,7 +185,9 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             preferenceEvidenceCount: preferenceEvidenceCount,
             candidateCount: candidateCount,
             skippedBookmarkSamples: Array(skippedBookmarkSamples.prefix(20)),
-            noMatchSamples: Array(noMatchSamples.prefix(20))
+            noMatchSamples: Array(noMatchSamples.prefix(20)),
+            evidenceSamples: Array(evidenceSamples.prefix(20)),
+            evidenceRejectedSamples: Array(evidenceRejectedSamples.prefix(20))
         )
     }
 
@@ -234,21 +252,134 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         )
     }
 
-    private func journalFoodPreferences() throws -> [PreferenceEvidence] {
+    private struct PreferenceEvidenceScan {
+        var evidence: [PreferenceEvidence]
+        var evidenceSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+        var rejectedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow]
+    }
+
+    private func journalFoodPreferences() throws -> PreferenceEvidenceScan {
         let outputs = try SecondBrainEnrichmentOutputService(database: database).outputs(
             kind: SecondBrainGraphCandidateContract.outputKind,
             reviewStates: nil,
             limit: nil
         )
-        return outputs.compactMap { output in
-            guard output.metadata[SecondBrainGraphCandidateContract.MetadataKey.sourceKind] == "journal" else { return nil }
+        var evidence: [PreferenceEvidence] = []
+        var evidenceSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
+        var rejectedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
+
+        for output in outputs {
+            guard output.metadata[SecondBrainGraphCandidateContract.MetadataKey.sourceKind] == "journal" else { continue }
             let objectTypes = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses])
             let relations = DatabaseHelpers.decodeStringArray(output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses])
-            guard objectTypes.contains("food") || objectTypes.contains("restaurant") || objectTypes.contains("place") else { return nil }
-            guard relations.contains("likes_food") || relations.contains("likes") else { return nil }
+            guard objectTypes.contains("food") || objectTypes.contains("restaurant") || objectTypes.contains("place") else { continue }
+            guard relations.contains("likes_food") || relations.contains("likes") else { continue }
             let evidenceRef = output.metadata["source_evidence_ref"]
-            return PreferenceEvidence(output: output, sourceEvidenceRef: evidenceRef)
+            let terms = cuisineTerms(in: "\(output.value) \(output.evidence)")
+            evidence.append(
+                PreferenceEvidence(
+                    id: output.id,
+                    owner: output.owner,
+                    title: "Journal preference evidence",
+                    value: output.value,
+                    evidence: output.evidence,
+                    confidence: output.confidence ?? 0.78,
+                    sourceEvidenceRef: evidenceRef,
+                    sourceRefs: [output.owner.canonicalRef, "graph_candidate:\(output.id)", evidenceRef].compactMap { $0 },
+                    terms: terms
+                )
+            )
+            evidenceSamples.append(
+                diagnosticRow(
+                    owner: output.owner,
+                    title: "Journal preference evidence",
+                    reasonCode: "usable_graph_food_preference_evidence",
+                    matchedTerms: terms,
+                    sourceRefs: [output.owner.canonicalRef, "graph_candidate:\(output.id)", evidenceRef].compactMap { $0 }
+                )
+            )
         }
+
+        let noteScan = try noteFoodPreferences()
+        evidence.append(contentsOf: noteScan.evidence)
+        evidenceSamples.append(contentsOf: noteScan.evidenceSamples)
+        rejectedSamples.append(contentsOf: noteScan.rejectedSamples)
+        return PreferenceEvidenceScan(
+            evidence: evidence,
+            evidenceSamples: evidenceSamples,
+            rejectedSamples: rejectedSamples
+        )
+    }
+
+    private func noteFoodPreferences() throws -> PreferenceEvidenceScan {
+        let stmt = try database.prepare("""
+            SELECT i.id, i.title, n.content
+            FROM items i
+            JOIN notes n ON n.item_id = i.id
+            WHERE i.type = 'note'
+            ORDER BY i.created_at DESC, i.title COLLATE NOCASE ASC;
+            """)
+
+        var evidence: [PreferenceEvidence] = []
+        var evidenceSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
+        var rejectedSamples: [SecondBrainSavedPlacePreferenceLinkDiagnosticRow] = []
+        while try stmt.step() {
+            let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: stmt.string(at: 0))
+            let title = stmt.string(at: 1)
+            let content = stmt.optionalString(at: 2) ?? ""
+            for sentence in foodEvidenceSentences(in: content) {
+                let terms = cuisineTerms(in: sentence)
+                guard !terms.isEmpty else { continue }
+                if isNoisyOrNegativeFoodPreferenceSentence(sentence) {
+                    rejectedSamples.append(
+                        diagnosticRow(
+                            owner: owner,
+                            title: title,
+                            reasonCode: "negative_or_non_preference_food_mention",
+                            matchedTerms: terms,
+                            sourceRefs: [owner.canonicalRef]
+                        )
+                    )
+                    continue
+                }
+                guard hasFoodPreferenceCue(sentence) else {
+                    rejectedSamples.append(
+                        diagnosticRow(
+                            owner: owner,
+                            title: title,
+                            reasonCode: "food_mention_without_preference_cue",
+                            matchedTerms: terms,
+                            sourceRefs: [owner.canonicalRef]
+                        )
+                    )
+                    continue
+                }
+                let id = "note_food_preference:\(owner.ownerID):\(terms.joined(separator: "-"))"
+                evidence.append(
+                    PreferenceEvidence(
+                        id: id,
+                        owner: owner,
+                        title: title,
+                        value: displayPreferenceValue(terms: terms),
+                        evidence: sentence,
+                        confidence: 0.76,
+                        sourceEvidenceRef: nil,
+                        sourceRefs: [owner.canonicalRef],
+                        terms: terms
+                    )
+                )
+                evidenceSamples.append(
+                    diagnosticRow(
+                        owner: owner,
+                        title: title,
+                        reasonCode: "usable_food_preference_evidence",
+                        matchedTerms: terms,
+                        sourceRefs: [owner.canonicalRef]
+                    )
+                )
+            }
+        }
+        return PreferenceEvidenceScan(evidence: evidence, evidenceSamples: evidenceSamples, rejectedSamples: rejectedSamples)
     }
 
     private struct Match {
@@ -258,15 +389,15 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         var reasonCodes: [String]
     }
 
-    private func match(bookmark: SavedBookmark, preference: SecondBrainEnrichmentOutput) -> Match? {
+    private func match(bookmark: SavedBookmark, preference: PreferenceEvidence) -> Match? {
         let preferenceText = normalizedWords(preference.value)
-        let preferenceTerms = cuisineTerms(in: preference.value)
+        let preferenceTerms = orderedUnique(preference.terms + cuisineTerms(in: preference.value))
         if preferenceTerms.contains("asian") {
             let asianTerms = Set(["asian", "thai", "japanese", "korean", "chinese", "vietnamese", "sushi", "ramen", "pho", "dim sum"])
             if let term = bookmark.placeTerms.first(where: { asianTerms.contains($0) }) {
                 return Match(
                     term: term,
-                    confidence: min(0.96, max(bookmark.bookmarkConfidence, preference.confidence ?? 0.78) - 0.05),
+                    confidence: min(0.96, max(bookmark.bookmarkConfidence, preference.confidence) - 0.05),
                     reason: "Saved restaurant looks \(term.capitalized) and journal evidence says the user likes Asian food.",
                     reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "cuisine_alias_family_match", "read_only_preview"]
                 )
@@ -276,7 +407,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         if let aliasMatch = cuisineAliasMatch(bookmarkTerms: bookmark.placeTerms, preferenceTerms: preferenceTerms) {
             return Match(
                 term: aliasMatch.bookmarkTerm,
-                confidence: min(0.93, max(bookmark.bookmarkConfidence, preference.confidence ?? 0.76) - 0.06),
+                confidence: min(0.93, max(bookmark.bookmarkConfidence, preference.confidence) - 0.06),
                 reason: "Saved restaurant looks \(aliasMatch.bookmarkDisplay) and journal evidence says the user likes \(aliasMatch.preferenceDisplay) food.",
                 reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "cuisine_alias_family_match", "read_only_preview"]
             )
@@ -285,7 +416,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         if let term = bookmark.placeTerms.first(where: { preferenceText.contains($0) || preferenceTerms.contains($0) }) {
             return Match(
                 term: term,
-                confidence: min(0.92, max(bookmark.bookmarkConfidence, preference.confidence ?? 0.76) - 0.08),
+                confidence: min(0.92, max(bookmark.bookmarkConfidence, preference.confidence) - 0.08),
                 reason: "Saved restaurant and journal preference share '\(term)'.",
                 reasonCodes: ["saved_restaurant_matches_food_preference", "source_backed_journal_preference", "read_only_preview"]
             )
@@ -298,26 +429,21 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         preference: PreferenceEvidence,
         match: Match
     ) -> SecondBrainSavedPlacePreferenceLinkCandidate {
-        let output = preference.output
-        let evidenceOwner = output.owner
         let sourceRefs = orderedUnique([
             bookmark.owner.canonicalRef,
-            evidenceOwner.canonicalRef,
-            "graph_candidate:\(output.id)",
+            preference.owner.canonicalRef,
             preference.sourceEvidenceRef,
-        ].compactMap { $0 })
+        ].compactMap { $0 } + preference.sourceRefs)
         let safeVerificationCommands = [
             "cider-cli item context bookmark \(bookmark.owner.ownerID) --json",
-            "cider-cli item context \(evidenceOwner.ownerType) \(evidenceOwner.ownerID) --json",
-            "cider-cli item graph-candidate \(output.id) --json",
-        ]
+            "cider-cli item context \(preference.owner.ownerType) \(preference.owner.ownerID) --json",
+        ] + graphCandidateCommand(for: preference)
         let safeNextCommands = [
             "cider-cli item context bookmark \(bookmark.owner.ownerID) --json",
-            "cider-cli item context \(evidenceOwner.ownerType) \(evidenceOwner.ownerID) --json",
-            "cider-cli item graph-candidate \(output.id) --json",
-        ]
+            "cider-cli item context \(preference.owner.ownerType) \(preference.owner.ownerID) --json",
+        ] + graphCandidateCommand(for: preference)
         return SecondBrainSavedPlacePreferenceLinkCandidate(
-            id: "saved_place_preference:\(bookmark.owner.ownerID):\(output.id)",
+            id: "saved_place_preference:\(bookmark.owner.ownerID):\(preference.id)",
             savedItem: SecondBrainSavedPlacePreferenceLinkPreviewSource(
                 owner: bookmark.owner,
                 title: bookmark.title,
@@ -326,14 +452,14 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
                 relativePath: bookmark.relativePath
             ),
             evidenceItem: SecondBrainSavedPlacePreferenceLinkPreviewSource(
-                owner: evidenceOwner,
-                title: "Journal preference evidence",
-                snippet: output.evidence,
+                owner: preference.owner,
+                title: preference.title,
+                snippet: preference.evidence,
                 url: nil,
                 relativePath: nil,
                 sourceEvidenceRef: preference.sourceEvidenceRef
             ),
-            preferenceValue: output.value,
+            preferenceValue: preference.value,
             confidence: match.confidence,
             reason: match.reason,
             reasonCodes: match.reasonCodes,
@@ -342,6 +468,13 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             safeVerificationCommands: safeVerificationCommands,
             safeNextCommands: safeNextCommands
         )
+    }
+
+    private func graphCandidateCommand(for preference: PreferenceEvidence) -> [String] {
+        preference.sourceRefs.compactMap { ref in
+            guard ref.hasPrefix("graph_candidate:") else { return nil }
+            return "cider-cli item graph-candidate \(String(ref.dropFirst("graph_candidate:".count))) --json"
+        }
     }
 
     private func diagnosticRow(
@@ -365,7 +498,8 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         let candidates = [
             "asian", "thai", "japanese", "korean", "chinese", "vietnamese",
             "sushi", "ramen", "pho", "dim sum", "udon", "taco", "tacos", "mexican",
-            "italian", "pizza", "indian", "curry", "burger", "bbq"
+            "italian", "pizza", "indian", "curry", "burger", "bbq", "chicken",
+            "sandwich", "sandwiches", "sando", "festival"
         ]
         var terms = candidates.filter { term in
             normalized.contains(" \(term) ")
@@ -378,6 +512,7 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
         }
         if normalized.contains(" sando ") || normalized.contains("-sando") || normalized.contains("/sando") {
             terms.append("japanese")
+            terms.append("sandwich")
         }
         return orderedUnique(terms)
     }
@@ -470,7 +605,11 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
             ("Italian", Set(["italian", "pizza"])),
             ("Indian", Set(["indian", "curry"])),
             ("BBQ", Set(["bbq"])),
-            ("Asian", Set(["asian", "thai", "japanese", "korean", "chinese", "vietnamese", "sushi", "ramen", "pho", "dim sum"])),
+            ("Korean", Set(["korean", "bbq", "chicken"])),
+            ("Japanese", Set(["japanese", "sushi", "ramen", "udon", "sando"])),
+            ("Sandwich", Set(["sandwich", "sandwiches", "sando"])),
+            ("Food festival", Set(["festival"])),
+            ("Asian", Set(["asian", "thai", "japanese", "korean", "chinese", "vietnamese", "sushi", "ramen", "pho", "dim sum", "udon"])),
         ]
         for family in families {
             guard let bookmarkTerm = bookmarkTerms.first(where: { family.terms.contains($0) }),
@@ -488,7 +627,42 @@ final class SecondBrainSavedPlacePreferenceLinkPreviewService {
 
     private func displayName(for term: String) -> String {
         if term == "bbq" { return "BBQ" }
+        if term == "sando" { return "Sando" }
         return term.capitalized
+    }
+
+    private func foodEvidenceSentences(in text: String) -> [String] {
+        text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func hasFoodPreferenceCue(_ sentence: String) -> Bool {
+        let normalized = " \(sentence.lowercased()) "
+        return containsAny(
+            normalized,
+            [
+                " i like ", " i love ", " we like ", " we love ", " favorite", " favourite",
+                " craving ", " crave ", " want to try ", " wanted to try ", " wants to try ", " wanting to try ",
+                " prefer ", " preference", " into ", " go-to", " dinner win"
+            ]
+        )
+    }
+
+    private func isNoisyOrNegativeFoodPreferenceSentence(_ sentence: String) -> Bool {
+        containsAny(
+            sentence.lowercased(),
+            [
+                "do not save", "don't save", "not a preference", "not into", "dislike",
+                "recipe", "funny", "meme", "clip", "reaction", "product", "bowl set",
+                "trailer", "movie", "game"
+            ]
+        )
+    }
+
+    private func displayPreferenceValue(terms: [String]) -> String {
+        let preferred = terms.first(where: { !["chicken", "festival"].contains($0) }) ?? terms.first ?? "food"
+        return "\(displayName(for: preferred)) food"
     }
 
     private func normalizedWords(_ text: String) -> Set<String> {

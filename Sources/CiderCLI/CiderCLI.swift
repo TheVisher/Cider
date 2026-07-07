@@ -27287,6 +27287,8 @@ struct CiderCLI {
             "candidateCount": diagnostics.candidateCount,
             "skippedBookmarkSamples": diagnostics.skippedBookmarkSamples.map(savedPlacePreferenceLinkDiagnosticRowToDict),
             "noMatchSamples": diagnostics.noMatchSamples.map(savedPlacePreferenceLinkDiagnosticRowToDict),
+            "evidenceSamples": diagnostics.evidenceSamples.map(savedPlacePreferenceLinkDiagnosticRowToDict),
+            "evidenceRejectedSamples": diagnostics.evidenceRejectedSamples.map(savedPlacePreferenceLinkDiagnosticRowToDict),
         ]
     }
 

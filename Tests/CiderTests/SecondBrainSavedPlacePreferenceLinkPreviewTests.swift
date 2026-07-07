@@ -321,7 +321,85 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
         })
     }
 
-    private func insertNoteItem(owner: SecondBrainOwnerRef, title: String, into db: CiderDatabase) throws {
+    @Test("preview discovers source-backed food preference note language with false-positive guards")
+    func previewDiscoversFoodPreferenceNoteLanguageWithFalsePositiveGuards() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let ramenNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let koreanNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let negativeNote = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let ramenPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        let koreanPlace = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
+        try insertNoteItem(
+            owner: ramenNote,
+            title: "Daily Journal - 2026-07-04",
+            content: "I have been craving ramen and Japanese food lately.",
+            into: db
+        )
+        try insertNoteItem(
+            owner: koreanNote,
+            title: "Daily Journal - 2026-07-05",
+            content: "Korean BBQ chicken is one of my favorite quick dinner ideas.",
+            into: db
+        )
+        try insertNoteItem(
+            owner: negativeNote,
+            title: "Recipe Clip Notes",
+            content: "Funny ramen recipe clip. Do not save this as a preference; it was just a meme.",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: ramenPlace,
+            title: "Botan Ramen & Bar",
+            url: "https://example.com/saved/botan-ramen-bar",
+            into: db
+        )
+        try insertBookmarkItem(
+            owner: koreanPlace,
+            title: "Bb.Q Chicken Lynnwood",
+            url: "https://example.com/saved/bbq-chicken-lynnwood",
+            into: db
+        )
+
+        let before = try mutationCounts(in: db)
+        let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: db)
+            .preview(limit: 10)
+        let after = try mutationCounts(in: db)
+
+        #expect(report.readOnly == true)
+        #expect(report.changed == false)
+        #expect(report.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(after == before)
+        #expect(report.diagnostics.preferenceEvidenceCount == 2)
+        #expect(report.candidates.contains { $0.savedItem.owner == ramenPlace && $0.evidenceItem.owner == ramenNote })
+        #expect(report.candidates.contains { $0.savedItem.owner == koreanPlace && $0.evidenceItem.owner == koreanNote })
+        #expect(report.candidates.allSatisfy { $0.truthBoundary == "reviewable_candidate_not_truth" })
+        #expect(report.candidates.allSatisfy { !$0.sourceRefs.contains(negativeNote.canonicalRef) })
+        #expect(report.diagnostics.evidenceSamples.contains {
+            $0.owner == ramenNote && $0.reasonCode == "usable_food_preference_evidence" && $0.matchedTerms.contains("ramen")
+        })
+        #expect(report.diagnostics.evidenceSamples.contains {
+            $0.owner == koreanNote && $0.reasonCode == "usable_food_preference_evidence" && $0.matchedTerms.contains("korean")
+        })
+        #expect(report.diagnostics.evidenceRejectedSamples.contains {
+            $0.owner == negativeNote && $0.reasonCode == "negative_or_non_preference_food_mention"
+        })
+
+        let payload = CiderCLI.savedPlacePreferenceLinkPreviewPayload(report)
+        let diagnostics = try #require(payload["diagnostics"] as? [String: Any])
+        let evidenceSamples = try #require(diagnostics["evidenceSamples"] as? [[String: Any]])
+        #expect(evidenceSamples.contains { ($0["matchedTerms"] as? [String])?.contains("ramen") == true })
+        let evidenceRejectedSamples = try #require(diagnostics["evidenceRejectedSamples"] as? [[String: Any]])
+        #expect(evidenceRejectedSamples.contains { $0["reasonCode"] as? String == "negative_or_non_preference_food_mention" })
+    }
+
+    private func insertNoteItem(
+        owner: SecondBrainOwnerRef,
+        title: String,
+        content: String = "",
+        into db: CiderDatabase
+    ) throws {
         let now = DatabaseHelpers.encode(Date())
         let itemStmt = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
@@ -334,8 +412,9 @@ struct SecondBrainSavedPlacePreferenceLinkPreviewTests {
             .bind("Journal/\(owner.ownerID).md", at: 5)
         try itemStmt.step()
 
-        let noteStmt = try db.prepare("INSERT INTO notes (item_id, content, summary, is_pinned) VALUES (?, '', NULL, 0);")
+        let noteStmt = try db.prepare("INSERT INTO notes (item_id, content, summary, is_pinned) VALUES (?, ?, NULL, 0);")
         noteStmt.bind(owner.ownerID, at: 1)
+            .bind(content, at: 2)
         try noteStmt.step()
     }
 
