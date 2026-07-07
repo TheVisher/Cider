@@ -281,6 +281,7 @@ struct CiderCLI {
       cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
         Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
       cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
+      cider-cli item saved-place-preference-links [--limit <n>] [--json]
       cider-cli item graph-candidates [<owner-type> <owner-id-or-ref>] [--include-reviewed] [--limit <n>] [--json]
       cider-cli item graph-candidate <candidate-id> [--json]
       cider-cli item journal-migration-preview [--json]
@@ -476,6 +477,8 @@ struct CiderCLI {
             return "cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]"
         case "journal-migration-preview", "journal-naming-preview", "journal-preview-migration":
             return "cider-cli item journal-migration-preview [--json]"
+        case "saved-place-preference-links", "place-preference-links", "saved-place-links":
+            return "cider-cli item saved-place-preference-links [--limit <n>] [--json]"
         case "sync-project", "project-sync":
             return "cider-cli item sync-project <project-id-or-name> [--json]"
         case "daily-tracker", "tracker-daily", "daily-signals":
@@ -7056,6 +7059,31 @@ struct CiderCLI {
                 printSimilarityCandidates(candidates, command: "item.similarity", owner: owner)
             } catch {
                 printCLIError(error.localizedDescription)
+            }
+
+        case "saved-place-preference-links", "place-preference-links", "saved-place-links":
+            do {
+                let limit = parseFlag("--limit", from: args).flatMap(Int.init) ?? 20
+                let report = try SecondBrainSavedPlacePreferenceLinkPreviewService(database: .shared)
+                    .preview(limit: limit)
+                let payload = savedPlacePreferenceLinkPreviewPayload(report)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Saved place preference link candidates: \(report.candidates.count)")
+                    print("  Read-only preview; no graph truth was accepted.")
+                }
+            } catch {
+                printCLIError(
+                    error.localizedDescription,
+                    details: [
+                        "command": "item.saved-place-preference-links",
+                        "readOnly": true,
+                        "changed": false,
+                        "truthBoundary": "reviewable_candidate_not_truth",
+                        "safeNextCommands": ["cider-cli item saved-place-preference-links --json"],
+                    ]
+                )
             }
 
         case "accept-similarity", "similarity-accept":
@@ -27214,6 +27242,69 @@ struct CiderCLI {
         if let reviewedAt = candidate.reviewedAt {
             dict["reviewedAt"] = ISO8601DateFormatter().string(from: reviewedAt)
         }
+        return dict
+    }
+
+    static func savedPlacePreferenceLinkPreviewPayload(_ report: SecondBrainSavedPlacePreferenceLinkPreviewReport) -> [String: Any] {
+        [
+            "ok": true,
+            "command": "item.saved-place-preference-links",
+            "readOnly": report.readOnly,
+            "changed": report.changed,
+            "truthBoundary": report.truthBoundary,
+            "count": report.candidates.count,
+            "candidates": report.candidates.map(savedPlacePreferenceLinkCandidateToDict),
+            "safeVerificationCommands": report.safeVerificationCommands,
+            "safeNextCommands": report.safeNextCommands,
+            "actionReceipt": agentActionReceiptToDict(
+                command: "item.saved-place-preference-links",
+                action: "preview_saved_place_preference_links",
+                actor: "cider-cli",
+                sourceRefs: report.candidates.flatMap(\.sourceRefs),
+                evidenceRefs: report.candidates.flatMap { candidate in
+                    candidate.sourceRefs.filter { $0.hasPrefix("source_evidence:") || $0.hasPrefix("graph_candidate:") }
+                },
+                readOnly: true,
+                changed: false,
+                status: "succeeded",
+                after: ["candidateCount": report.candidates.count, "truthBoundary": report.truthBoundary],
+                safeVerificationCommands: report.safeVerificationCommands,
+                safeNextCommands: report.safeNextCommands
+            ),
+        ]
+    }
+
+    static func savedPlacePreferenceLinkCandidateToDict(_ candidate: SecondBrainSavedPlacePreferenceLinkCandidate) -> [String: Any] {
+        [
+            "id": candidate.id,
+            "candidateRef": candidate.id,
+            "savedItem": savedPlacePreferenceLinkSourceToDict(candidate.savedItem),
+            "savedItemRef": candidate.savedItem.owner.canonicalRef,
+            "evidenceItem": savedPlacePreferenceLinkSourceToDict(candidate.evidenceItem),
+            "evidenceItemRef": candidate.evidenceItem.owner.canonicalRef,
+            "preferenceValue": candidate.preferenceValue,
+            "confidence": candidate.confidence,
+            "reason": candidate.reason,
+            "reasonCodes": candidate.reasonCodes,
+            "sourceRefs": candidate.sourceRefs,
+            "truthBoundary": candidate.truthBoundary,
+            "reviewState": "suggested",
+            "acceptedAsTruth": false,
+            "safeVerificationCommands": candidate.safeVerificationCommands,
+            "safeNextCommands": candidate.safeNextCommands,
+        ]
+    }
+
+    static func savedPlacePreferenceLinkSourceToDict(_ source: SecondBrainSavedPlacePreferenceLinkPreviewSource) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": ownerToDict(source.owner),
+            "ownerRef": source.owner.canonicalRef,
+            "title": source.title,
+            "snippet": source.snippet,
+        ]
+        if let url = source.url { dict["url"] = url }
+        if let relativePath = source.relativePath { dict["relativePath"] = relativePath }
+        if let sourceEvidenceRef = source.sourceEvidenceRef { dict["sourceEvidenceRef"] = sourceEvidenceRef }
         return dict
     }
 
