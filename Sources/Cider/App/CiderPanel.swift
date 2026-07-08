@@ -76,8 +76,7 @@ final class CiderPanel: NSPanel {
         default: nil
         }
 
-        if let action, let responder = firstResponder, responder.responds(to: action) {
-            responder.doCommand(by: action)
+        if let action, NSApp.sendAction(action, to: nil, from: self) {
             return true
         }
 

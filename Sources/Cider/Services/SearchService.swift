@@ -150,14 +150,16 @@ enum SearchService {
                 continue
             }
 
-            let modifier = String(part.dropFirst()).lowercased()
+            let rawModifier = String(part.dropFirst())
+            let modifier = rawModifier.lowercased()
 
             // Folder scope: @folder:Name or @f:Name (prefix match on "folder")
             // @folder: with no name → show all folders
             if let colonIdx = modifier.firstIndex(of: ":"),
                "folder".hasPrefix(String(modifier[modifier.startIndex..<colonIdx])),
-               modifier[modifier.startIndex..<colonIdx].count >= 1 {
-                let afterColon = String(modifier[modifier.index(after: colonIdx)...])
+               modifier[modifier.startIndex..<colonIdx].count >= 1,
+               let rawColonIdx = rawModifier.firstIndex(of: ":") {
+                let afterColon = String(rawModifier[rawModifier.index(after: rawColonIdx)...])
                 var nameParts: [String] = []
                 if !afterColon.isEmpty { nameParts.append(afterColon) }
                 i += 1
@@ -182,7 +184,7 @@ enum SearchService {
                     folderIDs.insert(folder.id)
                     folderNames.append(folder.name)
                 } else {
-                    folderNames.append(name)  // Unresolved name, show in pills
+                    remainingParts.append(contentsOf: nameParts)
                 }
                 continue
             }

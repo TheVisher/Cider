@@ -28,4 +28,27 @@ struct SearchPaletteSearchPublishPolicyTests {
             isCancelled: false
         ))
     }
+
+    @Test("typing with the full query selected replaces instead of appending")
+    func fullSelectionTypingReplacesQueryInsteadOfAppending() {
+        let original = "Jami smores"
+        let result = SearchPaletteQueryEditing.replacingSelectedText(
+            in: original,
+            selection: 0..<original.count,
+            replacement: "Botan Ramen"
+        )
+
+        #expect(result == "Botan Ramen")
+    }
+
+    @Test("typing without a selection still inserts at the caret")
+    func caretTypingStillInsertsAtCaret() {
+        let result = SearchPaletteQueryEditing.replacingSelectedText(
+            in: "Botan",
+            selection: 5..<5,
+            replacement: " Ramen"
+        )
+
+        #expect(result == "Botan Ramen")
+    }
 }

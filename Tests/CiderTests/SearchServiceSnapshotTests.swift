@@ -137,6 +137,21 @@ struct SearchServiceSnapshotTests {
         #expect(fileResults.first?.id == file.id)
     }
 
+    @Test("unknown folder scope token is not advertised as an active folder scope")
+    func unknownFolderScopeTokenIsNotAdvertisedAsActiveFolderScope() {
+        let scope = SearchService.parseScope(
+            from: "@folder:Nan Botan Ramen",
+            folders: [],
+            labels: []
+        )
+
+        #expect(!scope.hasFolderScope)
+        #expect(scope.cleanQuery == "Nan Botan Ramen")
+        #expect(scope.activeScopeDescriptions.isEmpty)
+        #expect(!scope.activeScopeDescriptions.joined(separator: " ").contains("@folder:Nan"))
+        #expect(!scope.activeScopeDescriptions.joined(separator: " ").contains("Folder: nan"))
+    }
+
     private static func bookmark(index: Int, labelID: UUID, folderID: UUID, now: Date) -> Bookmark {
         Bookmark(
             title: index == 123 ? "Needle bookmark" : "Bookmark \(index)",

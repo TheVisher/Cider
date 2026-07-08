@@ -87,6 +87,22 @@ enum SearchPaletteSearchPublishPolicy {
     }
 }
 
+enum SearchPaletteQueryEditing {
+    static func replacingSelectedText(
+        in query: String,
+        selection: Range<Int>,
+        replacement: String
+    ) -> String {
+        let lowerBound = max(0, min(selection.lowerBound, query.count))
+        let upperBound = max(lowerBound, min(selection.upperBound, query.count))
+        let start = query.index(query.startIndex, offsetBy: lowerBound)
+        let end = query.index(query.startIndex, offsetBy: upperBound)
+        var updated = query
+        updated.replaceSubrange(start..<end, with: replacement)
+        return updated
+    }
+}
+
 // MARK: - Search Palette View
 
 struct SearchPaletteView: View {
