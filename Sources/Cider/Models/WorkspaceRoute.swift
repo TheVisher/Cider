@@ -231,9 +231,9 @@ struct WorkspaceRoutePresentation: Equatable {
                 sidebarDomain: .browse,
                 title: "Library",
                 systemImage: WorkspaceNavigationDomain.browse.systemImage,
-                contentKind: .libraryDashboard,
-                visibleItemScope: .none,
-                showsLibraryViewOptions: false
+                contentKind: .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
+                visibleItemScope: .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
+                showsLibraryViewOptions: true
             )
         case .inbox:
             return libraryFeedPresentation(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: true)

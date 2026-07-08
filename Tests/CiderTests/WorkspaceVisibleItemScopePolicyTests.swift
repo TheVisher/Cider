@@ -2,6 +2,49 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceVisibleItemScopePolicyTests: XCTestCase {
+    func testTopLevelLibraryRouteShowsExistingLibraryItems() {
+        let presentation = WorkspaceRoutePresentation.presentation(for: .library(.overview))
+        let bookmark = LibraryItemV2.bookmark(Bookmark(title: "Bookmark", urlString: "https://example.com"))
+        let note = LibraryItemV2.note(Note(title: "Note"))
+        let file = LibraryItemV2.vaultFile(VaultFile(
+            id: UUID(),
+            filename: "Archive.pdf",
+            relativePath: "Documents/Archive.pdf",
+            fileType: .pdf,
+            fileSize: 10,
+            createdAt: Date(),
+            modifiedAt: Date(),
+            folderID: nil
+        ))
+        let todo = LibraryItemV2.todo(TodoCard(title: "Task"))
+
+        XCTAssertEqual(
+            WorkspaceVisibleItemScopePolicy.visibleItemIDs(
+                for: presentation.visibleItemScope,
+                items: [bookmark, note, file, todo],
+                folderID: nil,
+                tagIDs: [],
+                searchText: ""
+            ),
+            [bookmark.id, note.id, file.id, todo.id]
+        )
+    }
+
+    func testTopLevelLibraryRouteStaysTruthfullyEmptyWithoutLibraryItems() {
+        let presentation = WorkspaceRoutePresentation.presentation(for: .library(.overview))
+
+        XCTAssertEqual(
+            WorkspaceVisibleItemScopePolicy.visibleItemIDs(
+                for: presentation.visibleItemScope,
+                items: [],
+                folderID: nil,
+                tagIDs: [],
+                searchText: ""
+            ),
+            []
+        )
+    }
+
     func testLibraryFeedScopeFiltersEntityTypesAndInboxState() {
         let folderID = UUID()
         let bookmark = LibraryItemV2.bookmark(Bookmark(title: "Bookmark", urlString: "https://example.com"))

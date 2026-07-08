@@ -75,7 +75,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
         let tagID = UUID()
         let expectations: [(WorkspaceRoute, WorkspaceNavigationDomain?, WorkspaceRouteContentKind)] = [
             (.home, nil, .home),
-            (.library(.overview), .browse, .libraryDashboard),
+            (.library(.overview), .browse, .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false)),
             (.library(.inbox), .browse, .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: true)),
             (.library(.all), .browse, .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false)),
             (.library(.bookmarks), .browse, .libraryFeed(entityTypes: [.bookmark], onlyUnassigned: false)),
@@ -232,6 +232,10 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
     }
 
     func testRoutePresentationOwnsVisibleScopeForLibraryRoutes() {
+        XCTAssertEqual(
+            WorkspaceRoutePresentation.presentation(for: .library(.overview)).visibleItemScope,
+            .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false)
+        )
         XCTAssertEqual(
             WorkspaceRoutePresentation.presentation(for: .library(.files)).visibleItemScope,
             .libraryFeed(entityTypes: [.vaultFile], onlyUnassigned: false)
