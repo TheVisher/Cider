@@ -273,6 +273,42 @@ final class LegacyViewQuarantineTests: XCTestCase {
         try assertFilesDoNotContain(forbiddenPatternsByPath, caseInsensitive: true)
     }
 
+    func testSettingsShortcutCannotFallBackToBlankSwiftUIScene() throws {
+        let ciderAppSource = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent("Sources/Cider/App/CiderApp.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(
+            ciderAppSource.contains("Settings {\n            EmptyView()"),
+            "The SwiftUI Settings scene must not be blank; Cmd+, can fall through to it on macOS."
+        )
+        XCTAssertTrue(
+            ciderAppSource.contains("SettingsView()"),
+            "The SwiftUI Settings scene should render the real SettingsView as a safe fallback."
+        )
+        XCTAssertTrue(
+            ciderAppSource.contains("CommandGroup(replacing: .appSettings)"),
+            "CiderApp should replace SwiftUI's default Settings command so Cmd+, can route to Cider's settings notification."
+        )
+        XCTAssertTrue(
+            ciderAppSource.contains("NotificationCenter.default.post(name: .openCiderSettings, object: nil)"),
+            "The SwiftUI Settings command should open the same Settings path used by the gear and quick actions."
+        )
+
+        let appDelegateSource = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent("Sources/Cider/App/AppDelegate.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            appDelegateSource.contains("installCiderSettingsMenuItem()"),
+            "AppDelegate should deterministically install Cider's Settings menu item after custom menu setup."
+        )
+        XCTAssertTrue(
+            appDelegateSource.contains("NSMenuItem(title: \"Settings…\", action: #selector(openSettingsFromMenu), keyEquivalent: \",\")"),
+            "Cmd+, should target AppDelegate.openSettingsFromMenu instead of a stale SwiftUI menu item."
+        )
+    }
+
     private static var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

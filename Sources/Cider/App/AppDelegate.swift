@@ -164,16 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startAIAssistantHotkeyDetection()
         configureFloatingPanels()
 
-        // Redirect Cmd+, to our real settings window instead of the blank SwiftUI Settings scene
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if let appMenu = NSApp.mainMenu?.item(at: 0)?.submenu {
-                for item in appMenu.items where item.keyEquivalent == "," {
-                    item.target = self
-                    item.action = #selector(self.openSettingsFromMenu)
-                }
-            }
             self.installCiderApplicationMenuItems()
+            self.installCiderSettingsMenuItem()
         }
 
         transitionToCiderMainWindow()
@@ -344,6 +338,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ciderMenu.addItem(NSMenuItem.separator())
         ciderMenu.addItem(debugMenuItem(title: "Show Journal Intelligence", action: #selector(showJournalIntelligenceFromMenu)))
         #endif
+    }
+
+    private func installCiderSettingsMenuItem() {
+        guard let appMenu = NSApp.mainMenu?.item(at: 0)?.submenu else { return }
+
+        for item in appMenu.items.reversed()
+        where item.keyEquivalent == "," || item.action == #selector(openSettingsFromMenu) {
+            appMenu.removeItem(item)
+        }
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = [.command]
+        settingsItem.target = self
+
+        let insertIndex: Int
+        if let servicesIndex = appMenu.items.firstIndex(where: { $0.title == "Services" }) {
+            insertIndex = max(0, servicesIndex - 1)
+        } else if let firstSeparator = appMenu.items.firstIndex(where: { $0.isSeparatorItem }) {
+            insertIndex = min(firstSeparator + 1, appMenu.items.count)
+        } else {
+            insertIndex = min(1, appMenu.items.count)
+        }
+
+        appMenu.insertItem(settingsItem, at: insertIndex)
     }
 
     // MARK: - Status Item
