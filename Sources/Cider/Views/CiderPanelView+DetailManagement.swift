@@ -420,6 +420,11 @@ extension CiderPanelView {
         journalNavigationVisible = true
         journalMetadataVisible = false
         selectedJournalEntryID = projection.defaultSelection?.id
+        if let defaultEntry = projection.defaultSelection {
+            notesViewModel.selectNote(defaultEntry.note)
+        } else {
+            notesViewModel.clearSelectedNote()
+        }
 
         if !wasExpanded, detailViewMode == .slideOut {
             NotificationCenter.default.post(
@@ -510,10 +515,14 @@ extension CiderPanelView {
         }
 
         if surfacesToClear.contains(.journal) {
+            if isJournalDetailOpen {
+                notesViewModel.flushSave()
+            }
             isJournalDetailOpen = false
             journalNavigationVisible = false
             journalMetadataVisible = false
             selectedJournalEntryID = nil
+            notesViewModel.clearSelectedNote()
         }
 
         if surfacesToClear.contains(.kanban) {
@@ -526,14 +535,21 @@ extension CiderPanelView {
 
     func closeGenericDetail() {
         guard isGenericDetailOpen else { return }
+        let wasJournalDetailOpen = isJournalDetailOpen
         selectedDateCard = nil
         selectedContact = nil
         selectedTodoCard = nil
         selectedVaultFile = nil
+        if wasJournalDetailOpen {
+            notesViewModel.flushSave()
+        }
         isJournalDetailOpen = false
         journalNavigationVisible = false
         journalMetadataVisible = false
         selectedJournalEntryID = nil
+        if wasJournalDetailOpen {
+            notesViewModel.clearSelectedNote()
+        }
         selectedKanbanBoardID = nil
         selectedKanbanCardID = nil
         kanbanCardDraft = nil

@@ -234,7 +234,7 @@ extension CiderPanelView {
                 },
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
-                toolbarExtra: { EmptyView() },
+                toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
                 trailingExtra: {
                     JournalNavigationToggleButton(isVisible: $journalNavigationVisible) {
                         showJournalNavigationRail()
@@ -257,6 +257,7 @@ extension CiderPanelView {
         HStack(alignment: .top, spacing: 0) {
             JournalDetailContentView(
                 projection: projection,
+                notesViewModel: notesViewModel,
                 selectedEntryID: $selectedJournalEntryID
             )
 
@@ -483,7 +484,7 @@ extension CiderPanelView {
                 scrollsContent: false,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
-                toolbarExtra: { EmptyView() },
+                toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
                 trailingExtra: {
                     JournalNavigationToggleButton(isVisible: $journalNavigationVisible) {
                         showJournalNavigationRail()
@@ -724,7 +725,7 @@ extension CiderPanelView {
                 scrollsContent: false,
                 onClose: closeGenericDetail,
                 onModeChange: changeDetailViewMode,
-                toolbarExtra: { EmptyView() },
+                toolbarExtra: { NotesCompactToolbar(viewModel: notesViewModel) },
                 trailingExtra: {
                     JournalNavigationToggleButton(isVisible: $journalNavigationVisible) {
                         showJournalNavigationRail()
