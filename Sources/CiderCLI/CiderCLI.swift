@@ -2295,6 +2295,20 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "journal-cleanup", "journal-remove", "journal-supersede":
+            do {
+                let payload = try cleanupJournalCapture(args: args, storage: NotesStorage.shared)
+                if jsonOutput {
+                    outputJSON(payload)
+                } else {
+                    print("Cleaned journal capture: \(payload["removedCaptureEventID"] as? String ?? "")")
+                    print("  Removed section: \(payload["removedSection"] as? Bool == true)")
+                    print("  Removed candidates: \(payload["removedCandidateCount"] as? Int ?? 0)")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "review-queue", "worklist":
             do {
                 guard let limit = parsePositiveIntFlag("--limit", from: args, command: "capture.review-queue", minimum: 0) else { return }
@@ -2334,7 +2348,7 @@ struct CiderCLI {
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
-            print("Commands: add, review-queue, archive-artifacts")
+            print("Commands: add, review-queue, journal-cleanup, archive-artifacts")
         }
     }
 
@@ -2345,6 +2359,8 @@ struct CiderCLI {
     static func printCaptureUsage() {
         print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
+        print("       cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
+        print("       Journal capture: use `cider-cli capture add --kind journal --date today --stdin --json` so readable Markdown, metadata, provenance, indexing, and reviewable candidates stay connected.")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
@@ -3836,6 +3852,7 @@ struct CiderCLI {
             print("""
             Daily note commands:
               cider-cli note daily append --kind journal|food-log [--date YYYY-MM-DD|today] [--time HH:mm] (--stdin|--text-file <path>|--content <text>) [--source <source>] [--json]
+              Journal compatibility note: --kind journal routes through capture add --kind journal and returns backendCommand=capture.add. Prefer cider-cli capture add --kind journal --date today --stdin --json.
             """)
 
         case "append":
@@ -3845,6 +3862,23 @@ struct CiderCLI {
             }
             guard let rawContent = projectArtifactContent(from: rest) else { return }
             do {
+                if spec.kind == "journal" {
+                    let capture = try captureAddJournalPayload(
+                        rawContent: rawContent,
+                        args: rest,
+                        storage: storage,
+                        commandSource: parseFlag("--source", from: rest) ?? "note.daily.append"
+                    )
+                    let payload = dailyJournalAppendCompatibilityPayload(capture: capture)
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else {
+                        let item = capture["item"] as? [String: Any]
+                        print("Appended journal entry through structured capture: \(item?["title"] as? String ?? "")")
+                        print("  Preferred command: cider-cli capture add --kind journal --date \(capture["date"] as? String ?? "today") --stdin --json")
+                    }
+                    return
+                }
                 let result = try appendDailyNoteEntry(
                     spec: spec,
                     dateRaw: parseFlag("--date", from: rest),
@@ -3881,19 +3915,27 @@ struct CiderCLI {
         let source: String
     }
 
-    static func captureAddJournalPayload(rawContent: String, args: [String], storage: NotesStorage) throws -> [String: Any] {
+    static func captureAddJournalPayload(
+        rawContent: String,
+        args: [String],
+        storage: NotesStorage,
+        commandSource: String = "capture.add"
+    ) throws -> [String: Any] {
         let result = try appendDailyNoteEntry(
             spec: DailyNoteKindSpec(kind: "journal", titlePrefix: "Journal"),
             dateRaw: parseFlag("--date", from: args),
             timeRaw: parseFlag("--time", from: args),
             rawContent: rawContent,
-            source: parseFlag("--source", from: args) ?? "capture.add",
+            source: commandSource,
             storage: storage,
             emptyContentMessage: "Journal capture content cannot be empty."
         )
         let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
         let provenance = recordJournalCaptureProvenance(result, sourceContext: sourceContext)
-        let graphCandidates = recordJournalGraphCandidates(result)
+        let graphCandidates = recordJournalGraphCandidates(
+            result,
+            captureEventID: provenance["captureEventID"] as? String
+        )
         return journalCapturePayload(
             result,
             args: args,
@@ -3901,6 +3943,220 @@ struct CiderCLI {
             provenance: provenance,
             graphCandidates: graphCandidates
         )
+    }
+
+    static func dailyJournalAppendCompatibilityPayload(capture: [String: Any]) -> [String: Any] {
+        let date = capture["date"] as? String ?? "today"
+        let time = capture["time"] as? String
+        let preferredCommand = "cider-cli capture add --kind journal --date \(date)\(time.map { " --time \($0)" } ?? "") --stdin --json"
+        var commands = (capture["safeNextCommands"] as? [String]) ?? []
+        if !commands.contains(preferredCommand) {
+            commands.insert(preferredCommand, at: 0)
+        }
+        return [
+            "ok": capture["ok"] as? Bool ?? true,
+            "changed": capture["changed"] as? Bool ?? true,
+            "readOnly": false,
+            "command": "note.daily.append",
+            "backendCommand": "capture.add",
+            "kind": "journal",
+            "deprecatedBy": "capture.add",
+            "agentGuidance": "Journal append uses the structured capture path. Prefer `cider-cli capture add --kind journal --date today --stdin --json` for new journal intake.",
+            "date": date,
+            "time": capture["time"] ?? NSNull(),
+            "item": capture["item"] ?? NSNull(),
+            "note": capture["note"] ?? NSNull(),
+            "journalMetadata": capture["journalMetadata"] ?? NSNull(),
+            "provenance": capture["provenance"] ?? NSNull(),
+            "indexing": capture["indexing"] ?? NSNull(),
+            "graphCandidates": capture["graphCandidates"] ?? NSNull(),
+            "capture": capture,
+            "nextSafeAction": capture["nextSafeAction"] as? String ?? "inspect_item",
+            "safeNextCommands": commands,
+        ] as [String: Any]
+    }
+
+    struct JournalCaptureCleanupTarget {
+        let captureEventID: String
+        let noteID: String
+        let sourceText: String
+        let date: String
+        let time: String
+        let appendSource: String
+    }
+
+    static func cleanupJournalCapture(args: [String], storage: NotesStorage) throws -> [String: Any] {
+        let rawCaptureEventID = parseFlag("--capture-event", from: args)
+            ?? parseFlag("--capture-event-id", from: args)
+            ?? firstPositionalArgument(from: args, valueFlags: ["--capture-event", "--capture-event-id"])
+        guard let captureEventID = rawCaptureEventID?
+            .replacingOccurrences(of: "capture_event:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !captureEventID.isEmpty else {
+            throw CaptureAddArgumentError.message("Usage: cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
+        }
+        guard CiderDatabase.shared.isOpen else {
+            throw CaptureAddArgumentError.message("Journal capture cleanup requires the Cider database.")
+        }
+
+        let target = try journalCaptureCleanupTarget(captureEventID: captureEventID)
+        guard let noteUUID = UUID(uuidString: target.noteID),
+              let note = storage.notes.first(where: { $0.id == noteUUID }) else {
+            throw CaptureAddArgumentError.message("Produced journal note was not found for capture_event:\(captureEventID).")
+        }
+
+        let before = MutationAuditSnapshots.note(note)
+        let existingContent = storage.loadContent(for: note)
+        let entry = JournalTitle.appendSection(
+            time: target.time,
+            source: target.appendSource,
+            body: target.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        let updatedContent = journalContentByRemovingEntry(entry, from: existingContent)
+        let removedSection = updatedContent != existingContent
+        if removedSection {
+            var updated = note
+            updated.content = updatedContent
+            storage.save(note: updated)
+            let current = storage.notes.first(where: { $0.id == note.id }) ?? updated
+            MutationAuditService.shared.record(
+                action: "journal_capture_cleanup",
+                itemType: "note",
+                itemID: current.id,
+                before: before,
+                after: MutationAuditSnapshots.note(current),
+                metadata: [
+                    "captureEventID": captureEventID,
+                    "date": target.date,
+                    "time": target.time,
+                    "removedSection": "true",
+                ]
+            )
+        }
+
+        let removedCandidateCount = try deleteJournalCandidates(captureEventID: captureEventID, target: target)
+        try deleteJournalCaptureProvenance(captureEventID: captureEventID)
+
+        return [
+            "ok": true,
+            "changed": removedSection || removedCandidateCount > 0,
+            "readOnly": false,
+            "command": "capture.journal-cleanup",
+            "removedCaptureEventID": captureEventID,
+            "removedCaptureEventRef": "capture_event:\(captureEventID)",
+            "noteID": target.noteID,
+            "date": target.date,
+            "time": target.time,
+            "removedSection": removedSection,
+            "removedCandidateCount": removedCandidateCount,
+            "candidateBoundary": "removed_only_reviewable_candidates_for_capture_event",
+            "truthBoundary": "accepted_graph_or_memory_truth_not_deleted",
+            "safeNextCommands": [
+                "cider-cli item get note \(target.noteID) --json",
+                "cider-cli item context note \(target.noteID) --json",
+                "cider-cli item graph-candidates note \(target.noteID) --json",
+            ],
+        ] as [String: Any]
+    }
+
+    static func journalCaptureCleanupTarget(captureEventID: String) throws -> JournalCaptureCleanupTarget {
+        let stmt = try CiderDatabase.shared.prepare("""
+            SELECT e.source_text, e.metadata, r.target_owner_id
+            FROM capture_events e
+            JOIN owner_relations r
+              ON r.source_owner_type = 'capture_event'
+             AND r.source_owner_id = e.id
+             AND r.target_owner_type = 'note'
+             AND r.relation_type = 'produced_item'
+            WHERE e.id = ?
+              AND e.source_kind = 'journal'
+            LIMIT 1;
+            """)
+        stmt.bind(captureEventID, at: 1)
+        guard try stmt.step() else {
+            throw CaptureAddArgumentError.message("Journal capture event not found: capture_event:\(captureEventID)")
+        }
+        let sourceText = stmt.optionalString(at: 0) ?? ""
+        let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: stmt.optionalString(at: 1)) ?? [:]
+        guard let date = metadata["date"], let time = metadata["time"] else {
+            throw CaptureAddArgumentError.message("Journal capture event is missing date/time metadata and cannot be safely cleaned up.")
+        }
+        return JournalCaptureCleanupTarget(
+            captureEventID: captureEventID,
+            noteID: stmt.string(at: 2),
+            sourceText: sourceText,
+            date: date,
+            time: time,
+            appendSource: metadata["appendSource"] ?? metadata["command"] ?? "capture.add"
+        )
+    }
+
+    static func journalContentByRemovingEntry(_ entry: String, from content: String) -> String {
+        let candidates = [
+            "\n\n\(entry)\n",
+            "\n\n\(entry)",
+            "\(entry)\n\n",
+            entry,
+        ]
+        for candidate in candidates where content.contains(candidate) {
+            return content.replacingOccurrences(of: candidate, with: "\n")
+                .replacingOccurrences(of: "\n\n\n", with: "\n\n")
+                .trimmingCharacters(in: .newlines)
+                + "\n"
+        }
+        return content
+    }
+
+    static func deleteJournalCandidates(
+        captureEventID: String,
+        target: JournalCaptureCleanupTarget
+    ) throws -> Int {
+        let select = try CiderDatabase.shared.prepare("""
+            SELECT id, metadata, review_state
+            FROM enrichment_outputs
+            WHERE owner_type = 'note'
+              AND owner_id = ?
+              AND kind IN ('graph_candidate', 'memory_candidate');
+            """)
+        select.bind(target.noteID, at: 1)
+        var ids: [String] = []
+        while try select.step() {
+            let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: select.optionalString(at: 1)) ?? [:]
+            let reviewState = select.optionalString(at: 2) ?? ""
+            guard reviewState != "accepted" else { continue }
+            let matchesCaptureEvent = metadata["capture_event_id"] == captureEventID
+                || metadata["capture_event_ref"] == "capture_event:\(captureEventID)"
+            let matchesLegacyDateTime = metadata["capture_event_id"] == nil
+                && metadata["journal_date"] == target.date
+                && metadata["journal_time"] == target.time
+            if matchesCaptureEvent || matchesLegacyDateTime {
+                ids.append(select.string(at: 0))
+            }
+        }
+        guard !ids.isEmpty else { return 0 }
+        let delete = try CiderDatabase.shared.prepare("DELETE FROM enrichment_outputs WHERE id = ?;")
+        for id in ids {
+            delete.reset()
+            delete.bind(id, at: 1)
+            try delete.step()
+        }
+        return ids.count
+    }
+
+    static func deleteJournalCaptureProvenance(captureEventID: String) throws {
+        try CiderDatabase.shared.withTransaction {
+            let relation = try CiderDatabase.shared.prepare("""
+                DELETE FROM owner_relations
+                WHERE source_owner_type = 'capture_event'
+                  AND source_owner_id = ?;
+                """)
+            relation.bind(captureEventID, at: 1)
+            try relation.step()
+
+            let event = try CiderDatabase.shared.prepare("DELETE FROM capture_events WHERE id = ?;")
+            event.bind(captureEventID, at: 1)
+            try event.step()
+        }
     }
 
     static func appendDailyNoteEntry(
@@ -4037,6 +4293,7 @@ struct CiderCLI {
         metadata["kind"] = "journal"
         metadata["date"] = result.date
         metadata["time"] = result.time
+        metadata["appendSource"] = result.source
         let encodedMetadata = DatabaseHelpers.encodeJSON(metadata) ?? "{}"
 
         do {
@@ -4160,6 +4417,7 @@ struct CiderCLI {
                 "status": "recorded",
             ],
             "provenance": provenance,
+            "captureEventID": provenance["captureEventID"] ?? NSNull(),
             "indexing": [
                 "status": "indexed",
                 "ownerType": "note",
@@ -4182,6 +4440,22 @@ struct CiderCLI {
                 commands.append(reviewQueueCommand)
             }
             payload["safeNextCommands"] = commands
+        }
+        if let captureEventID = provenance["captureEventID"] as? String, !captureEventID.isEmpty {
+            var commands = (payload["safeNextCommands"] as? [String]) ?? []
+            let cleanupCommand = "cider-cli capture journal-cleanup --capture-event \(captureEventID) --json"
+            if !commands.contains(cleanupCommand) {
+                commands.append(cleanupCommand)
+            }
+            payload["safeNextCommands"] = commands
+            payload["journalEntry"] = [
+                "parentNoteID": result.note.id.uuidString,
+                "captureEventID": captureEventID,
+                "date": result.date,
+                "time": result.time,
+                "source": result.source,
+                "cleanupCommand": cleanupCommand,
+            ] as [String: Any]
         }
         if let sourceContext {
             payload["sourceContext"] = sourceContext.toDictionary()
@@ -4220,7 +4494,10 @@ struct CiderCLI {
         ] as [String: Any]
     }
 
-    static func recordJournalGraphCandidates(_ result: DailyNoteAppendResult) -> [String: Any] {
+    static func recordJournalGraphCandidates(
+        _ result: DailyNoteAppendResult,
+        captureEventID: String? = nil
+    ) -> [String: Any] {
         guard CiderDatabase.shared.isOpen else {
             return [
                 "status": "unavailable",
@@ -4247,7 +4524,11 @@ struct CiderCLI {
 
         do {
             let service = SecondBrainEnrichmentOutputService(database: .shared)
-            for output in extraction.outputs {
+            for var output in extraction.outputs {
+                if let captureEventID {
+                    output.metadata["capture_event_id"] = captureEventID
+                    output.metadata["capture_event_ref"] = "capture_event:\(captureEventID)"
+                }
                 try service.record(output)
             }
             let candidates = extraction.outputs.map { output -> [String: Any] in

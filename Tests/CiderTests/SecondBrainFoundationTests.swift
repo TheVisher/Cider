@@ -573,6 +573,99 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("note daily append journal routes through structured capture")
+    func noteDailyAppendJournalRoutesThroughStructuredCapture() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-daily-append-journal-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let payload = try jsonObject(from: runCLI([
+            "note", "daily", "append",
+            "--kind", "journal",
+            "--date", "2026-06-11",
+            "--time", "10:05",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "Daily append must not bypass capture provenance."))
+
+        #expect(payload["command"] as? String == "note.daily.append")
+        #expect(payload["backendCommand"] as? String == "capture.add")
+        let capture = try #require(payload["capture"] as? [String: Any])
+        #expect(capture["command"] as? String == "capture.add")
+        #expect(capture["kind"] as? String == "journal")
+        let provenance = try #require(capture["provenance"] as? [String: Any])
+        #expect(provenance["status"] as? String == "recorded")
+        let metadata = try #require(capture["journalMetadata"] as? [String: Any])
+        #expect(metadata["journalDate"] as? String == "2026-06-11")
+        let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli capture add --kind journal --date 2026-06-11 --time 10:05 --stdin --json"))
+
+        let item = try #require(capture["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+        let contextPayload = try jsonObject(from: runCLI([
+            "item", "context", "note", noteID, "--json",
+        ], vaultURL: vault))
+        let captureProvenance = try #require(contextPayload["captureProvenance"] as? [[String: Any]])
+        #expect(captureProvenance.contains { entry in
+            entry["sourceKind"] as? String == "journal"
+                && entry["sourceText"] as? String == "Daily append must not bypass capture provenance."
+        })
+    }
+
+    @Test("capture journal cleanup removes matching section and unaccepted side effects")
+    func captureJournalCleanupRemovesMatchingSectionAndUnacceptedSideEffects() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-journal-capture-cleanup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let capturePayload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-06-12",
+            "--time", "11:20",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "Cleanup smoke watched The Way Way Back at Cactus."))
+        let item = try #require(capturePayload["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+        let captureEventID = try #require(capturePayload["captureEventID"] as? String)
+        let graphCandidates = try #require(capturePayload["graphCandidates"] as? [String: Any])
+        #expect((graphCandidates["count"] as? Int ?? 0) > 0)
+
+        let cleanupPayload = try jsonObject(from: runCLI([
+            "capture", "journal-cleanup",
+            "--capture-event", captureEventID,
+            "--json",
+        ], vaultURL: vault))
+
+        #expect(cleanupPayload["command"] as? String == "capture.journal-cleanup")
+        #expect(cleanupPayload["changed"] as? Bool == true)
+        #expect(cleanupPayload["removedCaptureEventID"] as? String == captureEventID)
+        #expect((cleanupPayload["removedCandidateCount"] as? Int ?? 0) > 0)
+
+        let relativePath = try #require(item["relativePath"] as? String)
+        let content = try String(contentsOf: vault.appendingPathComponent(relativePath), encoding: .utf8)
+        #expect(!content.contains("Cleanup smoke watched The Way Way Back at Cactus."))
+        #expect(content.contains("# Journal 06-12-2026"))
+
+        let contextPayload = try jsonObject(from: runCLI([
+            "item", "context", "note", noteID, "--json",
+        ], vaultURL: vault))
+        let captureProvenance = try #require(contextPayload["captureProvenance"] as? [[String: Any]])
+        #expect(!captureProvenance.contains { entry in
+            entry["captureEventID"] as? String == captureEventID
+                || entry["id"] as? String == captureEventID
+        })
+
+        let listPayload = try jsonObject(from: runCLI([
+            "item", "graph-candidates", "note", noteID, "--json",
+        ], vaultURL: vault))
+        let candidates = try #require(listPayload["candidates"] as? [[String: Any]])
+        #expect(candidates.isEmpty)
+    }
+
     @Test("bookmark URL graph extractor classifies common object sources")
     func bookmarkURLGraphExtractorClassifiesCommonObjectSources() throws {
         let owner = SecondBrainOwnerRef(ownerType: "bookmark", ownerID: UUID().uuidString)
