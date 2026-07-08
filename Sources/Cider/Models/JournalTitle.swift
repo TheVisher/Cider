@@ -3,6 +3,7 @@ import Foundation
 enum JournalTitleKind: String, Hashable {
     case canonical
     case legacyDaily
+    case importedCandidate
 }
 
 struct JournalTitle: Hashable {

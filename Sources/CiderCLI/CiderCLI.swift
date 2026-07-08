@@ -4135,6 +4135,7 @@ struct CiderCLI {
             "note": noteToDict(result.note),
             "content": result.content,
             "appendedEntry": result.appendedEntry,
+            "journalMetadata": journalMetadataPayload(for: result),
             "destination": [
                 "kind": "daily_note",
                 "relativePath": result.note.relativePath,
@@ -4185,6 +4186,37 @@ struct CiderCLI {
             payload["sourceContext"] = sourceContext.toDictionary()
         }
         return payload
+    }
+
+    static func journalMetadataPayload(for result: DailyNoteAppendResult) -> [String: Any] {
+        guard let metadata = JournalLibraryReadModel.metadata(for: result.note, dateLabel: result.date) else {
+            return [
+                "status": "unavailable",
+                "reason": "Journal metadata could not be derived for date \(result.date).",
+            ]
+        }
+        return [
+            "status": "derived",
+            "journalDate": metadata.journalDate,
+            "displayTitle": metadata.displayTitle,
+            "titleKind": metadata.titleKind.rawValue,
+            "createdAt": DatabaseHelpers.encode(metadata.createdAt),
+            "capturedAt": metadata.capturedAt.map { DatabaseHelpers.encode($0) } ?? NSNull(),
+            "captureSource": metadata.captureSource,
+            "sections": metadata.sections.map { section in
+                [
+                    "id": section.id,
+                    "timestamp24Hour": section.timestamp24Hour,
+                    "capturedAt": section.capturedAt.map { DatabaseHelpers.encode($0) } ?? NSNull(),
+                    "captureSource": section.captureSource,
+                    "sourceSpan": [
+                        "location": section.sourceSpan.location,
+                        "length": section.sourceSpan.length,
+                    ],
+                    "sourceSnippet": section.sourceSnippet,
+                ] as [String: Any]
+            },
+        ] as [String: Any]
     }
 
     static func recordJournalGraphCandidates(_ result: DailyNoteAppendResult) -> [String: Any] {

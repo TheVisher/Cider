@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 struct JournalLibraryReadModelTests {
     @Test("journal library projection creates one container and defaults to newest daily entry")
@@ -60,6 +61,90 @@ struct JournalLibraryReadModelTests {
         #expect(projection.entries.map(\.note.id) == [canonical.id, legacy.id])
         #expect(projection.entries.map(\.dateLabel) == ["2026-07-04", "2026-07-03"])
         #expect(projection.container.entryCount == 2)
+    }
+
+    @Test("journal entry exposes structured metadata and timestamped source-backed sections")
+    func journalEntryExposesStructuredMetadataAndTimestampedSections() throws {
+        let content = """
+        # Journal 07-04-2026
+
+        ## 08:15
+        Source: capture.add
+
+        Morning reflection
+
+        ## 19:27
+        Source: voice
+
+        Evening addendum
+        """
+        let note = Note(
+            title: "Journal 07-04-2026",
+            content: content,
+            createdAt: Self.date("2026-07-04T08:15:00Z"),
+            modifiedAt: Self.date("2026-07-04T19:30:00Z"),
+            relativePath: "Inbox/Notes/Journal 07-04-2026.md"
+        )
+
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+
+        #expect(entry.metadata.journalDate == "2026-07-04")
+        #expect(entry.metadata.displayTitle == "Journal 07-04-2026")
+        #expect(entry.metadata.titleKind == .canonical)
+        #expect(entry.metadata.captureSource == "journal.read_model")
+        #expect(entry.metadata.sections.map(\.timestamp24Hour) == ["08:15", "19:27"])
+        #expect(entry.metadata.sections.map(\.captureSource) == ["capture.add", "voice"])
+        #expect(entry.metadata.sections.map { $0.displayTimestamp(format: .twelveHour) } == ["8:15 AM", "7:27 PM"])
+        #expect(entry.metadata.sections.allSatisfy { content.contains($0.sourceSnippet) })
+        #expect(entry.displayContent(timestampFormat: .twelveHour).contains("## 7:27 PM"))
+        #expect(entry.content == content)
+    }
+
+    @Test("journal capture payload exposes multi-entry structured sections without changing raw content")
+    @MainActor
+    func journalCapturePayloadExposesMultiEntryStructuredSectionsWithoutChangingRawContent() throws {
+        let content = """
+        # Journal 07-04-2026
+
+        ## 08:15
+        Source: capture.add
+
+        Morning reflection
+
+        ## 19:27
+        Source: voice
+
+        Evening addendum
+        """
+        let note = Note(
+            title: "Journal 07-04-2026",
+            content: content,
+            createdAt: Self.date("2026-07-04T08:15:00Z"),
+            modifiedAt: Self.date("2026-07-04T19:30:00Z"),
+            relativePath: "Inbox/Notes/Journal 07-04-2026.md"
+        )
+        let result = CiderCLI.DailyNoteAppendResult(
+            spec: CiderCLI.DailyNoteKindSpec(kind: "journal", titlePrefix: "Journal"),
+            date: "2026-07-04",
+            time: "19:27",
+            created: false,
+            note: note,
+            content: content,
+            appendedEntry: "## 19:27\nSource: voice\n\nEvening addendum",
+            rawContent: "Evening addendum",
+            source: "voice"
+        )
+
+        let payload = CiderCLI.journalMetadataPayload(for: result)
+        let sections = try #require(payload["sections"] as? [[String: Any]])
+
+        #expect(payload["status"] as? String == "derived")
+        #expect(payload["journalDate"] as? String == "2026-07-04")
+        #expect(payload["displayTitle"] as? String == "Journal 07-04-2026")
+        #expect(sections.compactMap { $0["timestamp24Hour"] as? String } == ["08:15", "19:27"])
+        #expect(sections.compactMap { $0["captureSource"] as? String } == ["capture.add", "voice"])
+        #expect((sections.last?["sourceSnippet"] as? String)?.contains("Evening addendum") == true)
+        #expect(result.content == content)
     }
 
     @Test("journal library projection previews old personal journal captures without importing ambiguous notes")
