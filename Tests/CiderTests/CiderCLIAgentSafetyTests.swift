@@ -6639,6 +6639,67 @@ struct CiderCLIAgentSafetyTests {
         #expect(secondRun["enrichmentOutputCount"] as? Int == firstRun["enrichmentOutputCount"] as? Int)
     }
 
+    @Test("item backfill journals undated limit continues past already seeded owners")
+    func itemBackfillJournalsUndatedLimitContinuesPastAlreadySeededOwners() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-backfill-journals-continuation-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let seededJournalID = try createNote(
+            title: "Daily Journal 2026-06-03",
+            content: "Jami loved pineapple coconut drink. First weekend overtime in five years; hourly wages motivation helped.",
+            vault: vault
+        )
+        let nextJournalID = try createNote(
+            title: "Daily Journal 2026-06-02",
+            content: "Alex prefers late coffee catch-ups and wants Thai food next Friday.",
+            vault: vault
+        )
+        _ = try createNote(
+            title: "Daily Journal 2026-06-01",
+            content: "Morgan wants the rowing machine moved into the garage.",
+            vault: vault
+        )
+
+        let seedRun = try parseJSONObject(try runCLI(args: [
+            "item", "backfill-journals",
+            "--date", "2026-06-03",
+            "--limit", "1",
+            "--json",
+        ], vault: vault).stdout)
+        #expect(seedRun["selectedCount"] as? Int == 1)
+        #expect((seedRun["graphCandidateCount"] as? Int ?? 0) > 0)
+
+        let beforeDryRunCounts = try generatedSecondBrainRowCounts(vault: vault)
+        let dryRun = try parseJSONObject(try runCLI(args: [
+            "item", "backfill-journals",
+            "--limit", "1",
+            "--dry-run",
+            "--json",
+        ], vault: vault).stdout)
+
+        #expect(dryRun["dryRun"] as? Bool == true)
+        #expect(dryRun["readOnly"] as? Bool == true)
+        #expect(dryRun["selectedCount"] as? Int == 1)
+        #expect(dryRun["skippedAlreadySeededCount"] as? Int == 1)
+        #expect(dryRun["skippedCount"] as? Int == 2)
+        #expect(try generatedSecondBrainRowCounts(vault: vault) == beforeDryRunCounts)
+
+        let owners = try #require(dryRun["owners"] as? [[String: Any]])
+        let selectedOwner = try #require(owners.first)
+        let selectedRef = try #require(selectedOwner["owner"] as? [String: Any])
+        #expect(selectedRef["ownerID"] as? String == nextJournalID)
+        #expect(selectedOwner["date"] as? String == "2026-06-02")
+
+        let skippedOwners = try #require(dryRun["skippedOwners"] as? [[String: Any]])
+        let skippedSeeded = try #require(skippedOwners.first)
+        let skippedRef = try #require(skippedSeeded["owner"] as? [String: Any])
+        #expect(skippedRef["ownerID"] as? String == seededJournalID)
+        #expect(skippedSeeded["date"] as? String == "2026-06-03")
+        #expect(skippedSeeded["reason"] as? String == "already_seeded")
+    }
+
     @Test("item dogfood intelligence exposes entity relation candidates through similarity JSON")
     func itemDogfoodIntelligenceExposesEntityRelationCandidatesThroughSimilarityJSON() throws {
         let vault = FileManager.default.temporaryDirectory

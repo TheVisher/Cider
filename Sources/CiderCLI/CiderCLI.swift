@@ -420,6 +420,7 @@ struct CiderCLI {
       cider-cli item reconcile-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
       cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
       cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
+        Undated bounded batches skip already-seeded Journal owners and continue to later eligible owners; --date still targets that owner for idempotence checks.
       cider-cli item similarity <owner-type> <owner-id-or-ref> [--json]
       cider-cli item accept-similarity <candidate-id> [--relation similar_to|duplicates|grouped_with] [--actor <name>] [--json]
       cider-cli item project-context <project-id-or-name> [--summary] [--limit <n>] [--full] [--json]
@@ -584,7 +585,7 @@ struct CiderCLI {
         case "dogfood-intelligence", "intelligence-dogfood":
             return "cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]"
         case "backfill-journals", "journal-backfill", "backfill-daily-journals":
-            return "cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]"
+            return "cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]\n  Undated bounded batches skip already-seeded Journal owners and continue to later eligible owners; --date still targets that owner for idempotence checks."
         case "journal-migration-preview", "journal-naming-preview", "journal-preview-migration":
             return "cider-cli item journal-migration-preview [--json]"
         case "saved-place-preference-links", "place-preference-links", "saved-place-links":
@@ -27736,6 +27737,21 @@ struct CiderCLI {
         return dict
     }
 
+    static func journalBackfillSkippedOwnerToDict(_ skipped: SecondBrainJournalBackfillSkippedOwner) -> [String: Any] {
+        var dict: [String: Any] = [
+            "owner": ownerToDict(skipped.owner),
+            "title": skipped.title,
+            "reason": skipped.reason,
+            "chunkCount": skipped.chunkCount,
+            "enrichmentOutputCount": skipped.enrichmentOutputCount,
+            "similarityCandidateCount": skipped.similarityCandidateCount,
+        ]
+        if let date = skipped.date {
+            dict["date"] = date
+        }
+        return dict
+    }
+
     static func journalBackfillResultToDict(_ result: SecondBrainJournalBackfillResult) -> [String: Any] {
         let safeNextCommands = journalBackfillSafeNextCommands(for: result)
         var payload: [String: Any] = [
@@ -27747,6 +27763,7 @@ struct CiderCLI {
             "dryRun": result.dryRun,
             "selectedCount": result.selectedCount,
             "skippedCount": result.skippedCount,
+            "skippedAlreadySeededCount": result.skippedAlreadySeededCount,
             "ownerCount": result.ownerCount,
             "errorCount": result.errorCount,
             "errors": result.errors.map(journalBackfillErrorToDict),
@@ -27761,9 +27778,10 @@ struct CiderCLI {
             "memoryCandidateCount": result.memoryCandidateCount,
             "reviewRequired": result.reviewRequired,
             "owners": result.owners.map(journalBackfillOwnerResultToDict),
+            "skippedOwners": result.skippedOwners.map(journalBackfillSkippedOwnerToDict),
             "safetyRule": result.dryRun
-                ? "Dry run only reports which Daily Journal notes would be reprocessed; it does not rebuild chunks, references, enrichment outputs, similarity candidates, graph candidates, or memory candidates."
-                : "Backfill reprocesses existing Daily Journal notes into chunks, references, enrichment outputs, similarity candidates, and reviewable graph/memory candidates; it does not create a new journal or silently accept graph/memory truth.",
+                ? "Dry run only reports which Daily Journal notes would be reprocessed; undated batches skip already-seeded owners and do not rebuild chunks, references, enrichment outputs, similarity candidates, graph candidates, or memory candidates."
+                : "Backfill reprocesses existing Daily Journal notes into chunks, references, enrichment outputs, similarity candidates, and reviewable graph/memory candidates; undated batches skip already-seeded owners and it does not create a new journal or silently accept graph/memory truth.",
         ]
         if let date = result.date {
             payload["date"] = date
@@ -27833,6 +27851,7 @@ struct CiderCLI {
         print("\(mode) \(result.ownerCount) Daily Journal note(s)\(dateSuffix).")
         print("  Selected: \(result.selectedCount)")
         print("  Skipped: \(result.skippedCount)")
+        print("  Skipped already seeded: \(result.skippedAlreadySeededCount)")
         print("  Errors: \(result.errorCount)")
         print("  Chunks: \(result.chunkCount)")
         print("  References: \(result.referenceCount)")
@@ -30513,6 +30532,7 @@ struct CiderCLI {
           cider-cli item rebuild-similarity <owner-type> <owner-id-or-ref> [--threshold <0-1>] [--limit <n>] [--json]
           cider-cli item dogfood-intelligence [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--json]
           cider-cli item backfill-journals [--date YYYY-MM-DD] [--limit <n>] [--threshold <0-1>] [--candidate-limit <n>] [--dry-run] [--json]
+            Undated bounded batches skip already-seeded Journal owners and continue to later eligible owners; --date still targets that owner for idempotence checks.
           cider-cli item sync-project <project-id-or-name> [--json]
 
         DOCTOR

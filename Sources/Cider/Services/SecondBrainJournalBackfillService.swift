@@ -24,11 +24,22 @@ struct SecondBrainJournalBackfillError: Codable, Equatable {
     var message: String
 }
 
+struct SecondBrainJournalBackfillSkippedOwner: Codable, Equatable {
+    var owner: SecondBrainOwnerRef
+    var title: String
+    var date: String?
+    var reason: String
+    var chunkCount: Int
+    var enrichmentOutputCount: Int
+    var similarityCandidateCount: Int
+}
+
 struct SecondBrainJournalBackfillResult: Codable, Equatable {
     var scope: String
     var dryRun: Bool
     var selectedCount: Int
     var skippedCount: Int
+    var skippedAlreadySeededCount: Int
     var ownerCount: Int
     var errorCount: Int
     var errors: [SecondBrainJournalBackfillError]
@@ -44,6 +55,7 @@ struct SecondBrainJournalBackfillResult: Codable, Equatable {
     var memoryCandidateCount: Int
     var reviewRequired: Bool
     var owners: [SecondBrainJournalBackfillOwnerResult]
+    var skippedOwners: [SecondBrainJournalBackfillSkippedOwner]
 }
 
 @MainActor
@@ -73,11 +85,13 @@ final class SecondBrainJournalBackfillService {
         let boundedCandidateLimit = max(0, candidateLimit)
         let normalizedDate = date?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
         let dailyNotes = allDailyJournalNotes()
-        let selectedNotes = selectDailyJournalNotes(
+        let selection = try selectDailyJournalNotes(
             from: dailyNotes,
             limit: boundedLimit,
             date: normalizedDate
         )
+        let selectedNotes = selection.selected
+        let skippedOwners = selection.skippedOwners
         let skippedCount = max(0, dailyNotes.count - selectedNotes.count)
 
         let indexer = SecondBrainItemContentIndexingService(database: database, store: store)
@@ -161,6 +175,7 @@ final class SecondBrainJournalBackfillService {
             dryRun: dryRun,
             selectedCount: selectedNotes.count,
             skippedCount: skippedCount,
+            skippedAlreadySeededCount: skippedOwners.count,
             ownerCount: ownerResults.count,
             errorCount: errors.count,
             errors: errors,
@@ -175,7 +190,8 @@ final class SecondBrainJournalBackfillService {
             graphCandidateCount: graphCandidateCount,
             memoryCandidateCount: memoryCandidateCount,
             reviewRequired: graphCandidateCount > 0 || memoryCandidateCount > 0 || similarityCandidateCount > 0 || enrichmentOutputCount > 0,
-            owners: ownerResults
+            owners: ownerResults,
+            skippedOwners: skippedOwners
         )
     }
 
@@ -211,15 +227,71 @@ final class SecondBrainJournalBackfillService {
         from dailyNotes: [Note],
         limit: Int,
         date: String?
-    ) -> [Note] {
-        guard limit > 0 else { return [] }
-        return dailyNotes
-            .filter { note in
-                guard let date else { return true }
-                return note.dailyJournalDateLabel == date
+    ) throws -> (selected: [Note], skippedOwners: [SecondBrainJournalBackfillSkippedOwner]) {
+        guard limit > 0 else { return ([], []) }
+        var selected: [Note] = []
+        var skippedOwners: [SecondBrainJournalBackfillSkippedOwner] = []
+        for note in dailyNotes {
+            if let date, note.dailyJournalDateLabel != date {
+                continue
             }
-            .prefix(limit)
-            .map { $0 }
+            let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+            if date == nil {
+                let counts = try generatedArtifactCounts(for: owner)
+                if counts.isSeeded {
+                    skippedOwners.append(SecondBrainJournalBackfillSkippedOwner(
+                        owner: owner,
+                        title: note.title,
+                        date: note.dailyJournalDateLabel,
+                        reason: "already_seeded",
+                        chunkCount: counts.chunkCount,
+                        enrichmentOutputCount: counts.enrichmentOutputCount,
+                        similarityCandidateCount: counts.similarityCandidateCount
+                    ))
+                    continue
+                }
+            }
+            selected.append(note)
+            if selected.count >= limit {
+                break
+            }
+        }
+        return (selected, skippedOwners)
+    }
+
+    private struct GeneratedArtifactCounts {
+        var chunkCount: Int
+        var enrichmentOutputCount: Int
+        var similarityCandidateCount: Int
+
+        var isSeeded: Bool {
+            enrichmentOutputCount > 0 || similarityCandidateCount > 0
+        }
+    }
+
+    private func generatedArtifactCounts(for owner: SecondBrainOwnerRef) throws -> GeneratedArtifactCounts {
+        GeneratedArtifactCounts(
+            chunkCount: try countRows(
+                sql: "SELECT count(*) FROM content_chunks WHERE owner_type = ? AND owner_id = ?;",
+                owner: owner
+            ),
+            enrichmentOutputCount: try countRows(
+                sql: "SELECT count(*) FROM enrichment_outputs WHERE owner_type = ? AND owner_id = ?;",
+                owner: owner
+            ),
+            similarityCandidateCount: try countRows(
+                sql: "SELECT count(*) FROM similarity_candidates WHERE source_owner_type = ? AND source_owner_id = ?;",
+                owner: owner
+            )
+        )
+    }
+
+    private func countRows(sql: String, owner: SecondBrainOwnerRef) throws -> Int {
+        let stmt = try database.prepare(sql)
+        stmt.bind(owner.ownerType, at: 1)
+            .bind(owner.ownerID, at: 2)
+        guard try stmt.step() else { return 0 }
+        return stmt.int(at: 0)
     }
 }
 
