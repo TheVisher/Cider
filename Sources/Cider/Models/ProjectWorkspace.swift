@@ -21,7 +21,7 @@ enum ProjectWorkspaceSurface: String, CaseIterable, Codable, Hashable, Identifia
         switch self {
         case .boards: "Boards"
         case .milestones: "Milestones"
-        case .notes: "Notes"
+        case .notes: "Docs"
         case .decisions: "Decisions"
         case .assets: "Assets"
         case .qaAudits: "QA"

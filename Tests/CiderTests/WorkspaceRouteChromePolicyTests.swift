@@ -2,6 +2,17 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceRouteChromePolicyTests: XCTestCase {
+    func testProjectCiderDocsRouteChromeMatchesSelectedDocsTab() {
+        let route = WorkspaceRoute.projects(.workspace(projectID: "cider", section: .docs))
+        let presentation = WorkspaceRoutePresentation.presentation(for: route)
+        let chrome = WorkspaceRouteChromePolicy.chrome(for: route)
+
+        XCTAssertEqual(presentation.title, "Docs")
+        XCTAssertEqual(presentation.selectedProjectLocalTabKind, .surface(.notes))
+        XCTAssertEqual(chrome.title, "Docs")
+        XCTAssertEqual(chrome.subtitle, "Projects / Docs")
+    }
+
     func testRouteChromeMatchesRepresentativeRoutes() {
         let folderID = UUID()
         let tagID = UUID()

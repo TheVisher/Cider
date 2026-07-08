@@ -182,7 +182,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(cider.surfaces.map(\.title), [
             "Boards",
             "Milestones",
-            "Notes",
+            "Docs",
             "Decisions",
             "Assets",
             "QA",
