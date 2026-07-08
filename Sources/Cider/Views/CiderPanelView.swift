@@ -439,6 +439,7 @@ struct CiderPanelView: View {
             SearchPaletteView(
                 bookmarks: bookmarksViewModel.bookmarks,
                 notes: notesViewModel.notes,
+                currentWorkspaceRoute: workspaceRouter.currentRoute,
                 onOpenBookmark: { bookmark in
                     if NSEvent.modifierFlags.contains(.command) {
                         bookmarksViewModel.open(bookmark)

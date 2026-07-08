@@ -103,11 +103,78 @@ enum SearchPaletteQueryEditing {
     }
 }
 
+enum SearchPaletteResultSelectionMode {
+    case preview
+    case showInLibrary
+}
+
+struct SearchPaletteResultSelectionAction: Equatable {
+    let previewRef: LibraryEntityRef
+    let routeAfterSelection: WorkspaceRoute
+    let sourceRoute: WorkspaceRoute?
+}
+
+enum SearchPaletteResultSelectionPolicy {
+    static func action(
+        for result: SearchResult,
+        mode: SearchPaletteResultSelectionMode,
+        currentRoute: WorkspaceRoute
+    ) -> SearchPaletteResultSelectionAction? {
+        guard let ref = entityRef(for: result) else { return nil }
+        let sourceRoute = librarySourceRoute(for: result.type)
+        switch mode {
+        case .preview:
+            return SearchPaletteResultSelectionAction(
+                previewRef: ref,
+                routeAfterSelection: currentRoute,
+                sourceRoute: nil
+            )
+        case .showInLibrary:
+            return SearchPaletteResultSelectionAction(
+                previewRef: ref,
+                routeAfterSelection: sourceRoute,
+                sourceRoute: sourceRoute
+            )
+        }
+    }
+
+    private static func entityRef(for result: SearchResult) -> LibraryEntityRef? {
+        switch result.type {
+        case .bookmark:
+            return result.bookmark.map { LibraryEntityRef(type: .bookmark, entityID: $0.id) }
+        case .note:
+            return result.note.map { LibraryEntityRef(type: .note, entityID: $0.id) }
+        case .dateCard:
+            return result.dateCard.map { LibraryEntityRef(type: .dateCard, entityID: $0.id) }
+        case .contact:
+            return result.contact.map { LibraryEntityRef(type: .contact, entityID: $0.id) }
+        case .todo:
+            return result.todoCard.map { LibraryEntityRef(type: .todo, entityID: $0.id) }
+        case .vaultFile:
+            return result.vaultFile.map { LibraryEntityRef(type: .vaultFile, entityID: $0.id) }
+        }
+    }
+
+    private static func librarySourceRoute(for type: SearchResultType) -> WorkspaceRoute {
+        switch type {
+        case .bookmark:
+            return .library(.bookmarks)
+        case .note:
+            return .library(.notes)
+        case .vaultFile:
+            return .library(.files)
+        case .dateCard, .contact, .todo:
+            return .library(.all)
+        }
+    }
+}
+
 // MARK: - Search Palette View
 
 struct SearchPaletteView: View {
     let bookmarks: [Bookmark]
     let notes: [Note]
+    let currentWorkspaceRoute: WorkspaceRoute
     let onOpenBookmark: (Bookmark) -> Void
     let onOpenNote: (Note) -> Void
     var onOpenDateCard: ((DateCard) -> Void)? = nil
@@ -341,33 +408,44 @@ struct SearchPaletteView: View {
             onOpenSearchRoute?(q)
             onDismiss()
         case .result(let result):
-            switch result.type {
-            case .bookmark:
-                if let bookmark = result.bookmark {
-                    onOpenBookmark(bookmark)
-                }
-            case .note:
-                if let note = result.note {
-                    onOpenNote(note)
-                }
-            case .dateCard:
-                if let dateCard = result.dateCard {
-                    onOpenDateCard?(dateCard)
-                }
-            case .contact:
-                if let contact = result.contact {
-                    onOpenContact?(contact)
-                }
-            case .todo:
-                if let todoCard = result.todoCard {
-                    onOpenTodo?(todoCard)
-                }
-            case .vaultFile:
-                if let vaultFile = result.vaultFile {
-                    NSWorkspace.shared.open(vaultFile.absoluteURL)
-                }
+            guard SearchPaletteResultSelectionPolicy.action(
+                for: result,
+                mode: .preview,
+                currentRoute: currentWorkspaceRoute
+            ) != nil else {
+                return
             }
+            openPreview(for: result)
             onDismiss()
+        }
+    }
+
+    private func openPreview(for result: SearchResult) {
+        switch result.type {
+        case .bookmark:
+            if let bookmark = result.bookmark {
+                onOpenBookmark(bookmark)
+            }
+        case .note:
+            if let note = result.note {
+                onOpenNote(note)
+            }
+        case .dateCard:
+            if let dateCard = result.dateCard {
+                onOpenDateCard?(dateCard)
+            }
+        case .contact:
+            if let contact = result.contact {
+                onOpenContact?(contact)
+            }
+        case .todo:
+            if let todoCard = result.todoCard {
+                onOpenTodo?(todoCard)
+            }
+        case .vaultFile:
+            if let vaultFile = result.vaultFile {
+                NSWorkspace.shared.open(vaultFile.absoluteURL)
+            }
         }
     }
 
