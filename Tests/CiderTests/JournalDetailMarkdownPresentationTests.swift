@@ -43,4 +43,50 @@ struct JournalDetailMarkdownPresentationTests {
             "Closing or leaving Journal should flush only real pending note edits, so render-mode changes do not rewrite journal prose."
         )
     }
+
+    @Test("journal rich mode uses prepared display content while markdown mode remains raw")
+    func journalRichModeUsesPreparedDisplayContentWhileMarkdownModeRemainsRaw() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let notesViewModelURL = repoRoot.appendingPathComponent("Sources/Cider/ViewModels/NotesViewModel.swift")
+        let journalViewsURL = repoRoot.appendingPathComponent("Sources/Cider/Views/Journal/JournalLibraryViews.swift")
+        let nativeMarkdownURL = repoRoot.appendingPathComponent("Sources/Cider/Views/Notes/NativeMarkdownEditorView.swift")
+        let notesViewModel = try String(contentsOf: notesViewModelURL, encoding: .utf8)
+        let journalViews = try String(contentsOf: journalViewsURL, encoding: .utf8)
+        let nativeMarkdown = try String(contentsOf: nativeMarkdownURL, encoding: .utf8)
+
+        #expect(
+            journalViews.contains("setRichDisplayContentOverride(entry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat))"),
+            "Journal rich display should use the read-model's cached/prepared presentation string, including timestamp preferences."
+        )
+        #expect(
+            notesViewModel.contains("richDisplayContentOverride"),
+            "NotesViewModel should keep journal rich presentation separate from raw editing content."
+        )
+        #expect(
+            nativeMarkdown.contains("viewModel.editingContent"),
+            "Markdown/source mode should continue to show raw stored note content."
+        )
+    }
+
+    @Test("journal rich markdown toggle avoids source rewrite and can reuse pushed rich content")
+    func journalRichMarkdownToggleAvoidsSourceRewriteAndCanReusePushedRichContent() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let notesViewModelURL = repoRoot.appendingPathComponent("Sources/Cider/ViewModels/NotesViewModel.swift")
+        let detailManagementURL = repoRoot.appendingPathComponent("Sources/Cider/Views/CiderPanelView+DetailManagement.swift")
+        let notesViewModel = try String(contentsOf: notesViewModelURL, encoding: .utf8)
+        let detailManagement = try String(contentsOf: detailManagementURL, encoding: .utf8)
+
+        #expect(
+            notesViewModel.contains("if mode == .source, richDisplayContentOverride == nil, let noteID = selectedNote?.id"),
+            "Switching a journal rich presentation to Markdown should not sync transformed display markdown back into the source note."
+        )
+        #expect(
+            notesViewModel.contains("lastRichEditorPushedMarkdown"),
+            "Switching Markdown back to Rich should be able to skip reparsing when the desired rich markdown is already loaded."
+        )
+        #expect(
+            detailManagement.contains("notesViewModel.setRichDisplayContentOverride(nil)"),
+            "Leaving Journal should clear the rich-only presentation override so normal notes are unaffected."
+        )
+    }
 }

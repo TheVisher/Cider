@@ -156,6 +156,35 @@ struct JournalLibraryReadModelTests {
         #expect(entry.content == content)
     }
 
+    @Test("journal display content canonicalizes legacy heading and date metadata without mutating source")
+    func journalDisplayContentCanonicalizesLegacyHeadingAndDateMetadataWithoutMutatingSource() throws {
+        let content = """
+        # Daily Journal 2026-07-01
+
+        2026-07-01
+
+        - 03:29 - Early note
+        - 14:14 - Afternoon thought
+        """
+        let note = Note(
+            title: "Daily Journal 2026-07-01",
+            content: content,
+            relativePath: "Inbox/Notes/Daily Journal 2026-07-01.md"
+        )
+
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+        let display = entry.displayContent(timestampFormat: .twelveHour)
+
+        #expect(entry.displayTitle == "Journal 07-01-2026")
+        #expect(display.contains("# Journal 07-01-2026"))
+        #expect(!display.contains("# Daily Journal 2026-07-01"))
+        #expect(display.contains("Journal 07-01-2026"))
+        #expect(!display.contains("\n2026-07-01\n"))
+        #expect(display.contains("- 3:29 AM - Early note"))
+        #expect(display.contains("- 2:14 PM - Afternoon thought"))
+        #expect(entry.content == content)
+    }
+
     @Test("journal display timestamp cache keeps formatting display only")
     func journalDisplayTimestampCacheKeepsFormattingDisplayOnly() throws {
         let content = """

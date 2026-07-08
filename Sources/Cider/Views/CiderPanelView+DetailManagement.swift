@@ -518,6 +518,7 @@ extension CiderPanelView {
             if isJournalDetailOpen {
                 notesViewModel.flushSave()
             }
+            notesViewModel.setRichDisplayContentOverride(nil)
             isJournalDetailOpen = false
             journalNavigationVisible = false
             journalMetadataVisible = false
@@ -543,6 +544,7 @@ extension CiderPanelView {
         if wasJournalDetailOpen {
             notesViewModel.flushSave()
         }
+        notesViewModel.setRichDisplayContentOverride(nil)
         isJournalDetailOpen = false
         journalNavigationVisible = false
         journalMetadataVisible = false

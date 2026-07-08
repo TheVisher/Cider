@@ -72,12 +72,12 @@ struct JournalDetailContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             if let selectedEntry {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text(selectedEntry.note.title)
+                    Text(selectedEntry.displayTitle)
                         .font(CiderFont.subheadingSemibold)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(2)
 
-                    Text(selectedEntry.dateLabel)
+                    Text(selectedEntry.displayTitle)
                         .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
@@ -103,11 +103,14 @@ struct JournalDetailContentView: View {
 
     private func selectJournalNoteIfNeeded() {
         guard let entry = selectedEntry else {
+            notesViewModel.setRichDisplayContentOverride(nil)
             notesViewModel.clearSelectedNote()
             return
         }
-        guard notesViewModel.selectedNote?.id != entry.note.id else { return }
-        notesViewModel.selectNote(entry.note)
+        if notesViewModel.selectedNote?.id != entry.note.id {
+            notesViewModel.selectNote(entry.note)
+        }
+        notesViewModel.setRichDisplayContentOverride(entry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat))
     }
 }
 

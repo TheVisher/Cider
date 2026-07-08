@@ -23,10 +23,15 @@ struct JournalLibraryEntry: Identifiable, Hashable {
     let dateLabel: String
     let content: String
 
+    var displayTitle: String {
+        JournalLibraryReadModel.canonicalDisplayTitle(for: date)
+    }
+
     func cachedDisplayContent(timestampFormat: JournalTimestampFormat) -> String? {
         JournalLibraryReadModel.cachedDisplayContent(
             entryID: id,
             content: content,
+            date: date,
             timestampFormat: timestampFormat
         )
     }
@@ -35,6 +40,7 @@ struct JournalLibraryEntry: Identifiable, Hashable {
         JournalLibraryReadModel.preparedDisplayContent(
             entryID: id,
             content: content,
+            date: date,
             timestampFormat: timestampFormat
         )
     }
@@ -111,12 +117,16 @@ struct JournalLibraryReadModel: Hashable {
     static func cachedDisplayContent(
         entryID: String,
         content: String,
+        date: Date,
         timestampFormat: JournalTimestampFormat
     ) -> String? {
-        guard timestampFormat == .twelveHour else { return content }
+        if timestampFormat == .twentyFourHour {
+            return canonicalizedJournalDisplayContent(content, date: date)
+        }
         return displayContentCache.value(for: displayCacheKey(
             entryID: entryID,
             content: content,
+            date: date,
             timestampFormat: timestampFormat
         ))
     }
@@ -124,15 +134,18 @@ struct JournalLibraryReadModel: Hashable {
     static func preparedDisplayContent(
         entryID: String,
         content: String,
+        date: Date,
         timestampFormat: JournalTimestampFormat
     ) -> String {
-        guard timestampFormat == .twelveHour else { return content }
-        let key = displayCacheKey(entryID: entryID, content: content, timestampFormat: timestampFormat)
+        let key = displayCacheKey(entryID: entryID, content: content, date: date, timestampFormat: timestampFormat)
         if let cached = displayContentCache.value(for: key) {
             return cached
         }
 
-        let formatted = formatJournalTimestamps(in: content, format: timestampFormat)
+        let formatted = formatJournalTimestamps(
+            in: canonicalizedJournalDisplayContent(content, date: date),
+            format: timestampFormat
+        )
         displayContentCache.setValue(formatted, for: key)
         return formatted
     }
@@ -140,9 +153,46 @@ struct JournalLibraryReadModel: Hashable {
     private static func displayCacheKey(
         entryID: String,
         content: String,
+        date: Date,
         timestampFormat: JournalTimestampFormat
     ) -> String {
-        "\(entryID)|\(timestampFormat.rawValue)|\(content.count)|\(content.hashValue)"
+        "\(entryID)|\(timestampFormat.rawValue)|\(canonicalDateLabel(for: date))|\(content.count)|\(content.hashValue)"
+    }
+
+    static func canonicalDisplayTitle(for date: Date) -> String {
+        "Journal \(displayDateFormatter.string(from: date))"
+    }
+
+    static func canonicalizedJournalDisplayContent(_ content: String, date: Date) -> String {
+        let title = canonicalDisplayTitle(for: date)
+        let isoDate = canonicalDateLabel(for: date)
+        var didReplaceHeading = false
+
+        return content
+            .components(separatedBy: .newlines)
+            .map { line in
+                if !didReplaceHeading, isJournalHeadingLine(line) {
+                    didReplaceHeading = true
+                    return "# \(title)"
+                }
+                if line.trimmingCharacters(in: .whitespaces) == isoDate {
+                    return title
+                }
+                return line
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func isJournalHeadingLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.range(
+            of: #"^#\s+(Daily Journal \d{4}-\d{2}-\d{2}|Journal \d{2}-\d{2}-\d{4})$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func canonicalDateLabel(for date: Date) -> String {
+        dayFormatter.string(from: date)
     }
 
     private static func formatJournalTimestampLine(_ line: String) -> String {
@@ -258,6 +308,15 @@ struct JournalLibraryReadModel: Hashable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        return formatter
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MM-dd-yyyy"
         return formatter
     }()
 

@@ -56,6 +56,7 @@ final class NotesViewModel: ObservableObject {
     @Published var findMatchCount: Int = 0
     @Published var findMatchIndex: Int = 0
     @Published var findFocusToken = UUID()
+    @Published private(set) var richDisplayContentOverride: String?
     @Published private(set) var notesEditorTextSize: NotesEditorTextSize
     @Published private(set) var noteEditorMode: NoteEditorMode
     @Published var editorFormatState = EditorFormatState()
@@ -75,6 +76,7 @@ final class NotesViewModel: ObservableObject {
     private var isLoadingNote = false
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
+    private var lastRichEditorPushedMarkdown: String?
     var notes: [Note] {
         NotesStorage.shared.notes.filter { !$0.isProjectArtifact }
     }
@@ -311,7 +313,7 @@ final class NotesViewModel: ObservableObject {
             editingContent = content
             lastSyncedDiskContent = content
             isLoadingNote = true
-            pushContentToEditor(content)
+            pushContentToEditor(richDisplayContentOverride ?? content)
             if isFindBarVisible, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 updateFindQuery(findQuery)
             }
@@ -319,9 +321,13 @@ final class NotesViewModel: ObservableObject {
     }
 
     /// Push markdown content to the TipTap editor via JS.
-    private func pushContentToEditor(_ markdown: String) {
+    private func pushContentToEditor(_ markdown: String, force: Bool = false) {
         guard editorIsReady, let webView = editorWebView else {
             logger.warning("pushContentToEditor: editor not ready or webView nil")
+            return
+        }
+        if !force, lastRichEditorPushedMarkdown == markdown {
+            reapplyFindQueryAfterEditorContentLoad()
             return
         }
         let editorMarkdown: String
@@ -338,6 +344,7 @@ final class NotesViewModel: ObservableObject {
             logger.error("pushContentToEditor: JSON encoding failed")
             return
         }
+        lastRichEditorPushedMarkdown = markdown
         webView.evaluateJavaScript("window.editorAPI.setContent(\(jsonString))") { [weak self] _, error in
             if let error {
                 logger.error("pushContentToEditor JS failed: \(error.localizedDescription)")
@@ -351,7 +358,15 @@ final class NotesViewModel: ObservableObject {
 
     func pushCurrentContentToEditorIfReady() {
         guard let selectedNote else { return }
-        pushContentToEditor(selectedNote.content)
+        pushContentToEditor(richDisplayContentOverride ?? selectedNote.content)
+    }
+
+    func setRichDisplayContentOverride(_ content: String?) {
+        guard richDisplayContentOverride != content else { return }
+        richDisplayContentOverride = content
+        guard noteEditorMode == .rich else { return }
+        isLoadingNote = content != nil
+        pushContentToEditor(content ?? editingContent)
     }
 
     /// Focus the TipTap editor.
@@ -437,6 +452,7 @@ final class NotesViewModel: ObservableObject {
         // Save current note before switching
         flushSave()
         isLoadingNote = false
+        richDisplayContentOverride = nil
 
         var loaded = note
         loaded.content = loadPersistedContent(for: note)
@@ -453,8 +469,9 @@ final class NotesViewModel: ObservableObject {
         externalChangeState = nil
         hasPendingSave = false
         isLoadingNote = true
+        lastRichEditorPushedMarkdown = nil
 
-        pushContentToEditor(loaded.content)
+        pushContentToEditor(richDisplayContentOverride ?? loaded.content)
         scheduleEditorRenderRefresh(for: loaded.id)
     }
 
@@ -588,6 +605,12 @@ final class NotesViewModel: ObservableObject {
     }
 
     private func applyEditedContent(_ persistedContent: String) {
+        if isLoadingNote, richDisplayContentOverride != nil {
+            isLoadingNote = false
+            hasPendingSave = false
+            return
+        }
+
         editingContent = persistedContent
         charCount = persistedContent.count
         hasPendingSave = true
@@ -654,6 +677,8 @@ final class NotesViewModel: ObservableObject {
         NotesStorage.shared.save(note: note)
         SyncService.shared.pushAfterLocalChange()
         hasPendingSave = false
+
+        guard richDisplayContentOverride == nil else { return }
 
         // Then ask the editor for current content to catch any final keystrokes
         // that haven't crossed the JS->Swift bridge yet.
@@ -905,7 +930,7 @@ final class NotesViewModel: ObservableObject {
     func setNoteEditorMode(_ mode: NoteEditorMode) {
         guard noteEditorMode != mode else { return }
 
-        if mode == .source, let noteID = selectedNote?.id {
+        if mode == .source, richDisplayContentOverride == nil, let noteID = selectedNote?.id {
             syncContentFromEditor(noteID: noteID)
         }
 
@@ -918,7 +943,7 @@ final class NotesViewModel: ObservableObject {
 
         if mode == .rich {
             isLoadingNote = true
-            pushContentToEditor(editingContent)
+            pushContentToEditor(richDisplayContentOverride ?? editingContent)
             focusEditor()
         }
     }
@@ -1320,12 +1345,14 @@ final class NotesViewModel: ObservableObject {
         editingContent = ""
         editingTitle = ""
         charCount = 0
+        richDisplayContentOverride = nil
         isFindBarVisible = false
         findQuery = ""
         resetFindResults()
         lastSyncedDiskContent = ""
         pendingExternalDiskContent = nil
         ignoredExternalDiskContent = nil
+        lastRichEditorPushedMarkdown = nil
         externalChangeState = nil
         hasPendingSave = false
 
