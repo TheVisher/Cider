@@ -207,7 +207,7 @@ struct JournalLibraryReadModel: Hashable {
         let isoDate = metadata?.journalDate ?? canonicalDateLabel(for: date)
         var didReplaceHeading = false
 
-        return content
+        let canonicalized = content
             .components(separatedBy: .newlines)
             .map { line in
                 if !didReplaceHeading, isJournalHeadingLine(line) {
@@ -220,6 +220,7 @@ struct JournalLibraryReadModel: Hashable {
                 return line
             }
             .joined(separator: "\n")
+        return normalizeCapturedJournalSections(in: canonicalized)
     }
 
     private static func isJournalHeadingLine(_ line: String) -> Bool {
@@ -256,6 +257,114 @@ struct JournalLibraryReadModel: Hashable {
         }
 
         return line
+    }
+
+    private static func normalizeCapturedJournalSections(in content: String) -> String {
+        let lines = content.components(separatedBy: .newlines)
+        var normalized: [String] = []
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            guard let time = exactTimestampHeading(in: line) else {
+                normalized.append(line)
+                index += 1
+                continue
+            }
+
+            let sourceIndex = nextNonEmptyLineIndex(after: index, in: lines)
+            guard let sourceIndex,
+                  let source = captureSourceLineValue(lines[sourceIndex]) else {
+                normalized.append("- \(time) -")
+                index += 1
+                continue
+            }
+
+            normalized.append("- \(time) - \(friendlyCaptureSourceLabel(for: source))")
+            index += 1
+            while index < lines.count {
+                if index == sourceIndex {
+                    index += 1
+                    continue
+                }
+                normalized.append(lines[index])
+                index += 1
+                if index > sourceIndex { break }
+            }
+        }
+        return normalized.joined(separator: "\n")
+    }
+
+    private static func exactTimestampHeading(in line: String) -> String? {
+        let regex = try! NSRegularExpression(pattern: #"^\s*##\s+(\d{2}:\d{2})\s*$"#)
+        let range = NSRange(line.startIndex..., in: line)
+        guard let match = regex.firstMatch(in: line, range: range),
+              let timeRange = Range(match.range(at: 1), in: line) else {
+            return nil
+        }
+        let time = String(line[timeRange])
+        return isValidClockTime(time) ? time : nil
+    }
+
+    private static func nextNonEmptyLineIndex(after index: Int, in lines: [String]) -> Int? {
+        var candidate = index + 1
+        while candidate < lines.count {
+            if !lines[candidate].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return candidate
+            }
+            candidate += 1
+        }
+        return nil
+    }
+
+    private static func captureSourceLineValue(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.localizedLowercase.hasPrefix("source:") else { return nil }
+        let value = String(trimmed.dropFirst("Source:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    static func friendlyCaptureSourceLabel(for rawSource: String) -> String {
+        let normalized = rawSource
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .localizedLowercase
+        guard !normalized.isEmpty else { return "Captured by Cider agent" }
+
+        let isVoice = normalized.contains("voice")
+        if normalized.contains("discord") {
+            return isVoice ? "Captured from Discord voice note" : "Captured from Discord"
+        }
+        if normalized.contains("telegram") {
+            return isVoice ? "Captured from Telegram voice note" : "Captured from Telegram"
+        }
+        if normalized.contains("slack") {
+            return isVoice ? "Captured from Slack voice note" : "Captured from Slack"
+        }
+        if normalized.contains("voice") {
+            return "Captured from voice note"
+        }
+        if normalized == "capture.add"
+            || normalized == "cider cli"
+            || normalized == "cider agent"
+            || normalized == "cli" {
+            return "Captured by Cider agent"
+        }
+
+        let words = normalized.split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return "Captured by Cider agent" }
+        return "Captured from \(words.map(capitalizedSourceWord).joined(separator: " "))"
+    }
+
+    private static func capitalizedSourceWord(_ word: String) -> String {
+        switch word {
+        case "ios": return "iOS"
+        case "macos": return "macOS"
+        case "cli": return "CLI"
+        default:
+            guard let first = word.first else { return word }
+            return first.uppercased() + word.dropFirst()
+        }
     }
 
     static func twelveHourDisplayTime(from rawTime: String) -> String? {

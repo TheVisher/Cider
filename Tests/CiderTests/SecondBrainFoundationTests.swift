@@ -613,6 +613,59 @@ struct SecondBrainFoundationTests {
         })
     }
 
+    @Test("capture add journal keeps source markdown honest while rich display is calm")
+    func captureAddJournalKeepsSourceMarkdownHonestWhileRichDisplayIsCalm() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-journal-capture-display-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let payload = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-07-08",
+            "--time", "15:16",
+            "--channel", "discord",
+            "--surface", "discord",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "Fresh Discord voice-note reflection."))
+
+        let item = try #require(payload["item"] as? [String: Any])
+        let relativePath = try #require(item["relativePath"] as? String)
+        let content = try String(contentsOf: vault.appendingPathComponent(relativePath), encoding: .utf8)
+        #expect(content.contains("## 15:16"))
+        #expect(content.contains("Source: discord"))
+        #expect(content.contains("Fresh Discord voice-note reflection."))
+
+        let note = Note(
+            title: try #require(item["title"] as? String),
+            content: content,
+            relativePath: relativePath
+        )
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+        let richDisplay = entry.displayContent(timestampFormat: .twelveHour)
+        #expect(richDisplay.contains("- 3:16 PM - Captured from Discord"))
+        #expect(!richDisplay.contains("## 3:16 PM"))
+        #expect(!richDisplay.contains("Source: discord"))
+
+        let provenance = try #require(payload["provenance"] as? [String: Any])
+        #expect(provenance["status"] as? String == "recorded")
+        #expect(payload["command"] as? String == "capture.add")
+
+        let beforeSecondCapture = content
+        _ = try jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "journal",
+            "--date", "2026-07-09",
+            "--time", "09:05",
+            "--stdin",
+            "--json",
+        ], vaultURL: vault, stdin: "Next-day entry should not rewrite yesterday."))
+        let afterSecondCapture = try String(contentsOf: vault.appendingPathComponent(relativePath), encoding: .utf8)
+        #expect(afterSecondCapture == beforeSecondCapture)
+    }
+
     @Test("capture journal cleanup removes matching section and unaccepted side effects")
     func captureJournalCleanupRemovesMatchingSectionAndUnacceptedSideEffects() throws {
         let vault = FileManager.default.temporaryDirectory

@@ -3921,16 +3921,16 @@ struct CiderCLI {
         storage: NotesStorage,
         commandSource: String = "capture.add"
     ) throws -> [String: Any] {
+        let sourceContext = captureSourceContext(from: args, originalText: rawContent)
         let result = try appendDailyNoteEntry(
             spec: DailyNoteKindSpec(kind: "journal", titlePrefix: "Journal"),
             dateRaw: parseFlag("--date", from: args),
             timeRaw: parseFlag("--time", from: args),
             rawContent: rawContent,
-            source: commandSource,
+            source: journalAppendSource(commandSource: commandSource, sourceContext: sourceContext),
             storage: storage,
             emptyContentMessage: "Journal capture content cannot be empty."
         )
-        let sourceContext = captureSourceContext(from: args, originalText: result.rawContent)
         let provenance = recordJournalCaptureProvenance(result, sourceContext: sourceContext)
         let graphCandidates = recordJournalGraphCandidates(
             result,
@@ -3943,6 +3943,24 @@ struct CiderCLI {
             provenance: provenance,
             graphCandidates: graphCandidates
         )
+    }
+
+    static func journalAppendSource(commandSource: String, sourceContext: CaptureSourceContext?) -> String {
+        let candidates = [
+            sourceContext?.channel,
+            sourceContext?.surface,
+            commandSource,
+        ]
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !trimmed.isEmpty else { continue }
+            if trimmed.localizedCaseInsensitiveCompare("cli") == .orderedSame
+                || trimmed.localizedCaseInsensitiveCompare("cider-cli") == .orderedSame {
+                continue
+            }
+            return trimmed
+        }
+        return commandSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "capture.add" : commandSource
     }
 
     static func dailyJournalAppendCompatibilityPayload(capture: [String: Any]) -> [String: Any] {

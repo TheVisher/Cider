@@ -96,7 +96,60 @@ struct JournalLibraryReadModelTests {
         #expect(entry.metadata.sections.map(\.captureSource) == ["capture.add", "voice"])
         #expect(entry.metadata.sections.map { $0.displayTimestamp(format: .twelveHour) } == ["8:15 AM", "7:27 PM"])
         #expect(entry.metadata.sections.allSatisfy { content.contains($0.sourceSnippet) })
-        #expect(entry.displayContent(timestampFormat: .twelveHour).contains("## 7:27 PM"))
+        #expect(entry.displayContent(timestampFormat: .twelveHour).contains("- 7:27 PM - Captured from voice note"))
+        #expect(entry.content == content)
+    }
+
+    @Test("journal rich display normalizes capture headings and hides raw source command")
+    func journalRichDisplayNormalizesCaptureHeadingsAndHidesRawSourceCommand() throws {
+        let content = """
+        # Journal 07-08-2026
+
+        ## Entries
+        ## 15:16
+        Source: capture.add
+
+        Captured reflection from the agent path.
+        """
+        let note = Note(
+            title: "Journal 07-08-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 07-08-2026.md"
+        )
+
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+        let display = entry.displayContent(timestampFormat: .twelveHour)
+
+        #expect(display.contains("- 3:16 PM - Captured by Cider agent"))
+        #expect(!display.contains("## 3:16 PM"))
+        #expect(!display.contains("Source: capture.add"))
+        #expect(display.contains("Captured reflection from the agent path."))
+        #expect(entry.metadata.sections.map(\.captureSource) == ["capture.add"])
+        #expect(entry.content == content)
+    }
+
+    @Test("journal rich display derives friendly source labels from capture marker")
+    func journalRichDisplayDerivesFriendlySourceLabelsFromCaptureMarker() throws {
+        let content = """
+        # Journal 07-08-2026
+
+        ## 09:05
+        Source: discord voice note
+
+        Voice-derived reflection.
+        """
+        let note = Note(
+            title: "Journal 07-08-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 07-08-2026.md"
+        )
+
+        let entry = try #require(JournalLibraryReadModel.build(from: [note]).entries.first)
+        let display = entry.displayContent(timestampFormat: .twelveHour)
+
+        #expect(display.contains("- 9:05 AM - Captured from Discord voice note"))
+        #expect(!display.contains("Source: discord voice note"))
+        #expect(entry.metadata.sections.map(\.captureSource) == ["discord voice note"])
         #expect(entry.content == content)
     }
 
