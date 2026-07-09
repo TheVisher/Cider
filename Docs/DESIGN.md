@@ -30,6 +30,7 @@ Cider should feel like a calm native memory cockpit: fast capture, clear review,
 ## Feature Surfaces
 
 - Capture flows should be fast and forgiving.
+- Library should open to the complete visual collection and use subtle, low-weight multi-select pills for fast show/hide filtering. Keep item-type filters, workflow state, and Space/entity lenses conceptually distinct so the control row stays calm.
 - Review surfaces should make uncertainty visible and correction cheap.
 - Detail views should reveal metadata without overwhelming the main content.
 - Kanban should optimize for scanning and handoff.

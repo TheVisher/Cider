@@ -12,6 +12,16 @@ The main Mac surface is a fast panel/window experience activated by hotkey. Cide
 
 Key code: `Sources/Cider/App/`, `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Views/Shared/CiderPanelShell.swift`.
 
+## Library
+
+Library opens to the complete visual collection across active item types. It is the shared manual-browse and capture surface, not a dashboard landing page and not a second set of domain mini-apps.
+
+Filtering should be immediate and low-clutter. Use a quiet row of multi-select pills to show or hide major content families—for example Bookmarks, Journal/Notes, Files, Tasks, Events, and People—with an obvious All/reset state. Keep workflow state such as Inbox or Needs Review visually distinct from content-type pills, and expose Spaces through an entity-aware lens/selector rather than expanding the row into dozens of permanent chips. Active filters must remain obvious and easy to clear; a fresh Library opening should show the complete collection.
+
+Journal should appear in Library as a calm container/card rather than flooding the collection with every daily entry. Grid, masonry, and list/table presentation remain useful views over the same filtered collection.
+
+Key code: `Sources/Cider/Models/WorkspaceRoute.swift`, `Sources/Cider/Models/LibraryItemV2.swift`, `Sources/Cider/Views/Shared/`, `Sources/Cider/Views/Journal/JournalLibraryViews.swift`.
+
 ## Bookmarks
 
 Bookmarks are one captured item type inside the second-brain loop. They capture URLs, metadata, thumbnails, tags, notes, related items, source provenance, routing/review state, and vault placement. `.webloc` files are durable vault artifacts while SQLite stores canonical metadata. Bookmark detail should conserve memory: keep the active live page useful, but avoid warming every web/reader/extraction surface in the background.

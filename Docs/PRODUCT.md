@@ -48,7 +48,7 @@ The core loop is:
 
 1. Run a product-scope reset through an explicit feature/view/route inventory; preserve content while deciding what to keep, merge, demote, park, or remove.
 2. Make conversation -> Journal -> selective typed objects -> source-backed recall the first mature daily loop.
-3. Guarantee parity between native/manual capture and agent capture through the shared SQLite-backed item, provenance, indexing, review, and recall layer.
+3. Guarantee parity between native/manual capture and agent capture through the shared SQLite-backed item, provenance, indexing, review, and recall layer. Library opens to the complete visual collection with calm, easily cleared show/hide filters over that shared data.
 4. Add bounded reconciliation for relationships discovered across time, such as a later manual toolbox bookmark matching an earlier Journal intention, while keeping uncertain links reviewable.
 5. Keep Kanban strong as the visual idea, project, QA, and agent-handoff system without treating every captured idea as immediate implementation work.
 6. Stabilize speed, reliability, and Testing debt before broad feature expansion.
