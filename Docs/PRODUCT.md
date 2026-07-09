@@ -4,6 +4,8 @@ Status: canonical core doc.
 
 Cider is a local-first Mac second brain and life command center. It is the user's calm native memory cockpit: fast capture, clear review, helpful resurfacing, and one trusted Main Brain over local personal context.
 
+In everyday use, conversation and voice-driven Journal capture are the primary front door. The Mac app remains an important manual-capture, browsing, review, and project-management client rather than a required intermediary for every save.
+
 The destination is defined in `Docs/NORTH_STAR.md`; this document summarizes the current product line, principles, surfaces, focus, and non-goals.
 
 The product is no longer the old general vault/bookmark app with extra features bolted on. Bookmarks, notes, files, todos, dates, contacts, screenshots, Kanban cards, and Spaces are parts of one second-brain system.
@@ -20,6 +22,8 @@ The core loop is:
 
 - Local-first by default. Personal memory belongs on the user's Mac first.
 - Capture must be fast and imperfect by design. The user should not need to decide the perfect folder, type, or tag before saving something.
+- Manual and agent captures must have parity: both enter the same canonical item/index/provenance graph and must be equally available to search, recall, linking, review, and Main Brain.
+- Journal is the readable chronological narrative. Explicit user intent creates typed bookmarks, places, tasks, events, and other objects linked to that narrative; incidental mentions remain reviewable suggestions rather than automatic Library clutter.
 - Cider should reduce memory and ADHD friction by helping the user remember, connect, review, and act.
 - SQLite is the canonical memory and query layer for managed items, routing, review state, search, recall, agenda relevance, and agent context.
 - Vault files and Kanban YAML remain durable artifacts and workflow stores where the file itself matters.
@@ -42,13 +46,13 @@ The core loop is:
 
 ## Current Focus
 
-1. Keep core docs lean and aligned with the second-brain product narrative.
-2. Keep Kanban strong enough to operate roadmap work without chasing perfect project-management polish.
-3. Build out capture -> enrich -> route -> review over the shared SQLite-backed item and routing layer.
-4. Make Dashboard/Home a useful command center, not a passive feed.
-5. Improve recall, search, and agent context bundles across item types and Spaces.
-6. Make Cider-owned reminders and life tracking reliable enough for bills, dates, follow-ups, and recurring obligations.
-7. Keep Main Brain focused, useful, cautious, and grounded in local Cider truth.
+1. Run a product-scope reset through an explicit feature/view/route inventory; preserve content while deciding what to keep, merge, demote, park, or remove.
+2. Make conversation -> Journal -> selective typed objects -> source-backed recall the first mature daily loop.
+3. Guarantee parity between native/manual capture and agent capture through the shared SQLite-backed item, provenance, indexing, review, and recall layer.
+4. Add bounded reconciliation for relationships discovered across time, such as a later manual toolbox bookmark matching an earlier Journal intention, while keeping uncertain links reviewable.
+5. Keep Kanban strong as the visual idea, project, QA, and agent-handoff system without treating every captured idea as immediate implementation work.
+6. Stabilize speed, reliability, and Testing debt before broad feature expansion.
+7. Let Home, Spaces, dashboards, and specialized views earn prominence from repeated value instead of assuming every capability needs a permanent surface.
 
 ## Legacy Framing
 

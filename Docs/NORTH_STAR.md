@@ -31,6 +31,18 @@ capture -> enrich -> route -> review -> link -> recall -> resurface -> act
 
 Every major feature should either strengthen that loop or deliberately stay out of the way.
 
+## Primary Interaction And Capture Parity
+
+Conversation and voice-driven Journal capture are Cider's primary everyday front door. The user should be able to talk naturally, explicitly ask Cider to remember or create something, and later recall it with source-backed accuracy even when the native Mac app has not been opened for days.
+
+The native app remains a first-class manual capture and visual-management client. A bookmark, image, file, note, task, event, or other item saved manually must enter the same canonical item, provenance, indexing, linking, and recall system as an agent-created capture. Manual and agent captures must be equally visible to Main Brain and other authorized agents.
+
+- The Journal is the readable chronological narrative, not the only object type and not a raw transcript dump.
+- Explicit intent such as “save this,” “remind me,” “make this a task,” or “add this restaurant” may create the corresponding typed object immediately and link it to the source Journal/conversation entry.
+- Ordinary mentions may produce reviewable people/place/task/date/preference/relation candidates, but should not silently create Library clutter or accepted truth.
+- URLs, images, and files captured manually or conversationally preserve their own identity while linking back to the source episode or context that made them meaningful.
+- Bounded daily/weekly reconciliation may scan new Journal entries and newly captured items for missed reciprocal relationships. It should propose source-backed links for review, deduplicate against existing relations, and never silently promote ambiguous matches to accepted graph truth.
+
 - Capture gets material into Cider quickly, even when metadata is incomplete.
 - Enrichment extracts useful structure without overwriting user-owned truth.
 - Routing proposes where something belongs, with confidence and evidence.
@@ -84,6 +96,10 @@ Cider should have multiple surfaces, but one shared memory foundation. No chat a
 - **CLI** is the reliable agent-facing interface for facts and safe mutations.
 
 If two surfaces need the same truth, build or use the shared service/read-model instead of duplicating logic in each view.
+
+Conversation/Main Brain, Journal/Capture, Library, and Projects/Kanban are the candidate core experience. Review is a trust workflow that should appear when needed. Home, Spaces, dashboards, and specialized views must earn default navigation weight through clear repeated value; they may be demoted, merged, hidden, or parked without deleting the underlying data or capability.
+
+When product breadth becomes overwhelming, prefer a deliberate feature/view/route inventory with the user over speculative expansion. Classify each surface as keep, merge, demote, park, or remove; preserve content and durable capability before changing navigation or deleting code.
 
 ## Local-First Trust Contract
 

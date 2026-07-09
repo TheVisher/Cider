@@ -4,6 +4,8 @@ Status: canonical core doc.
 
 This is a compact inventory of Cider's durable product surfaces. Keep summaries short. Roadmaps, bugs, QA evidence, and implementation history belong in Kanban.
 
+During the journal-first product-scope reset, use this as the starting feature inventory, then supplement it with a code-backed view and route inventory on the North Star Kanban audit. Decide with the user whether each feature/view/route should be kept, merged, demoted, parked, or removed. Preserve user content and shared backend capability even when a dedicated visible surface is reduced.
+
 ## Floating Panel
 
 The main Mac surface is a fast panel/window experience activated by hotkey. Cider uses AppKit where macOS behavior requires it and SwiftUI for content. It should avoid stealing focus, remember useful surface state, and support reanchoring floating work back into the main window.
@@ -18,7 +20,7 @@ Key code: `Sources/Cider/Views/Bookmarks/`, `Sources/Cider/Services/VaultBookmar
 
 ## Capture
 
-Capture is the lowest-friction intake path for URLs now, and should grow toward notes, files/images, todos, dates/reminders, contacts/context, screen snippets, and other source material. Capture should save source identity first, return agent-friendly JSON, and tolerate incomplete enrichment or routing.
+Capture is the lowest-friction intake path for URLs, Journal/conversation entries, notes, files/images, todos, dates/reminders, contacts/context, screen snippets, and other source material. Native/manual and agent capture must converge on the same canonical item, provenance, indexing, review, linking, and recall contracts. Capture should save source identity first, return agent-friendly JSON, acknowledge quickly, and tolerate incomplete enrichment or routing.
 
 Key code: `Sources/Cider/Services/CiderCaptureService.swift`, `Sources/CiderCLI/CiderCLI.swift`.
 
