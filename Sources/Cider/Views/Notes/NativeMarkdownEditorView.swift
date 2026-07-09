@@ -67,15 +67,34 @@ struct NativeMarkdownEditorView: NSViewRepresentable {
             context.coordinator.isApplyingTextChange = true
             let selectedRanges = textView.selectedRanges
             textView.string = viewModel.editingContent
-            textView.selectedRanges = selectedRanges.compactMap { value in
-                let range = value.rangeValue
-                guard range.location <= textView.string.utf16.count else { return nil }
-                let clampedLength = min(range.length, textView.string.utf16.count - range.location)
-                return NSValue(range: NSRange(location: range.location, length: clampedLength))
-            }
+            textView.selectedRanges = Self.sanitizedSelectionRanges(
+                selectedRanges,
+                contentUTF16Length: textView.string.utf16.count
+            )
             context.coordinator.isApplyingTextChange = false
         }
         context.coordinator.applyFindSelectionIfNeeded(in: textView)
+    }
+
+    static func sanitizedSelectionRanges(
+        _ ranges: [NSValue],
+        contentUTF16Length: Int
+    ) -> [NSValue] {
+        let sanitized = ranges.compactMap { value -> NSValue? in
+            let range = value.rangeValue
+            guard range.location != NSNotFound,
+                  range.location <= contentUTF16Length else {
+                return nil
+            }
+
+            let clampedLength = min(range.length, contentUTF16Length - range.location)
+            return NSValue(range: NSRange(location: range.location, length: clampedLength))
+        }
+
+        guard !sanitized.isEmpty else {
+            return [NSValue(range: NSRange(location: contentUTF16Length, length: 0))]
+        }
+        return sanitized
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

@@ -43,4 +43,18 @@ struct NoteEditorModeTests {
             "Arming NSTextView.delegate before applying initial content can publish sourceContentChanged during SwiftUI view creation/mode switch."
         )
     }
+
+    @Test("Source editor keeps a valid fallback selection when content shrinks")
+    @MainActor
+    func sourceEditorKeepsAValidFallbackSelectionWhenContentShrinks() {
+        let ranges = NativeMarkdownEditorView.sanitizedSelectionRanges(
+            [
+                NSValue(range: NSRange(location: 42, length: 3)),
+                NSValue(range: NSRange(location: NSNotFound, length: 0))
+            ],
+            contentUTF16Length: 6
+        )
+
+        #expect(ranges == [NSValue(range: NSRange(location: 6, length: 0))])
+    }
 }
