@@ -60,7 +60,9 @@ Key code: `Sources/Cider/Services/VaultFolderService.swift`, `Sources/Cider/View
 
 ## Search And Recall
 
-Search lets the user find saved items across vault types. Recall quality should favor precise local data over vague AI summaries. Related-items/backlink surfaces should use explicit links when they exist instead of asking agents to infer relationships every time.
+Cider has one global search mental model across Journal, Library items, and Projects/Kanban. The visible Library search field and `⌘K` invoke the same underlying search, ranking, scopes, and result vocabulary; `⌘K` additionally exposes quick actions and creation commands. Search scope/type filters may narrow results without creating separate search products.
+
+Recall quality should favor precise local data over vague AI summaries. Related-items/backlink surfaces should use explicit links when they exist instead of asking agents to infer relationships every time.
 
 Second-brain recall adds structured sections, content chunks, FTS5 search, routing decisions, and agent-action provenance. Exact search stays first-class; embeddings may supplement recall later, but vector search should not become the memory authority.
 
