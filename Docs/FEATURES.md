@@ -34,6 +34,8 @@ Key code: `Sources/Cider/Views/Bookmarks/`, `Sources/Cider/Services/VaultBookmar
 
 Capture is the lowest-friction intake path for URLs, Journal/conversation entries, notes, files/images, todos, dates/reminders, contacts/context, screen snippets, and other source material. Native/manual and agent capture must converge on the same canonical item, provenance, indexing, review, linking, and recall contracts. Capture should save source identity first, return agent-friendly JSON, acknowledge quickly, and tolerate incomplete enrichment or routing.
 
+The global **+ New** menu stays intentionally minimal: Bookmark, Journal Entry, Note, and Task. Other supported typed creation and organization actions live under **More** or in their relevant context. `⌘K` may expose the same vocabulary as quick actions, but must not maintain a competing creation model. A Journal Entry action appends to the current daily Journal; it does not create an ordinary Note.
+
 Key code: `Sources/Cider/Services/CiderCaptureService.swift`, `Sources/CiderCLI/CiderCLI.swift`.
 
 ## Journal
