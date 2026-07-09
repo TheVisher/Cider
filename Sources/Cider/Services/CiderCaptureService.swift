@@ -1106,7 +1106,7 @@ enum CiderCaptureIntentStagingService {
         var sourceText: String?
         var sourceContext: CaptureSourceContext?
 
-        var combinedText: String {
+        var combinedOriginalText: String {
             [
                 title,
                 urlString,
@@ -1117,6 +1117,10 @@ enum CiderCaptureIntentStagingService {
             ]
                 .compactMap { $0 }
                 .joined(separator: " ")
+        }
+
+        var combinedText: String {
+            combinedOriginalText
                 .lowercased()
         }
     }
@@ -1142,38 +1146,51 @@ enum CiderCaptureIntentStagingService {
     }
 
     static func stagedIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
+        let semanticIntents = stagedSemanticIntents(for: input)
         let providerIntents = stagedProviderIntents(for: input)
-        return providerIntents + stagedProjectIntents(in: input.combinedText)
+        return semanticIntents + providerIntents + stagedProjectIntents(in: input.combinedText)
     }
 
     static func routeIntents(for input: Input) -> [CiderCaptureResult.RouteIntent] {
+        var intents = routeSemanticIntents(for: input)
         guard let urlString = input.urlString ?? firstURLString(in: input.combinedText),
               let components = URLComponents(string: urlString),
               let rawHost = components.host?.lowercased() else {
-            return []
+            return intents
         }
         let host = canonicalIntentHost(rawHost)
         let path = components.path.lowercased()
         if rawHost.matchesDomain("rottentomatoes.com") {
             let route = path.contains("/tv/") ? "media/shows" : "media/movies"
-            return [.init(
+            intents.append(.init(
                 route: route,
                 source: "capture.intent.url_provider",
                 confidence: 0.78,
                 reason: "Rotten Tomatoes URL provider metadata indicates an obvious \(route == "media/shows" ? "TV/show" : "movie") media route candidate.",
                 provenance: routeIntentProvenance(host: host, path: components.path)
-            )]
+            ))
+            return intents
         }
         if rawHost.matchesDomain("imdb.com"), path.contains("/title/") {
-            return [.init(
+            intents.append(.init(
                 route: "media/movies",
                 source: "capture.intent.url_provider",
                 confidence: 0.78,
                 reason: "IMDb title URL provider metadata indicates an obvious movie media route candidate.",
                 provenance: routeIntentProvenance(host: host, path: components.path)
-            )]
+            ))
+            return intents
         }
-        return []
+        if rawHost.matchesDomain("tiktok.com") {
+            intents.append(.init(
+                route: "media/social-video",
+                source: "capture.intent.url_provider",
+                confidence: 0.62,
+                reason: "TikTok URL provider metadata indicates a social-video source; preserve it as a secondary reviewable signal.",
+                provenance: routeIntentProvenance(host: host, path: components.path)
+            ))
+        }
+        return intents
     }
 
     static func stagedContactIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
@@ -1217,7 +1234,7 @@ enum CiderCaptureIntentStagingService {
                 source: "capture.intent.url_provider"
             ))
         } else if host.matchesDomain("tiktok.com") {
-            intents.append(stagedTikTokIntent(in: text))
+            intents.append(stagedTikTokIntent())
         } else if host.matchesDomain("allrecipes.com")
                     || host.matchesDomain("seriouseats.com")
                     || host.matchesDomain("smittenkitchen.com") {
@@ -1243,21 +1260,141 @@ enum CiderCaptureIntentStagingService {
         ]
     }
 
-    private static func stagedTikTokIntent(in text: String) -> CiderCaptureResult.StagedIntent {
-        if hasRestaurantPlaceSignals(in: text) {
-            return .init(
-                kind: .space(spaceName: "Food", area: "Restaurants"),
-                confidence: 0.74,
-                reason: "TikTok provider provenance is social video, but the capture text identifies a restaurant or place-to-try; keep the bookmark in Inbox for review while staging the likely restaurant intent.",
-                source: "capture.intent.social_restaurant_signal"
-            )
-        }
+    private static func stagedTikTokIntent() -> CiderCaptureResult.StagedIntent {
         return .init(
             kind: .space(spaceName: "Media", area: "Social Video"),
             confidence: 0.62,
             reason: "TikTok URLs are social video references; keep the capture in Inbox for review while preserving the likely media intent.",
             source: "capture.intent.url_provider"
         )
+    }
+
+    private static func stagedSemanticIntents(for input: Input) -> [CiderCaptureResult.StagedIntent] {
+        var intents: [CiderCaptureResult.StagedIntent] = []
+        let text = input.combinedText
+        if hasFamilyTripPlaceSignals(in: text), let entityName = tripPlaceEntityName(from: input) {
+            intents.append(.init(
+                kind: .entity(entityName: entityName, entityType: "place"),
+                confidence: 0.79,
+                reason: "The title or body describes a real-world kids/family trip idea at a named place; stage that place intent ahead of any embedded social-video source URL.",
+                source: "capture.intent.trip_place_signal"
+            ))
+        } else if hasRealWorldPlaceSignals(in: text), let entityName = placeEntityName(from: input) {
+            intents.append(.init(
+                kind: .entity(entityName: entityName, entityType: "place"),
+                confidence: 0.72,
+                reason: "The title or extracted text identifies a named real-world place; stage that place intent ahead of any embedded social-video source URL.",
+                source: "capture.intent.place_signal"
+            ))
+        }
+        if hasRestaurantPlaceSignals(in: text) {
+            intents.append(.init(
+                kind: .space(spaceName: "Food", area: "Restaurants"),
+                confidence: 0.74,
+                reason: "The capture text identifies a restaurant or place-to-try; keep the item in Inbox for review while staging the likely restaurant intent.",
+                source: "capture.intent.social_restaurant_signal"
+            ))
+        }
+        return intents
+    }
+
+    private static func routeSemanticIntents(for input: Input) -> [CiderCaptureResult.RouteIntent] {
+        guard hasFamilyTripPlaceSignals(in: input.combinedText),
+              let entityName = tripPlaceEntityName(from: input) else {
+            guard hasRealWorldPlaceSignals(in: input.combinedText),
+                  let entityName = placeEntityName(from: input) else {
+                return []
+            }
+            return [
+                .init(
+                    route: "places/place",
+                    source: "capture.intent.place_signal",
+                    confidence: 0.72,
+                    reason: "The title or extracted text identifies \(entityName) as a named real-world place; expose this as a reviewable place route intent.",
+                    provenance: ["text_signal:named_place", "entity:\(entityName)"]
+                )
+            ]
+        }
+        return [
+            .init(
+                route: "places/family-trip",
+                source: "capture.intent.trip_place_signal",
+                confidence: 0.79,
+                reason: "The title or body describes a kids/family trip idea at \(entityName); expose this as a reviewable place/trip route intent.",
+                provenance: ["text_signal:kids_family_trip_place", "entity:\(entityName)"]
+            )
+        ]
+    }
+
+    private static func hasFamilyTripPlaceSignals(in text: String) -> Bool {
+        let familySignals = ["kid", "kids", "family", "children"]
+        let tripSignals = ["trip idea", "fun trip", "day trip", "place to go", "place to try", "outing"]
+        let placeSignals = ["arcade", "lynnwood", "seattle", "wa ", "washington", "address"]
+        return familySignals.contains { text.contains($0) }
+            && tripSignals.contains { text.contains($0) }
+            && placeSignals.contains { text.contains($0) }
+    }
+
+    private static func hasRealWorldPlaceSignals(in text: String) -> Bool {
+        let placeKindSignals = ["arcade", "game-room", "game room", "interactive"]
+        let locationSignals = ["lynnwood", "seattle", "bellevue", "wa ", "washington", "address"]
+        return placeKindSignals.contains { text.contains($0) }
+            && locationSignals.contains { text.contains($0) }
+    }
+
+    private static func tripPlaceEntityName(from input: Input) -> String? {
+        for raw in [input.title, input.sourceText, input.sourceContext?.originalText].compactMap({ $0 }) {
+            if let name = tripPlaceEntityName(in: raw) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    private static func placeEntityName(from input: Input) -> String? {
+        for raw in [input.title, input.sourceText, input.sourceContext?.originalText].compactMap({ $0 }) {
+            if let name = cheArcadeEntityName(in: raw) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    private static func cheArcadeEntityName(in raw: String) -> String? {
+        let pattern = #"(?i)\bc\.?\s*h\.?\s*e\.?\s+arcade\s+in\s+([A-Za-z ]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              match.numberOfRanges > 1,
+              let locationRange = Range(match.range(at: 1), in: raw) else {
+            return nil
+        }
+        let location = String(raw[locationRange])
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \t\r\n.:;,-#"))
+        guard !location.isEmpty else { return nil }
+        return "C.H.E Arcade in \(location)"
+    }
+
+    private static func tripPlaceEntityName(in raw: String) -> String? {
+        let patterns = [
+            #"(?i)kids trip idea:\s*([^\n]+)"#,
+            #"(?i)kids trip idea[-–]\s*([^\n]+)"#,
+            #"(?i)fun trip for the kids[^.\n]*?\bat\s+([^.\n]+)"#,
+            #"(?i)trip idea[^.\n]*?\bat\s+([^.\n]+)"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+                  match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: raw) else {
+                continue
+            }
+            let candidate = String(raw[range])
+                .trimmingCharacters(in: CharacterSet(charactersIn: " \t\r\n.:;,-"))
+            if !candidate.isEmpty {
+                return candidate
+            }
+        }
+        return nil
     }
 
     private static func hasRestaurantPlaceSignals(in text: String) -> Bool {

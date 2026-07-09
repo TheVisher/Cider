@@ -1528,6 +1528,53 @@ struct CiderItemContextServiceTests {
         #expect((actionReceipt["safeCommandRefs"] as? [String])?.contains("cider-cli item context note \(note.entityID.uuidString) --json") == true)
     }
 
+    @Test("item get exposes trip place route intent for note with embedded TikTok URL")
+    func itemGetExposesTripPlaceRouteIntentForNoteWithEmbeddedTikTokURL() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(
+            note,
+            title: "Kids trip idea: C.H.E Arcade in Lynnwood",
+            relativePath: "Inbox/Notes/Kids trip idea C.H.E Arcade in Lynnwood.md",
+            into: db
+        )
+
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: note.entityID.uuidString)
+        let store = SecondBrainStore(database: db)
+        try store.replaceChunks(owner: owner, chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: note.entityID.uuidString,
+                source: "test",
+                title: "Kids trip idea: C.H.E Arcade in Lynnwood",
+                body: """
+                Kids trip idea: C.H.E Arcade in Lynnwood.
+                Might be a fun trip for the kids.
+                Source: https://www.tiktok.com/t/ZP8GQy8Cw/
+                """,
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let bundle = try service.context(for: note)
+        let payload = CiderCLI.itemGetResponseToDict(bundle, requestedType: "note", requestedRef: note.entityID.uuidString)
+
+        let routeIntents = try #require(payload["routeIntents"] as? [[String: Any]])
+        #expect(routeIntents.first?["route"] as? String == "places/family-trip")
+        #expect(routeIntents.first?["source"] as? String == "capture.intent.trip_place_signal")
+        #expect(routeIntents.contains {
+            $0["route"] as? String == "media/social-video"
+                && $0["source"] as? String == "capture.intent.url_provider"
+        })
+        let intentStaging = try #require(payload["intentStaging"] as? [String: Any])
+        let staged = try #require(intentStaging["intents"] as? [[String: Any]])
+        #expect(staged.first?["entityType"] as? String == "place")
+        #expect(staged.first?["entityName"] as? String == "C.H.E Arcade in Lynnwood")
+    }
+
     @Test("search diagnostics filter low signal natural language expansions")
     func searchDiagnosticsFilterLowSignalNaturalLanguageExpansions() throws {
         let (db, url) = try makeTestDB()

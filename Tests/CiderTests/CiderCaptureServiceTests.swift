@@ -414,6 +414,31 @@ struct CiderCaptureServiceTests {
             let socialRestaurantRouting = try #require(socialRestaurant["routing"] as? [String: Any])
             #expect((socialRestaurantRouting["candidateTarget"] as? [String: Any])?["relativePath"] as? String == "Inbox/Bookmarks")
 
+            let socialPlace = try service.addBookmarkCapture(
+                urlString: "https://www.tiktok.com/t/ZP8GQy8Cw/",
+                title: "Come with us to the interactive C.H.E. arcade in Lynnwood",
+                folderID: nil,
+                sourceContext: CaptureSourceContext(
+                    surface: "share",
+                    originalText: "Come with us to the interactive C.H.E. arcade in Lynnwood. #thingstodoinseattle #lynnwood #games #chearcade"
+                )
+            ).toDictionary()
+            let placeIntent = try #require(socialPlace["entityIntent"] as? [String: Any])
+            #expect(placeIntent["entityType"] as? String == "place")
+            #expect(placeIntent["entityName"] as? String == "C.H.E Arcade in Lynnwood")
+            #expect(placeIntent["source"] as? String == "capture.intent.place_signal")
+            let socialPlaceStaging = try #require(socialPlace["intentStaging"] as? [String: Any])
+            let socialPlaceIntents = try #require(socialPlaceStaging["intents"] as? [[String: Any]])
+            #expect(socialPlaceIntents.first?["kind"] as? String == "entity")
+            #expect(socialPlaceIntents.contains {
+                $0["kind"] as? String == "space"
+                    && $0["spaceName"] as? String == "Media"
+                    && $0["area"] as? String == "Social Video"
+            })
+            let socialPlaceRoutes = try #require(socialPlace["routeIntents"] as? [[String: Any]])
+            #expect(socialPlaceRoutes.first?["route"] as? String == "places/place")
+            #expect(socialPlaceRoutes.contains { $0["route"] as? String == "media/social-video" })
+
             let projectReference = try service.addBookmarkCapture(
                 urlString: "https://x.com/openaidevs/status/2062599291479478275?s=12",
                 title: "OpenAI Developers Codex iOS app loop",
@@ -1656,6 +1681,49 @@ struct CiderCaptureServiceTests {
             let routing = try #require(screen["routing"] as? [String: Any])
             let target = try #require(routing["candidateTarget"] as? [String: Any])
             #expect(target["relativePath"] as? String == "Inbox/Notes")
+        }
+    }
+
+    @Test("trip place note with embedded TikTok URL stages place intent before social video")
+    func tripPlaceNoteWithEmbeddedTikTokURLStagesPlaceIntentBeforeSocialVideo() throws {
+        try withIsolatedVault { db, bookmarks, notes, todos, files in
+            let service = CiderCaptureService(
+                bookmarkService: bookmarks,
+                notesStorage: notes,
+                todoStorage: todos,
+                vaultFileStorage: files,
+                database: db,
+                routingDecisionService: CiderRoutingDecisionService(database: db)
+            )
+
+            let result = try service.addNoteCapture(
+                title: "Kids trip idea: C.H.E Arcade in Lynnwood",
+                content: """
+                Kids trip idea: C.H.E Arcade in Lynnwood.
+                Might be a fun trip for the kids.
+                Source: https://www.tiktok.com/t/ZP8GQy8Cw/
+                """,
+                folderID: nil
+            ).toDictionary()
+
+            let staging = try #require(result["intentStaging"] as? [String: Any])
+            let intents = try #require(staging["intents"] as? [[String: Any]])
+            #expect(intents.first?["kind"] as? String == "entity")
+            #expect(intents.first?["entityType"] as? String == "place")
+            #expect(intents.first?["entityName"] as? String == "C.H.E Arcade in Lynnwood")
+            #expect(intents.first?["source"] as? String == "capture.intent.trip_place_signal")
+            #expect(intents.contains {
+                $0["kind"] as? String == "space"
+                    && $0["spaceName"] as? String == "Media"
+                    && $0["area"] as? String == "Social Video"
+                    && $0["source"] as? String == "capture.intent.url_provider"
+            })
+            #expect(!(intents.count == 1
+                && intents.first?["spaceName"] as? String == "Media"
+                && intents.first?["area"] as? String == "Social Video"))
+            #expect(result["entityIntent"] != nil)
+            #expect(result["spaceIntent"] != nil)
+            #expect(result["recommendedNextAction"] as? String == "review_intent")
         }
     }
 

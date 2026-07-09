@@ -22011,8 +22011,62 @@ struct CiderCLI {
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
             "captureProvenance": bundle.captureProvenance.map(captureProvenanceToDict),
         ]
+        addReviewableIntentDictionaries(for: bundle, to: &dict)
         CiderAgentDecisionContract.merge(itemContextBundleDecisionDictionary(for: bundle), into: &dict)
         return dict
+    }
+
+    private static func addReviewableIntentDictionaries(
+        for bundle: CiderItemContextBundle,
+        to dict: inout [String: Any]
+    ) {
+        let input = CiderCaptureIntentStagingService.Input(
+            title: bundle.item.title,
+            urlString: bundle.captureProvenance.compactMap(\.sourceURL).first,
+            sourceFile: bundle.captureProvenance.compactMap(\.sourceFile).first,
+            sourceText: itemContextIntentSourceText(for: bundle),
+            sourceContext: nil
+        )
+        let storageDestination = bundle.item.relativePath?.hasPrefix("Inbox/") == true
+            ? bundle.item.relativePath?.components(separatedBy: "/").prefix(2).joined(separator: "/")
+            : bundle.item.relativePath
+        let stagedIntents = CiderCaptureIntentStagingService.stagedIntents(for: input)
+            .map { $0.toDictionary(storageDestination: storageDestination) }
+        if !stagedIntents.isEmpty {
+            dict["intentStaging"] = [
+                "status": "staged",
+                "reviewNeeded": true,
+                "safeNextAction": "review_intent",
+                "intents": stagedIntents,
+                "truthBoundary": "reviewable_candidate_not_truth",
+            ]
+            if let spaceIntent = stagedIntents.first(where: { $0["kind"] as? String == "space" }) {
+                dict["spaceIntent"] = spaceIntent
+            }
+            if let projectIntent = stagedIntents.first(where: { $0["kind"] as? String == "project" }) {
+                dict["projectIntent"] = projectIntent
+            }
+            if let entityIntent = stagedIntents.first(where: { $0["kind"] as? String == "entity" }) {
+                dict["entityIntent"] = entityIntent
+            }
+        }
+        let routeIntents = CiderCaptureIntentStagingService.routeIntents(for: input)
+            .map { $0.toDictionary() }
+        if !routeIntents.isEmpty {
+            dict["routeIntents"] = routeIntents
+            dict["routeIntent"] = routeIntents[0]
+        }
+    }
+
+    private static func itemContextIntentSourceText(for bundle: CiderItemContextBundle) -> String? {
+        let parts = bundle.sections.map(\.body)
+            + bundle.chunks.flatMap { [$0.title, $0.body] }
+            + bundle.captureProvenance.compactMap(\.sourceText)
+        let text = parts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        return text.isEmpty ? nil : text
     }
 
     static func libraryHubReadModelToDict(_ hub: CiderLibraryHubReadModel, sourceArgs: [String] = []) -> [String: Any] {
@@ -28375,7 +28429,10 @@ struct CiderCLI {
             dict["routingReadiness"] = routingReadiness
             dict["captureQuality"] = captureQuality
             dict["bookmark"] = bookmarkToDict(bookmark)
-            let routeIntents = CiderCaptureIntentStagingService.routeIntents(for: bookmark).map { $0.toDictionary() }
+            let routeIntents = mergedRouteIntentDictionaries(
+                dict["routeIntents"] as? [[String: Any]] ?? [],
+                CiderCaptureIntentStagingService.routeIntents(for: bookmark).map { $0.toDictionary() }
+            )
             if !routeIntents.isEmpty {
                 dict["routeIntents"] = routeIntents
                 dict["routeIntent"] = routeIntents[0]
@@ -28395,6 +28452,23 @@ struct CiderCLI {
             provenanceRefs: [sourceRef]
         )
         return dict
+    }
+
+    private static func mergedRouteIntentDictionaries(_ groups: [[String: Any]]...) -> [[String: Any]] {
+        var seen = Set<String>()
+        var merged: [[String: Any]] = []
+        for group in groups {
+            for intent in group {
+                let key = [
+                    intent["route"] as? String ?? "",
+                    intent["source"] as? String ?? "",
+                ].joined(separator: "|")
+                if seen.insert(key).inserted {
+                    merged.append(intent)
+                }
+            }
+        }
+        return merged
     }
 
     private static func itemRoutingReadinessDictionary(for bundle: CiderItemContextBundle) -> [String: Any] {
