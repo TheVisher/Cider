@@ -1359,6 +1359,56 @@ struct CiderItemContextServiceTests {
         #expect((dict["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(noteID.uuidString) --json") == true)
     }
 
+    @Test("item search JSON exposes trip place route intent hint for social video backed family trip notes")
+    func itemSearchJSONExposesTripPlaceRouteIntentHintForSocialVideoBackedFamilyTripNotes() throws {
+        let (db, url) = try makeTestDB()
+        defer { db.close(); cleanup(url) }
+
+        let store = SecondBrainStore(database: db)
+        let note = LibraryEntityRef(type: .note, entityID: UUID())
+        try insertItem(
+            note,
+            title: "Kids trip idea: C.H.E Arcade",
+            relativePath: "Inbox/Notes/Kids trip idea C.H.E Arcade.md",
+            into: db
+        )
+        let noteContent = "Fun trip for the kids at C.H.E Arcade in Lynnwood. Source: https://www.tiktok.com/@creator/video/12345"
+        let noteStmt = try db.prepare("INSERT INTO notes (item_id, content, summary, is_pinned) VALUES (?, ?, NULL, 0);")
+        noteStmt.bind(DatabaseHelpers.encode(note.entityID), at: 1)
+            .bind(noteContent, at: 2)
+        try noteStmt.step()
+        try store.replaceChunks(owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.entityID.uuidString), chunks: [
+            SecondBrainChunkDraft(
+                sectionID: nil,
+                itemID: note.entityID.uuidString,
+                source: "test",
+                title: "Kids trip idea: C.H.E Arcade",
+                body: noteContent,
+                chunkIndex: 0
+            )
+        ])
+
+        let service = CiderItemContextService(database: db, secondBrainStore: store)
+        let results = try service.search("kids trip", limit: 5, scope: .personalMemory)
+        let result = try #require(results.first { $0.owner.ownerID == note.entityID.uuidString })
+        let dict = CiderCLI.itemSearchResultToDict(result)
+
+        let routeIntentHint = try #require(dict["routeIntentHint"] as? [String: Any])
+        #expect(routeIntentHint["readOnly"] as? Bool == true)
+        #expect(routeIntentHint["changed"] as? Bool == false)
+        #expect(routeIntentHint["truthBoundary"] as? String == "reviewable_candidate_not_truth")
+        #expect(routeIntentHint["acceptedAsTruth"] as? Bool == false)
+        #expect(routeIntentHint["primaryRoute"] as? String == "places/family-trip")
+        #expect(routeIntentHint["secondaryRoutes"] as? [String] == ["media/social-video"])
+        #expect((routeIntentHint["safeNextCommands"] as? [String])?.contains("cider-cli item context note \(note.entityID.uuidString) --json") == true)
+        #expect((routeIntentHint["safeVerificationCommands"] as? [String])?.contains("cider-cli item get note \(note.entityID.uuidString) --json") == true)
+
+        let intents = try #require(routeIntentHint["intents"] as? [[String: Any]])
+        #expect(intents.map { $0["route"] as? String } == ["places/family-trip", "media/social-video"])
+        #expect(intents[0]["source"] as? String == "capture.intent.trip_place_signal")
+        #expect(intents[1]["source"] as? String == "capture.intent.url_provider")
+    }
+
     @Test("vault file search JSON exposes human display title when shared item title is raw filename")
     func vaultFileSearchJSONExposesHumanDisplayTitleForRawFilenameRows() throws {
         let fileID = UUID()

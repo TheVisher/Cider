@@ -157,7 +157,7 @@ struct CiderCaptureResult {
         }
     }
 
-    struct RouteIntent: Equatable {
+    struct RouteIntent: Codable, Equatable {
         var route: String
         var source: String
         var confidence: Double

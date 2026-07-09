@@ -308,6 +308,21 @@ struct CiderItemSearchMatchProvenance: Codable, Equatable {
     }
 }
 
+struct CiderItemSearchRouteIntentHint: Codable, Equatable {
+    var readOnly: Bool = true
+    var changed: Bool = false
+    var truthBoundary: String = "reviewable_candidate_not_truth"
+    var acceptedAsTruth: Bool = false
+    var primaryIntent: CiderCaptureResult.RouteIntent
+    var secondaryIntents: [CiderCaptureResult.RouteIntent]
+    var safeVerificationCommands: [String]
+    var safeNextCommands: [String]
+
+    var intents: [CiderCaptureResult.RouteIntent] {
+        [primaryIntent] + secondaryIntents
+    }
+}
+
 struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var id: String
     var kind: CiderItemSearchResultKind
@@ -324,6 +339,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
     var matchProvenance: CiderItemSearchMatchProvenance
     var relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint?
     var savedPlacePreferenceEvidenceHint: CiderItemSavedPlacePreferenceEvidenceSearchHint?
+    var routeIntentHint: CiderItemSearchRouteIntentHint?
 
     init(
         id: String,
@@ -340,7 +356,8 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         captureProvenance: [CiderItemCaptureProvenance] = [],
         matchProvenance: CiderItemSearchMatchProvenance = CiderItemSearchMatchProvenance(),
         relatedSavedPlacesHint: CiderItemRelatedSavedPlacesSearchHint? = nil,
-        savedPlacePreferenceEvidenceHint: CiderItemSavedPlacePreferenceEvidenceSearchHint? = nil
+        savedPlacePreferenceEvidenceHint: CiderItemSavedPlacePreferenceEvidenceSearchHint? = nil,
+        routeIntentHint: CiderItemSearchRouteIntentHint? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -357,6 +374,7 @@ struct CiderItemSearchResult: Identifiable, Codable, Equatable {
         self.matchProvenance = matchProvenance
         self.relatedSavedPlacesHint = relatedSavedPlacesHint
         self.savedPlacePreferenceEvidenceHint = savedPlacePreferenceEvidenceHint
+        self.routeIntentHint = routeIntentHint
     }
 }
 
@@ -1364,8 +1382,115 @@ final class CiderItemContextService {
                 var hinted = result
                 hinted.relatedSavedPlacesHint = try relatedSavedPlacesSearchHint(for: result, limit: 5)
                 hinted.savedPlacePreferenceEvidenceHint = try savedPlacePreferenceEvidenceSearchHint(for: result, limit: 5)
+                hinted.routeIntentHint = routeIntentSearchHint(for: result)
                 return hinted
             }
+    }
+
+    private func routeIntentSearchHint(
+        for result: CiderItemSearchResult
+    ) -> CiderItemSearchRouteIntentHint? {
+        guard let item = result.item,
+              LibraryEntityType.activeCases.contains(item.type),
+              result.owner.ownerType == item.type.rawValue,
+              result.owner.ownerID == item.id.uuidString else {
+            return nil
+        }
+
+        let chunks = (try? chunks(for: result.owner)) ?? []
+        let sourceText = orderedUnique(
+            [result.snippet]
+                + [itemStoredRouteIntentText(for: item)].compactMap { $0 }
+                + chunks.flatMap { [$0.title, $0.body] }
+                + result.captureProvenance.flatMap { provenance in
+                    [
+                        provenance.sourceText,
+                        provenance.sourceURL,
+                        provenance.sourceFile,
+                        provenance.messageID,
+                        provenance.relation.evidence,
+                    ].compactMap { $0 }
+                }
+        )
+            .joined(separator: "\n")
+        let detectedIntents = CiderCaptureIntentStagingService.routeIntents(for: .init(
+            title: item.title,
+            urlString: firstRouteIntentURLString(in: sourceText),
+            sourceFile: item.relativePath,
+            sourceText: sourceText,
+            sourceContext: nil
+        ))
+        let intents = orderedRouteIntentHints(
+            detectedIntents + providerRouteIntentFallbacks(in: sourceText)
+        )
+        guard !intents.isEmpty else { return nil }
+
+        let contextCommand = "cider-cli item context \(item.type.rawValue) \(item.id.uuidString) --json"
+        let getCommand = "cider-cli item get \(item.type.rawValue) \(item.id.uuidString) --json"
+        return CiderItemSearchRouteIntentHint(
+            primaryIntent: intents[0],
+            secondaryIntents: Array(intents.dropFirst()),
+            safeVerificationCommands: [getCommand],
+            safeNextCommands: [contextCommand, getCommand]
+        )
+    }
+
+    private func orderedRouteIntentHints(
+        _ intents: [CiderCaptureResult.RouteIntent]
+    ) -> [CiderCaptureResult.RouteIntent] {
+        var seen = Set<String>()
+        var output: [CiderCaptureResult.RouteIntent] = []
+        for intent in intents {
+            guard !seen.contains(intent.route) else { continue }
+            seen.insert(intent.route)
+            output.append(intent)
+        }
+        return output
+    }
+
+    private func providerRouteIntentFallbacks(in sourceText: String) -> [CiderCaptureResult.RouteIntent] {
+        let lowercased = sourceText.lowercased()
+        guard lowercased.contains("tiktok.com") else { return [] }
+        return [
+            .init(
+                route: "media/social-video",
+                source: "capture.intent.url_provider",
+                confidence: 0.62,
+                reason: "TikTok URL provider metadata indicates a social-video source; preserve it as a secondary reviewable signal.",
+                provenance: ["url_host:tiktok.com"]
+            )
+        ]
+    }
+
+    private func itemStoredRouteIntentText(for item: CiderItemSummary) -> String? {
+        switch item.type {
+        case .note:
+            let stmt = try? database.prepare("SELECT content FROM notes WHERE item_id = ? LIMIT 1;")
+            stmt?.bind(DatabaseHelpers.encode(item.id), at: 1)
+            guard (try? stmt?.step()) == true else { return nil }
+            return stmt?.optionalString(at: 0)
+        case .bookmark:
+            let stmt = try? database.prepare("SELECT url, notes, ocr_text FROM bookmarks WHERE item_id = ? LIMIT 1;")
+            stmt?.bind(DatabaseHelpers.encode(item.id), at: 1)
+            guard (try? stmt?.step()) == true else { return nil }
+            return [
+                stmt?.optionalString(at: 0),
+                stmt?.optionalString(at: 1),
+                stmt?.optionalString(at: 2),
+            ].compactMap { $0 }.joined(separator: "\n")
+        default:
+            return nil
+        }
+    }
+
+    private func firstRouteIntentURLString(in text: String) -> String? {
+        let pattern = #"https?://[^\s<>"')\]]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range, in: text) else {
+            return nil
+        }
+        return String(text[range])
     }
 
     private func savedPlacePreferenceEvidenceSearchHint(

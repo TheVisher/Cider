@@ -28890,6 +28890,9 @@ struct CiderCLI {
         if let savedPlacePreferenceEvidenceHint = result.savedPlacePreferenceEvidenceHint {
             dict["savedPlacePreferenceEvidenceHint"] = itemSavedPlacePreferenceEvidenceSearchHintToDict(savedPlacePreferenceEvidenceHint)
         }
+        if let routeIntentHint = result.routeIntentHint {
+            dict["routeIntentHint"] = itemSearchRouteIntentHintToDict(routeIntentHint)
+        }
         dict["matchProvenance"] = itemSearchMatchProvenanceToDict(result.matchProvenance)
         dict["temporal"] = itemSearchTemporalMetadata(result)
         dict["provenance"] = itemSearchProvenanceMetadata(result)
@@ -28945,7 +28948,24 @@ struct CiderCLI {
                 + (result.relatedSavedPlacesHint?.safeNextCommands ?? [])
                 + (result.savedPlacePreferenceEvidenceHint?.safeVerificationCommands ?? [])
                 + (result.savedPlacePreferenceEvidenceHint?.safeNextCommands ?? [])
+                + (result.routeIntentHint?.safeVerificationCommands ?? [])
+                + (result.routeIntentHint?.safeNextCommands ?? [])
         )
+    }
+
+    private static func itemSearchRouteIntentHintToDict(_ hint: CiderItemSearchRouteIntentHint) -> [String: Any] {
+        [
+            "readOnly": hint.readOnly,
+            "changed": hint.changed,
+            "truthBoundary": hint.truthBoundary,
+            "acceptedAsTruth": hint.acceptedAsTruth,
+            "primaryRoute": hint.primaryIntent.route,
+            "secondaryRoutes": hint.secondaryIntents.map(\.route),
+            "candidateCount": hint.intents.count,
+            "intents": hint.intents.map { $0.toDictionary() },
+            "safeVerificationCommands": hint.safeVerificationCommands,
+            "safeNextCommands": hint.safeNextCommands,
+        ]
     }
 
     private static func itemRelatedSavedPlacesSearchHintToDict(_ hint: CiderItemRelatedSavedPlacesSearchHint) -> [String: Any] {
