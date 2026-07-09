@@ -2403,6 +2403,21 @@ struct CiderCLI {
                 printCLIError(error.localizedDescription)
             }
 
+        case "home-dashboard", "home-probe":
+            guard let limit = parsePositiveIntFlag("--limit", from: args, command: "review.home-dashboard", minimum: 0) else { return }
+            do {
+                let start = Date()
+                let result = try service.homeDashboardReviewModel(
+                    itemLimit: limit ?? 30,
+                    includeDeferred: args.contains("--include-deferred"),
+                    batchEnrichmentSampleLimit: parseFlag("--sample-limit", from: args).flatMap(Int.init) ?? 5
+                )
+                let elapsedMilliseconds = Int(Date().timeIntervalSince(start) * 1000)
+                printReviewHomeDashboardResult(result, elapsedMilliseconds: elapsedMilliseconds)
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
         case "enrichment-diagnosis", "diagnose-enrichment", "diagnosis":
             do {
                 let result = try service.enrichmentDiagnosis(
@@ -2818,6 +2833,7 @@ struct CiderCLI {
             Usage:
               cider-cli review list [--include-deferred] [--limit <n>] [--kind <kind>] [--item-type <type>] [--state <state>] [--safe-action <action>] [--json]
               cider-cli review summary [--include-deferred] [--json]
+              cider-cli review home-dashboard [--include-deferred] [--limit <n>] [--sample-limit <n>] [--json]
               cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
               cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]
               cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
@@ -2833,7 +2849,7 @@ struct CiderCLI {
             """)
 
         default:
-            printCLIError("Unknown review command: \(subcommand ?? "nil"). Commands: list, summary, enrichment-diagnosis, enrichment-reconcile-plan, enrichment-reconcile-samples, enrichment-reconcile-apply, drilldown, approve, reject, correct, defer, enrich, enrich-batch, jobs")
+            printCLIError("Unknown review command: \(subcommand ?? "nil"). Commands: list, summary, home-dashboard, enrichment-diagnosis, enrichment-reconcile-plan, enrichment-reconcile-samples, enrichment-reconcile-apply, drilldown, approve, reject, correct, defer, enrich, enrich-batch, jobs")
         }
     }
 
@@ -14546,6 +14562,26 @@ struct CiderCLI {
         }
         let preview = result.batchEnrichmentPreview
         print("  Batch enrichment preview: \(preview.candidateCount) candidate(s), \(preview.excludedCount) excluded, mutating=\(preview.isMutating)")
+    }
+
+    static func printReviewHomeDashboardResult(
+        _ result: CiderHomeDashboardReviewModel,
+        elapsedMilliseconds: Int
+    ) {
+        if jsonOutput {
+            var payload = result.toDictionary()
+            payload["diagnostics"] = [
+                "elapsedMilliseconds": elapsedMilliseconds,
+                "queueBuildCount": 1,
+                "truthBoundary": "diagnostic_timing_not_user_content",
+            ]
+            outputJSON(payload)
+            return
+        }
+
+        print("Review Home dashboard: \(result.summary.totalCount) total item(s), \(result.items.items.count) surfaced")
+        print("  Elapsed: \(elapsedMilliseconds) ms")
+        print("  By kind: \(formatCounts(result.summary.countsByKind))")
     }
 
     static func printReviewEnrichmentDiagnosisResult(_ result: CiderReviewEnrichmentDiagnosisResult) {
@@ -30890,6 +30926,7 @@ struct CiderCLI {
         REVIEW
           cider-cli review list [--include-deferred] [--limit <n>] [--json]
           cider-cli review summary [--include-deferred] [--json]
+          cider-cli review home-dashboard [--include-deferred] [--limit <n>] [--sample-limit <n>] [--json]
           cider-cli review drilldown <group-id> [--limit <n>] [--offset <n>] [--json]
           cider-cli review enrichment-diagnosis [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]

@@ -16,6 +16,23 @@ struct CiderReviewQueueResult: Equatable {
     }
 }
 
+struct CiderHomeDashboardReviewModel: Equatable {
+    var command: String = "review.home-dashboard"
+    var generatedAt: Date
+    var items: CiderReviewQueueResult
+    var summary: CiderReviewQueueSummaryResult
+
+    func toDictionary() -> [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "command": command,
+            "generatedAt": formatter.string(from: generatedAt),
+            "items": items.toDictionary(),
+            "summary": summary.toDictionary(),
+        ]
+    }
+}
+
 struct CiderCaptureReviewWorklistResult: Equatable {
     var command: String = "capture.review-queue"
     var generatedAt: Date
@@ -1186,6 +1203,87 @@ final class CiderReviewQueueService {
         requiredSafeAction: String? = nil,
         now: Date = Date()
     ) throws -> CiderReviewQueueResult {
+        let sorted = try sortedReviewItems(
+            includeDeferred: includeDeferred,
+            kind: kind,
+            itemType: itemType,
+            reviewState: reviewState,
+            requiredSafeAction: requiredSafeAction,
+            now: now
+        )
+
+        return CiderReviewQueueResult(
+            command: "review.list",
+            generatedAt: now,
+            items: Array(sorted.prefix(max(0, limit)))
+        )
+    }
+
+    func summary(
+        includeDeferred: Bool = false,
+        batchEnrichmentSampleLimit: Int = 10,
+        now: Date = Date()
+    ) throws -> CiderReviewQueueSummaryResult {
+        let items = try sortedReviewItems(includeDeferred: includeDeferred, now: now)
+
+        return summaryResult(
+            for: items,
+            batchEnrichmentSampleLimit: batchEnrichmentSampleLimit,
+            now: now
+        )
+    }
+
+    func homeDashboardReviewModel(
+        itemLimit: Int = 30,
+        includeDeferred: Bool = false,
+        batchEnrichmentSampleLimit: Int = 5,
+        now: Date = Date()
+    ) throws -> CiderHomeDashboardReviewModel {
+        let items = try sortedReviewItems(includeDeferred: includeDeferred, now: now)
+        return CiderHomeDashboardReviewModel(
+            generatedAt: now,
+            items: CiderReviewQueueResult(
+                command: "review.list",
+                generatedAt: now,
+                items: Array(items.prefix(max(0, itemLimit)))
+            ),
+            summary: summaryResult(
+                for: items,
+                batchEnrichmentSampleLimit: batchEnrichmentSampleLimit,
+                now: now
+            )
+        )
+    }
+
+    private func summaryResult(
+        for items: [CiderReviewQueueItem],
+        batchEnrichmentSampleLimit: Int,
+        now: Date
+    ) -> CiderReviewQueueSummaryResult {
+        CiderReviewQueueSummaryResult(
+            command: "review.summary",
+            generatedAt: now,
+            totalCount: items.count,
+            countsByKind: groupedCounts(items.map(\.kind)),
+            countsByItemType: groupedCounts(items.map(\.itemType)),
+            countsByReviewState: groupedCounts(items.map(\.reviewState)),
+            countsBySafeAction: groupedCounts(items.flatMap(\.safeActions)),
+            groups: reviewGroups(for: items),
+            batchEnrichmentPreview: batchEnrichmentPreview(
+                for: items,
+                sampleLimit: batchEnrichmentSampleLimit
+            )
+        )
+    }
+
+    private func sortedReviewItems(
+        includeDeferred: Bool,
+        kind: String? = nil,
+        itemType: String? = nil,
+        reviewState: String? = nil,
+        requiredSafeAction: String? = nil,
+        now: Date
+    ) throws -> [CiderReviewQueueItem] {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let latestDecisions = try latestRoutingDecisions(in: db)
         let itemsByID = try itemSummaries(in: db)
@@ -1248,54 +1346,21 @@ final class CiderReviewQueueService {
             includeDeferred: includeDeferred
         ))
 
-        let filtered = reviewItems.filter { item in
-            if let kind, item.kind != kind { return false }
-            if let itemType, item.itemType != itemType { return false }
-            if let reviewState, item.reviewState != reviewState { return false }
-            if let requiredSafeAction, !item.safeActions.contains(requiredSafeAction) { return false }
-            return true
-        }
-
-        let sorted = filtered.sorted { lhs, rhs in
-            let lhsRank = sortRank(lhs)
-            let rhsRank = sortRank(rhs)
-            if lhsRank != rhsRank { return lhsRank < rhsRank }
-            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-        }
-
-        return CiderReviewQueueResult(
-            command: "review.list",
-            generatedAt: now,
-            items: Array(sorted.prefix(max(0, limit)))
-        )
-    }
-
-    func summary(
-        includeDeferred: Bool = false,
-        batchEnrichmentSampleLimit: Int = 10,
-        now: Date = Date()
-    ) throws -> CiderReviewQueueSummaryResult {
-        let items = try list(
-            limit: Int.max,
-            includeDeferred: includeDeferred,
-            now: now
-        ).items
-
-        return CiderReviewQueueSummaryResult(
-            command: "review.summary",
-            generatedAt: now,
-            totalCount: items.count,
-            countsByKind: groupedCounts(items.map(\.kind)),
-            countsByItemType: groupedCounts(items.map(\.itemType)),
-            countsByReviewState: groupedCounts(items.map(\.reviewState)),
-            countsBySafeAction: groupedCounts(items.flatMap(\.safeActions)),
-            groups: reviewGroups(for: items),
-            batchEnrichmentPreview: batchEnrichmentPreview(
-                for: items,
-                sampleLimit: batchEnrichmentSampleLimit
-            )
-        )
+        return reviewItems
+            .filter { item in
+                if let kind, item.kind != kind { return false }
+                if let itemType, item.itemType != itemType { return false }
+                if let reviewState, item.reviewState != reviewState { return false }
+                if let requiredSafeAction, !item.safeActions.contains(requiredSafeAction) { return false }
+                return true
+            }
+            .sorted { lhs, rhs in
+                let lhsRank = sortRank(lhs)
+                let rhsRank = sortRank(rhs)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
     }
 
     func captureReviewWorklist(

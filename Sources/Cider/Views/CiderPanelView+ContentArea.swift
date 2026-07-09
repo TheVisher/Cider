@@ -518,8 +518,10 @@ extension CiderPanelView {
 
     var homeOverviewDashboard: some View {
         let reviewQueue = CiderReviewQueueService()
-        let reviewItems = (try? reviewQueue.list(limit: 30).items) ?? []
-        let reviewSummary = try? reviewQueue.summary(batchEnrichmentSampleLimit: 5)
+        let reviewModel = try? reviewQueue.homeDashboardReviewModel(
+            itemLimit: 30,
+            batchEnrichmentSampleLimit: 5
+        )
         let dateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
             from: libraryViewModel.items
         )
@@ -530,8 +532,8 @@ extension CiderPanelView {
                 recentItems: libraryViewModel.recentItems,
                 folders: bookmarksViewModel.folders,
                 kanbanBoards: kanbanStorage.boards,
-                reviewQueueItems: reviewItems,
-                reviewQueueSummary: reviewSummary,
+                reviewQueueItems: reviewModel?.items.items ?? [],
+                reviewQueueSummary: reviewModel?.summary,
                 bookmarkDateSuggestionResults: dateSuggestionResults,
                 surfacingDays: CiderConfig.load().dateCardSurfacingDays
             ),
@@ -561,8 +563,10 @@ extension CiderPanelView {
 
     var reviewQueueDashboard: some View {
         let reviewQueue = CiderReviewQueueService()
-        let reviewItems = (try? reviewQueue.list(limit: 60).items) ?? []
-        let reviewSummary = try? reviewQueue.summary(batchEnrichmentSampleLimit: 8)
+        let reviewModel = try? reviewQueue.homeDashboardReviewModel(
+            itemLimit: 60,
+            batchEnrichmentSampleLimit: 8
+        )
         let dateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
             from: libraryViewModel.items
         )
@@ -571,8 +575,8 @@ extension CiderPanelView {
             recentItems: libraryViewModel.recentItems,
             folders: bookmarksViewModel.folders,
             kanbanBoards: kanbanStorage.boards,
-            reviewQueueItems: reviewItems,
-            reviewQueueSummary: reviewSummary,
+            reviewQueueItems: reviewModel?.items.items ?? [],
+            reviewQueueSummary: reviewModel?.summary,
             bookmarkDateSuggestionResults: dateSuggestionResults,
             surfacingDays: CiderConfig.load().dateCardSurfacingDays
         )

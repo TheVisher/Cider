@@ -257,6 +257,44 @@ struct CiderReviewQueueServiceTests {
         #expect(result.items[0].safeActions == ["approve", "correct", "defer"])
     }
 
+    @Test("home dashboard review model builds queue once for list and summary")
+    func homeDashboardReviewModelBuildsQueueOnce() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+
+        let now = Date(timeIntervalSince1970: 1_775_779_200)
+        _ = try insertBookmark(
+            db,
+            title: "Needs enrichment",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil,
+            updatedAt: now
+        )
+
+        var duplicateScanCount = 0
+        let service = CiderReviewQueueService(
+            database: db,
+            duplicateFindingsProvider: {
+                duplicateScanCount += 1
+                return []
+            }
+        )
+
+        let model = try service.homeDashboardReviewModel(
+            itemLimit: 30,
+            batchEnrichmentSampleLimit: 5,
+            now: now
+        )
+        let expectedService = CiderReviewQueueService(database: db, duplicateFindingsProvider: { [] })
+        let expectedItems = try expectedService.list(limit: 30, now: now)
+        let expectedSummary = try expectedService.summary(batchEnrichmentSampleLimit: 5, now: now)
+
+        #expect(duplicateScanCount == 1)
+        #expect(model.items.items.map(\.id) == expectedItems.items.map(\.id))
+        #expect(model.summary.totalCount == expectedSummary.totalCount)
+        #expect(model.summary.countsByKind == expectedSummary.countsByKind)
+    }
+
     @Test("review queue routes non-bookmark correction to item move instead of review correct")
     func reviewQueueRoutesNonBookmarkCorrectionToItemMove() throws {
         let (db, url) = try makeTempDB()
