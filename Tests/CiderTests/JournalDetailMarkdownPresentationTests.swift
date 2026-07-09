@@ -31,12 +31,12 @@ struct JournalDetailMarkdownPresentationTests {
         let journalViews = try String(contentsOf: journalViewsURL, encoding: .utf8)
 
         #expect(
-            detailManagement.contains("notesViewModel.selectNote(defaultEntry.note)"),
-            "Opening Journal should load the default daily note through NotesViewModel without rewriting its source."
+            detailManagement.contains("notesViewModel.selectNote(\n                defaultEntry.note,\n                richDisplayContentOverride: defaultEntry.preparedDisplayContent"),
+            "Opening Journal should load the default daily note and its rich-only display override through NotesViewModel without rewriting its source."
         )
         #expect(
-            journalViews.contains("notesViewModel.selectNote(entry.note)"),
-            "Changing journal navigation selection should load that daily note through NotesViewModel."
+            journalViews.contains("notesViewModel.selectNote(entry.note, richDisplayContentOverride: displayContent)"),
+            "Changing journal navigation selection should load that daily note with its rich-only display override."
         )
         #expect(
             detailManagement.contains("notesViewModel.flushSave()"),
@@ -55,12 +55,17 @@ struct JournalDetailMarkdownPresentationTests {
         let nativeMarkdown = try String(contentsOf: nativeMarkdownURL, encoding: .utf8)
 
         #expect(
-            journalViews.contains("setRichDisplayContentOverride(entry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat))"),
+            journalViews.contains("let displayContent = entry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat)")
+                && journalViews.contains("selectNote(entry.note, richDisplayContentOverride: displayContent)"),
             "Journal rich display should use the read-model's cached/prepared presentation string, including timestamp preferences."
         )
         #expect(
             notesViewModel.contains("richDisplayContentOverride"),
             "NotesViewModel should keep journal rich presentation separate from raw editing content."
+        )
+        #expect(
+            notesViewModel.contains("richEditorMarkdownForCurrentSelection"),
+            "NotesViewModel should route Rich editor pushes through the rich-only override when one exists."
         )
         #expect(
             nativeMarkdown.contains("viewModel.editingContent"),

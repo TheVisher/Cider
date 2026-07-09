@@ -107,10 +107,12 @@ struct JournalDetailContentView: View {
             notesViewModel.clearSelectedNote()
             return
         }
+        let displayContent = entry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat)
         if notesViewModel.selectedNote?.id != entry.note.id {
-            notesViewModel.selectNote(entry.note)
+            notesViewModel.selectNote(entry.note, richDisplayContentOverride: displayContent)
+        } else {
+            notesViewModel.setRichDisplayContentOverride(displayContent)
         }
-        notesViewModel.setRichDisplayContentOverride(entry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat))
     }
 }
 

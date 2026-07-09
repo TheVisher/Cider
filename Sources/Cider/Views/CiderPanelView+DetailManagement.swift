@@ -421,7 +421,10 @@ extension CiderPanelView {
         journalMetadataVisible = false
         selectedJournalEntryID = projection.defaultSelection?.id
         if let defaultEntry = projection.defaultSelection {
-            notesViewModel.selectNote(defaultEntry.note)
+            notesViewModel.selectNote(
+                defaultEntry.note,
+                richDisplayContentOverride: defaultEntry.preparedDisplayContent(timestampFormat: CiderConfig.load().journalTimestampFormat)
+            )
         } else {
             notesViewModel.clearSelectedNote()
         }

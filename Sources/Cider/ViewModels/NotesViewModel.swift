@@ -77,6 +77,9 @@ final class NotesViewModel: ObservableObject {
     private var pendingExternalDiskContent: String?
     private var ignoredExternalDiskContent: String?
     private var lastRichEditorPushedMarkdown: String?
+    var richEditorMarkdownForCurrentSelection: String {
+        richDisplayContentOverride ?? editingContent
+    }
     var notes: [Note] {
         NotesStorage.shared.notes.filter { !$0.isProjectArtifact }
     }
@@ -313,7 +316,7 @@ final class NotesViewModel: ObservableObject {
             editingContent = content
             lastSyncedDiskContent = content
             isLoadingNote = true
-            pushContentToEditor(richDisplayContentOverride ?? content)
+            pushContentToEditor(richEditorMarkdownForCurrentSelection)
             if isFindBarVisible, !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 updateFindQuery(findQuery)
             }
@@ -357,8 +360,8 @@ final class NotesViewModel: ObservableObject {
     }
 
     func pushCurrentContentToEditorIfReady() {
-        guard let selectedNote else { return }
-        pushContentToEditor(richDisplayContentOverride ?? selectedNote.content)
+        guard selectedNote != nil else { return }
+        pushContentToEditor(richEditorMarkdownForCurrentSelection)
     }
 
     func setRichDisplayContentOverride(_ content: String?) {
@@ -366,7 +369,7 @@ final class NotesViewModel: ObservableObject {
         richDisplayContentOverride = content
         guard noteEditorMode == .rich else { return }
         isLoadingNote = content != nil
-        pushContentToEditor(content ?? editingContent)
+        pushContentToEditor(richEditorMarkdownForCurrentSelection)
     }
 
     /// Focus the TipTap editor.
@@ -449,10 +452,13 @@ final class NotesViewModel: ObservableObject {
     // MARK: - Note Selection
 
     func selectNote(_ note: Note) {
+        selectNote(note, richDisplayContentOverride: nil)
+    }
+
+    func selectNote(_ note: Note, richDisplayContentOverride displayContentOverride: String?) {
         // Save current note before switching
         flushSave()
         isLoadingNote = false
-        richDisplayContentOverride = nil
 
         var loaded = note
         loaded.content = loadPersistedContent(for: note)
@@ -470,8 +476,9 @@ final class NotesViewModel: ObservableObject {
         hasPendingSave = false
         isLoadingNote = true
         lastRichEditorPushedMarkdown = nil
+        richDisplayContentOverride = displayContentOverride
 
-        pushContentToEditor(richDisplayContentOverride ?? loaded.content)
+        pushContentToEditor(richEditorMarkdownForCurrentSelection)
         scheduleEditorRenderRefresh(for: loaded.id)
     }
 
@@ -585,6 +592,11 @@ final class NotesViewModel: ObservableObject {
     // MARK: - Auto-save
 
     func contentChanged(_ newContent: String) {
+        guard richDisplayContentOverride == nil else {
+            isLoadingNote = false
+            hasPendingSave = false
+            return
+        }
         let persistedContent: String
         if let note = selectedNote {
             persistedContent = NotesStorage.shared.markdownForPersistence(newContent, note: note)
@@ -595,6 +607,9 @@ final class NotesViewModel: ObservableObject {
     }
 
     func sourceContentChanged(_ newContent: String) {
+        if richDisplayContentOverride != nil {
+            isLoadingNote = false
+        }
         let persistedContent: String
         if let note = selectedNote {
             persistedContent = NotesStorage.shared.markdownForPersistence(newContent, note: note)
@@ -943,7 +958,7 @@ final class NotesViewModel: ObservableObject {
 
         if mode == .rich {
             isLoadingNote = true
-            pushContentToEditor(richDisplayContentOverride ?? editingContent)
+            pushContentToEditor(richEditorMarkdownForCurrentSelection)
             focusEditor()
         }
     }
