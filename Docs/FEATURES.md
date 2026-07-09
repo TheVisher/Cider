@@ -136,9 +136,11 @@ Key code: `Sources/Cider/Services/ClipboardHistoryService.swift`, `Sources/Cider
 
 ## Screen Capture
 
-Screen capture saves images and OCR-derived context into the vault. Routing should be explicit and visible when possible.
+Park Cider's dedicated screenshot/OCR routing workflow as a visible product surface; it has not demonstrated enough real use to justify separate UI. Preserve reusable capture and OCR capability in the backend where inexpensive, but do not require OCR or entity routing before an image can be saved.
 
-Key code: `Sources/Cider/Services/ScreenCaptureService.swift`, `Sources/Cider/Views/ScreenCapture/`.
+Unify screenshots with clipboard image capture instead. When any supported OS screenshot/snipping tool places an image on the clipboard, Cider's lightweight capture toast should show a thumbnail and ask whether to save it. An accepted image enters canonical capture with source provenance; optional OCR may enrich search after saving without interrupting capture or automatically creating events/contacts. macOS can use the native Cider clipboard monitor; Windows requires an equivalent local capture client/worker before the same behavior can operate there.
+
+Key code: `Sources/Cider/Services/ScreenCapture/`, `Sources/Cider/Views/ScreenCapture/`, `Sources/Cider/Views/Shared/ScreenCaptureRoutingToast.swift`.
 
 ## Settings And Sync
 
