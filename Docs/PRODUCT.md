@@ -52,7 +52,7 @@ The core loop is:
 4. Add bounded reconciliation for relationships discovered across time, such as a later manual toolbox bookmark matching an earlier Journal intention, while keeping uncertain links reviewable.
 5. Keep Kanban strong as the visual idea, project, QA, and agent-handoff system without treating every captured idea as immediate implementation work.
 6. Stabilize speed, reliability, and Testing debt before broad feature expansion.
-7. Let Home, Spaces, dashboards, and specialized views earn prominence from repeated value instead of assuming every capability needs a permanent surface.
+7. Place Spaces under Library as entity-aware semantic hubs/lenses. Allow useful domain-specific states and workflows—such as watched/unwatched and liked/disliked for movies—without creating parallel storage or permanent top-level mini-apps.
 
 ## Legacy Framing
 

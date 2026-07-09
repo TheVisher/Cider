@@ -90,7 +90,9 @@ Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Source
 
 ## Spaces
 
-Spaces are domain surfaces over shared second-brain state, such as Media, Food, Projects, Finance, People, and Recipes. They can provide dashboards, routing hints, and domain-specific workflows, but they must not become independent storage silos.
+Spaces are entity-aware semantic hubs and lenses inside Library, not a separate top-level mini-app system and not merely saved filters. They may add domain-specific states, facets, views, and actions over shared canonical objects. A Media Space, for example, can filter movies while also tracking watched/unwatched, liked/disliked, ratings, recommendations, and linked Journal reflections or source material.
+
+Spaces must not become independent storage silos. Their identity, instructions, memberships, and relations enrich the same Library items and second-brain graph that Main Brain searches and recalls.
 
 The target backend shape is a native SQLite `spaces` table for Space identity and instructions, with `space_memberships` and owner relations carrying semantic membership. Folder paths and `.cider-space.yaml` metadata remain compatibility/export surfaces until the cutover is proven.
 

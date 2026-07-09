@@ -44,7 +44,7 @@ Every capture client must converge on this shared foundation. A native bookmark 
 
 Cross-time relationship discovery should be incremental and reviewable. A bounded reconciliation service may compare recent/new Journal spans and newly captured objects, emit source-backed `graph_candidate` rows, and support daily/weekly agent runs. It must avoid duplicate candidates, preserve both source refs, and require explicit acceptance for ambiguous relations before creating accepted `owner_relations`.
 
-Spaces are product surfaces over shared state. They may have domain-specific dashboards and routing hints, but they should not become independent data silos or parallel memory systems.
+Spaces are entity-aware product lenses under Library over shared state. They may add domain-specific facets, states, and workflows—such as watched/unwatched, liked/disliked, ratings, and recommendations for media—but they should not become independent data silos or parallel memory systems.
 
 Graph-native second-brain work should use the shared `graph_candidate` contract before creating feature-specific models. Extractors write reviewable `enrichment_outputs(kind: graph_candidate)` rows with source quotes and typed guesses. Review, CLI, and UI surfaces inspect those candidates. Only explicit accept paths create accepted object owners or `owner_relations`; reject/defer/correct paths should change review state or metadata without creating graph truth.
 
