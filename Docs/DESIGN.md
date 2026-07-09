@@ -33,7 +33,7 @@ Cider should feel like a calm native memory cockpit: fast capture, clear review,
 - Library should open to the complete visual collection and use subtle, low-weight multi-select pills for fast show/hide filtering. Keep item-type filters, workflow state, and Space/entity lenses conceptually distinct so the control row stays calm.
 - Use one global search interaction and result vocabulary. The visible Library search field and `⌘K` are two entry points to the same search; `⌘K` may additionally expose quick actions without becoming a second search product.
 - Review surfaces should make uncertainty visible and correction cheap.
-- Detail views should reveal metadata without overwhelming the main content.
+- Detail views should reveal metadata without overwhelming the main content. Default Library items to a calm slide-out detail; make **Open Full** and **Float** explicit secondary actions rather than equally prominent modes.
 - Kanban should optimize for scanning and handoff.
 - Dashboard should answer what matters now, why it matters, and what action is available.
 - Spaces should feel like sibling command surfaces over the same memory system, not unrelated empty pages.

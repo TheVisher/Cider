@@ -20,6 +20,8 @@ Filtering should be immediate and low-clutter. Use a quiet row of multi-select p
 
 Journal should appear in Library as a calm container/card rather than flooding the collection with every daily entry. Grid, masonry, and list/table presentation remain useful views over the same filtered collection.
 
+Opening a normal Library item defaults to a calm slide-out detail so browsing context stays visible. **Open Full** and **Float** are explicit secondary actions rather than equally prominent global modes. Item-specific content may add focused actions inside that hierarchy, but should not reintroduce a mode picker as the primary interaction.
+
 Key code: `Sources/Cider/Models/WorkspaceRoute.swift`, `Sources/Cider/Models/LibraryItemV2.swift`, `Sources/Cider/Views/Shared/`, `Sources/Cider/Views/Journal/JournalLibraryViews.swift`.
 
 ## Bookmarks
