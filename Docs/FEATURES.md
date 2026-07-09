@@ -128,7 +128,9 @@ Key code: `Sources/Cider/Services/AI/`.
 
 ## Clipboard
 
-Clipboard history supports capture and recall from copied text, URLs, and images. It can act as a lightweight inbox, but promotion into durable vault objects should stay explicit.
+Keep Cider's simple clipboard history panel as a useful lightweight utility, along with automatic URL and image detection that asks whether the user wants to save the copied content. Do not expand it into a heavyweight standalone clipboard-manager product or permanent top-level destination.
+
+Unsaved clipboard history remains transient and separate from durable Library truth. When the user accepts a save prompt or explicitly saves a clipboard item, it must run through canonical Cider capture with clipboard provenance, duplicate detection, indexing, linking, and Main Brain recall parity. Promotion into durable vault objects stays explicit.
 
 Key code: `Sources/Cider/Services/ClipboardHistoryService.swift`, `Sources/Cider/Views/Shared/ClipboardPanelView.swift`.
 
