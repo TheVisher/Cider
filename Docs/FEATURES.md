@@ -24,6 +24,12 @@ Capture is the lowest-friction intake path for URLs, Journal/conversation entrie
 
 Key code: `Sources/Cider/Services/CiderCaptureService.swift`, `Sources/CiderCLI/CiderCLI.swift`.
 
+## Journal
+
+Journal is a permanent top-level destination and Cider's readable chronological life narrative. Conversation and voice may append source-backed daily entries; explicit intent may create linked bookmarks, tasks, events, places, and other typed objects. Journal must remain readable rather than becoming a raw transcript dump, while structured spans, provenance, and links support accurate recall behind the presentation.
+
+Key code: `Sources/Cider/Views/Journal/`, `Sources/Cider/Models/JournalLibraryReadModel.swift`, `Sources/Cider/Services/SecondBrainStore.swift`.
+
 ## Notes
 
 Notes are local-first Markdown knowledge objects. Cider supports inline editing, rich TipTap editing, image drops, find, snapshots, and vault routing. The rich editor must preserve safe Markdown round-trips, image serialization, external modification checks, and deny-by-default navigation in its WKWebView layer.
@@ -78,7 +84,7 @@ Key code: `Sources/Cider/Views/Contacts/`, `Sources/Cider/Services/ContactStorag
 
 ## Dashboard
 
-Dashboard/Home should become the user's command center: current work, vault pulse, reminders, resurfacing, docs health, inbox health, and agent summaries. It should be personal, explainable, and actionable. The quality bar is whether a card answers: why does this matter to me? Dashboard should share the same Cider-computed agenda/briefing relevance model used by CLI JSON and agent reports, so Telegram/agent briefings can be compact projections of dashboard truth rather than separate heuristics.
+Home is a compact **Today** view, not Cider's primary front door or an all-purpose command center. It should show only reminders, open loops, and genuinely relevant resurfacing that help the user act now. Main Brain opens first; Journal carries the chronological life narrative. Today should share the same Cider-computed relevance model used by CLI JSON and agent briefings, so its few visible cards are explainable projections of shared truth rather than a separate feed of counts and telemetry.
 
 Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Sources/Cider/Services/Dashboard/`.
 
@@ -92,7 +98,7 @@ Key code: `Sources/Cider/Views/Spaces/`, `Sources/Cider/Services/CiderSpaceStora
 
 ## Main Brain Chat
 
-Main Brain is the native Cider chat surface for the user's primary agent. It preserves a stable logical Cider brain, `cider.main`, displayed as Cider, while bridging to Hermes runtime/session behavior. The visible transcript is a working surface; the vault is durable memory.
+Main Brain is Cider's default opening experience and primary conversational front door. The native Cider chat surface preserves a stable logical Cider brain, `cider.main`, displayed as Cider, while bridging to Hermes runtime/session behavior. The visible transcript is a working surface; the vault is durable memory. Embedded and pop-out chat are two presentations of the same conversation identity, not separate products.
 
 Key code: `Sources/Cider/Views/AIAssistant/`, `Sources/Cider/Services/Agent/`.
 

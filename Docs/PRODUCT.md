@@ -4,7 +4,7 @@ Status: canonical core doc.
 
 Cider is a local-first Mac second brain and life command center. It is the user's calm native memory cockpit: fast capture, clear review, helpful resurfacing, and one trusted Main Brain over local personal context.
 
-In everyday use, conversation and voice-driven Journal capture are the primary front door. The Mac app remains an important manual-capture, browsing, review, and project-management client rather than a required intermediary for every save.
+In everyday use, conversation and voice-driven Journal capture are the primary front door. Main Brain is the default opening experience, Journal is a permanent top-level destination, and Home is a compact Today view rather than a broad dashboard. The Mac app remains an important manual-capture, browsing, review, and project-management client rather than a required intermediary for every save.
 
 The destination is defined in `Docs/NORTH_STAR.md`; this document summarizes the current product line, principles, surfaces, focus, and non-goals.
 
