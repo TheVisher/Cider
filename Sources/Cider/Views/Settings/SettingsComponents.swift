@@ -146,19 +146,33 @@ struct SettingsPrimaryCategoryButton: View {
 struct SettingsSubcategoryHeader: View {
     let category: SettingsCategory
     @Binding var selectedSubcategory: SettingsSubcategory
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Spacing.xs) {
-                ForEach(category.subcategories, id: \.self) { subcategory in
-                    SettingsSubcategoryChip(
-                        title: subcategory.title,
-                        isSelected: selectedSubcategory == subcategory,
-                        action: { selectedSubcategory = subcategory }
-                    )
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(category.subcategories, id: \.self) { subcategory in
+                        SettingsSubcategoryChip(
+                            title: subcategory.title,
+                            isSelected: selectedSubcategory == subcategory,
+                            action: { selectedSubcategory = subcategory }
+                        )
+                        .id(subcategory)
+                    }
+                }
+                .padding(.vertical, Spacing.xs)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .onAppear {
+                proxy.scrollTo(selectedSubcategory, anchor: .center)
+            }
+            .onChange(of: selectedSubcategory) { _, _ in
+                withAnimation(reduceMotion ? .none : .snappy) {
+                    proxy.scrollTo(selectedSubcategory, anchor: .center)
                 }
             }
-            .padding(.vertical, Spacing.xs)
         }
     }
 }

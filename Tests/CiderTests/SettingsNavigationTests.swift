@@ -98,6 +98,27 @@ struct SettingsNavigationTests {
         #expect(delegate.contains("NotificationCenter.default.publisher(for: .openCiderSettings)"))
     }
 
+    @Test("Advanced destination rail is bounded and reveals routed selections")
+    func advancedDestinationRailLayout() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let components = try source("Sources/Cider/Views/Settings/SettingsComponents.swift", under: root)
+        let afterHeaderMarker = try #require(
+            components.split(separator: "// MARK: - Subcategory Header").last
+        )
+        let header = try #require(afterHeaderMarker.split(separator: "// MARK: - Subcategory Chip").first)
+
+        #expect(header.contains("ScrollViewReader { proxy in"))
+        #expect(header.contains("ScrollView(.horizontal, showsIndicators: true)"))
+        #expect(header.contains(".id(subcategory)"))
+        #expect(header.contains("proxy.scrollTo(selectedSubcategory, anchor: .center)"))
+        #expect(header.contains(".onChange(of: selectedSubcategory)"))
+        #expect(header.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(header.contains(".clipped()"))
+    }
+
     private func source(_ relativePath: String, under root: URL) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }
