@@ -40,7 +40,7 @@ Cider should feel like a calm native memory cockpit: fast capture, clear review,
 - Dashboard should answer what matters now, why it matters, and what action is available.
 - Spaces should feel like sibling command surfaces over the same memory system, not unrelated empty pages.
 - Chat should show state clearly: idle, running, awaiting approval, failed, repaired.
-- Settings use five stable sections—General, Capture, Reading & Appearance, Intelligence, and Data & Privacy—with rare migration, repair, and diagnostic tools behind guarded Advanced disclosure.
+- Settings use five stable sections—General, Capture, Reading & Appearance, Intelligence, and Data & Privacy—with rare migration, repair, and diagnostic tools behind guarded Advanced disclosure. Developer-only Journal provenance/index/candidate diagnostics stay out of normal Journal UI entirely.
 
 ## Layout Contracts
 

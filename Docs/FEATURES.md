@@ -142,6 +142,8 @@ Key code: `Sources/Cider/Views/AIAssistant/`, `Sources/Cider/Services/Agent/`.
 
 Cider uses local and external intelligence for metadata extraction, summaries, tags, OCR, embeddings, similar items, and agent tools. AI should support local truth, not replace it. User-owned fields stay protected; generated summaries and enrichment belong in AI-owned fields.
 
+The current **Journal Intelligence** panel is an internal developer diagnostic only. It verifies provenance, indexing, graph/memory candidates, review state, and safe CLI follow-ups for the latest Journal; it exposes database IDs and commands rather than useful everyday Journal content. Preserve its service/tests for Hermes/Codex QA, but hide it from normal Cider navigation and user-facing Journal features.
+
 Key code: `Sources/Cider/Services/AI/`.
 
 ## Clipboard
