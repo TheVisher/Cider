@@ -62,7 +62,9 @@ Key code: `Sources/Cider/Services/VaultFileService.swift`, `Sources/Cider/Servic
 
 ## Folders And Tags
 
-Folders and tags organize vault items. Folder movement must preserve item identity and should avoid destructive filesystem behavior.
+Park Folders and Tags as visible default Library organization during the journal-first reset. Preserve every existing folder/tag value, filesystem/storage behavior, service, import/export path, and compatibility contract; do not migrate, flatten, or delete user data. Do not include folder/tag chips in the default Library filter row.
+
+Real usage should determine what returns. If organization friction appears, add back the smallest proven surface—for example folder location under Advanced/item details, a focused organizer, or a curated tag facet—using the preserved backend rather than rebuilding the data model. Spaces and Library filters may satisfy many visible-organization needs, but they do not erase physical folder/storage semantics.
 
 Key code: `Sources/Cider/Services/VaultFolderService.swift`, `Sources/Cider/Views/Shared/FolderSidebarView.swift`, `Sources/Cider/Services/CardLabelStorage.swift`.
 
