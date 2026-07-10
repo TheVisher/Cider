@@ -96,6 +96,8 @@ Keep **Milestones** as explicit project goals. Milestone progress is derived fro
 
 **Browse All Boards** remains an administrative/browse utility under a secondary **More** menu. It should not compete with the Projects summary, project-scoped Boards, or global search as a primary destination.
 
+Keep the floating QA guide as a contextual **Test Checklist** action on cards in Testing. It reads the card's What to Test steps, can stay visible while the user leaves Cider to test the app, records passed/failed results and notes, and syncs evidence back to the source card. It is not a permanent project section or global destination.
+
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
 Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
