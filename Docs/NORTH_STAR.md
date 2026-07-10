@@ -84,7 +84,7 @@ The target is not magical auto-organization. The target is a trustworthy graph w
 
 Cider should have multiple surfaces, but one shared memory foundation. No chat app, transport, or hosted LLM provider should become the source of truth for the relationship between the user and Cider/Hermes. Discord, iMessage/Photon, the native app, CLI, and future surfaces are interchangeable doors into the same local-first system.
 
-- **Main Brain** is the primary local agent/chat surface over Cider truth.
+- **Main Brain/Hermes** is the agent runtime and conversational surface over Cider truth, used primarily outside the native Mac app for now. Preserve its integration and route compatibility without requiring permanent app navigation weight.
 - **iMessage/Photon** is a low-friction personal front door for quick capture, reminders, voice notes, recall, and high-attention nudges; it is not the canonical conversation system.
 - **Discord** is a structured operations cockpit for development, debugging, Cody handoffs, screenshots, files, threads, and channel-specific workflows; it is not the canonical conversation system.
 - **Dashboard/Home** is the today/now command center: what matters, why it matters, and what action is available.
@@ -97,7 +97,7 @@ Cider should have multiple surfaces, but one shared memory foundation. No chat a
 
 If two surfaces need the same truth, build or use the shared service/read-model instead of duplicating logic in each view.
 
-Main Brain is the confirmed default opening experience. Journal is a permanent top-level destination. Library and Projects/Kanban remain core destinations. Home is retained only as a compact Today view for reminders, open loops, and genuinely relevant resurfacing—not as a broad command-center dashboard. Review is a contextual trust workflow that appears when needed rather than occupying permanent navigation. Spaces live under Library as entity-aware semantic hubs/lenses, not as another top-level mini-app system; they may provide domain-specific states, facets, and actions while sharing canonical Cider data. Other specialized views must earn navigation weight through clear repeated value and may be demoted, merged, hidden, or parked without deleting underlying data or capability.
+Home is the confirmed default opening experience and remains a compact Today view for reminders, open loops, and genuinely relevant resurfacing—not a broad administrative dashboard. Journal is a permanent top-level destination. Library and Projects/Kanban remain core destinations. The bare in-app Main Brain surface is parked from normal navigation while Hermes integration, route compatibility, and future conversational capability remain preserved. Review is a contextual trust workflow that appears when needed rather than occupying permanent navigation. Spaces live under Library as entity-aware semantic hubs/lenses, not as another top-level mini-app system; they may provide domain-specific states, facets, and actions while sharing canonical Cider data. Other specialized views must earn navigation weight through clear repeated value and may be demoted, merged, hidden, or parked without deleting underlying data or capability.
 
 When product breadth becomes overwhelming, prefer a deliberate feature/view/route inventory with the user over speculative expansion. Classify each surface as keep, merge, demote, park, or remove; preserve content and durable capability before changing navigation or deleting code.
 

@@ -2,9 +2,9 @@
 
 Status: canonical core doc.
 
-Cider is a local-first Mac second brain and life command center. It is the user's calm native memory cockpit: fast capture, clear review, helpful resurfacing, and one trusted Main Brain over local personal context.
+Cider is a local-first Mac second brain and life command center. It is the user's calm native memory cockpit: fast capture, clear review, helpful resurfacing, and trusted Hermes access to local personal context.
 
-In everyday use, conversation and voice-driven Journal capture are the primary front door. Main Brain is the default opening experience, Journal is a permanent top-level destination, and Home is a compact Today view rather than a broad dashboard. The Mac app remains an important manual-capture, browsing, review, and project-management client rather than a required intermediary for every save.
+In everyday use, conversation and voice-driven Journal capture remain important intake paths, but the native Mac app opens to Home by default. Home is a compact Today view rather than a broad dashboard; Journal is a permanent top-level destination. The Mac app remains an important manual-capture, browsing, review, and project-management client rather than the user's primary Hermes chat client or a required intermediary for every save.
 
 The destination is defined in `Docs/NORTH_STAR.md`; this document summarizes the current product line, principles, surfaces, focus, and non-goals.
 
@@ -29,15 +29,15 @@ The core loop is:
 - Vault files and Kanban YAML remain durable artifacts and workflow stores where the file itself matters.
 - Conservative routing beats clever misfiling. When confidence is low, Cider should keep uncertainty visible in review instead of hiding a bad guess.
 - Dashboard, reminders, CLI JSON, and agent reports should share the same relevance truth and explain why something matters.
-- Main Brain should be excellent before Cider grows a broad roster of agents. Hermes is the sole supported current runtime; Cider shows simple connection/model status rather than becoming a provider or runtime management console.
+- Hermes is the sole supported current runtime. Preserve the Main Brain integration and route compatibility, but park the bare native chat surface from normal navigation until it earns repeated use; Cider should not become a provider or runtime management console.
 - Kanban is Cider's active roadmap, spec, testing, bug, and handoff surface.
 - Core docs should stay lean and durable.
 
 ## Product Surfaces
 
-- Main Brain is the default native Cider conversation and agent surface over the local second brain.
+- Home is the default native Cider opening surface: a compact Today view over relevant local second-brain state.
 - Journal is the permanent top-level chronological life narrative.
-- Home is a compact Today view for reminders, open loops, and genuinely relevant resurfacing.
+- Main Brain is a preserved Hermes-backed conversational capability, parked from normal native navigation for now rather than deleted.
 - Capture is the lowest-friction intake path for URLs, Journal entries, notes, files/images, tasks, dates, contacts, and snippets.
 - Review is a contextual trust workflow for uncertain routing, metadata, duplicates, reminders, and agent suggestions.
 - Library opens to the complete visual collection with calm type, state, and Space/entity filtering.

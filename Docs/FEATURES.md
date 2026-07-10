@@ -122,7 +122,7 @@ Key code: `Sources/Cider/Views/Contacts/`, `Sources/Cider/Services/ContactStorag
 
 ## Dashboard
 
-Home is a compact **Today** view, not Cider's primary front door or an all-purpose command center. It should show only reminders, open loops, and genuinely relevant resurfacing that help the user act now. Main Brain opens first; Journal carries the chronological life narrative. Today should share the same Cider-computed relevance model used by CLI JSON and agent briefings, so its few visible cards are explainable projections of shared truth rather than a separate feed of counts and telemetry.
+Home is Cider's default opening experience and a compact **Today** view, not an all-purpose administrative command center. It should show only reminders, open loops, and genuinely relevant resurfacing that help the user act now. Journal carries the chronological life narrative. Today should share the same Cider-computed relevance model used by CLI JSON and agent briefings, so its few visible cards are explainable projections of shared truth rather than a separate feed of counts and telemetry.
 
 Key code: `Sources/Cider/Views/Dashboard/`, `Sources/Cider/Views/Home/`, `Sources/Cider/Services/Dashboard/`.
 
@@ -138,7 +138,7 @@ Key code: `Sources/Cider/Views/Spaces/`, `Sources/Cider/Services/CiderSpaceStora
 
 ## Main Brain Chat
 
-Main Brain is Cider's default opening experience and primary conversational front door. Hermes is the sole supported current agent runtime. The normal surface shows only a simple connection state and active-model label; it does not expose provider pickers, channel controls, runtime switching, or restart administration. Embedded and pop-out chat are two presentations of the same stable logical Cider brain, `cider.main`, not separate products.
+Main Brain is a preserved Hermes-backed conversational capability, but its bare native surface is parked from normal app navigation because the user's real Hermes conversation happens outside Cider and the current UI has not earned permanent space. Home opens first. Preserve the stable logical Cider brain, `cider.main`, route/backend compatibility, and simple connection/model status capability so a stronger contextual or conversational surface can return later without rebuilding the integration.
 
 Cider owns the native working surface and durable local memory; Hermes owns runtime execution and external session continuity. Audit dormant Apple Intelligence, local-model, alternate-provider, and runtime-management code during implementation, then remove code proven unused and dependency-safe instead of carrying speculative code debt.
 
