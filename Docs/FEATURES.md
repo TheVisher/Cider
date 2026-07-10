@@ -92,6 +92,8 @@ Project **Docs** is one calm section with filters for Docs, Decisions, QA, and P
 
 Files, screenshots, Library references, and other supporting artifacts attach to their relevant CID cards so their purpose and evidence stay together. A project-wide **References** view is a read-only aggregation of those card-linked artifacts—not a second manually managed asset store. Opening an aggregated reference must make its source card clear.
 
+Keep **Milestones** as explicit project goals. Milestone progress is derived from linked parent/child CID card status and evidence rather than manually re-entered percentages or a second task system. Milestones may summarize progress in Project Overview while the Board remains the execution surface.
+
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
 Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
