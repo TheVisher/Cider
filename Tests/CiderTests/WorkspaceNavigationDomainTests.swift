@@ -130,11 +130,16 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         )
     }
 
-    func testLibraryRoutesExposeContentTypesAndFoldersForFastFiltering() {
+    func testLibraryRoutesExposeOneCollectionDefaultAndNestedSpacesLens() {
+        let routes = WorkspaceDomainRoutePolicy.routes(for: .browse)
+
         XCTAssertEqual(
-            WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
-            [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
+            routes.map(\.kind),
+            [.inbox, .bookmarks, .notes, .files, .folders, .tags, .spaces]
         )
+        XCTAssertFalse(routes.contains { $0.title == "Overview" })
+        XCTAssertFalse(routes.contains { $0.title == "All" })
+        XCTAssertEqual(routes.last?.title, "Spaces")
         XCTAssertEqual(WorkspaceDomainRouteKind.bookmarks.libraryEntityTypes, [.bookmark])
         XCTAssertEqual(WorkspaceDomainRouteKind.notes.libraryEntityTypes, [.note])
         XCTAssertEqual(WorkspaceDomainRouteKind.files.libraryEntityTypes, [.vaultFile])
@@ -143,7 +148,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
     func testLibraryLeafRoutesResolveToScopedContentInsteadOfDashboard() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.contentPresentation(for: .overview, in: .browse),
-            .dashboard
+            .libraryFeed(onlyUnassigned: false, entityTypes: LibraryEntityType.activeCases)
         )
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.contentPresentation(for: .all, in: .browse),

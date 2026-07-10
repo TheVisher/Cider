@@ -160,14 +160,15 @@ final class CiderSpaceStorageTests: XCTestCase {
         XCTAssertEqual(storage.loadIssues.count, 1)
     }
 
-    func testLibraryRoutesKeepFoldersVisibleWhenSpacesAreIntroduced() {
+    func testLibraryRoutesKeepFoldersVisibleAndNestSpacesBelowPermanentRoots() {
         XCTAssertEqual(
             WorkspaceDomainRoutePolicy.routes(for: .browse).map(\.kind),
-            [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
+            [.inbox, .bookmarks, .notes, .files, .folders, .tags, .spaces]
         )
         XCTAssertEqual(
-            WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: nil).prefix(2),
-            [.mainDashboard, .browse]
+            WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: nil),
+            [.aiAssistant, .journal, .mainDashboard, .browse, .projects]
         )
+        XCTAssertFalse(WorkspaceNavigationDomain.spaces.isPrimaryRoot)
     }
 }

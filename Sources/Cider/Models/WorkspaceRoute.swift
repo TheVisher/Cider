@@ -238,18 +238,11 @@ struct WorkspaceRoutePresentation: Equatable {
     private static func libraryPresentation(for route: LibraryRoute) -> WorkspaceRoutePresentation {
         switch route {
         case .overview:
-            return WorkspaceRoutePresentation(
-                sidebarDomain: .browse,
-                title: "Library",
-                systemImage: WorkspaceNavigationDomain.browse.systemImage,
-                contentKind: .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
-                visibleItemScope: .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
-                showsLibraryViewOptions: true
-            )
+            return completeLibraryPresentation()
         case .inbox:
             return libraryFeedPresentation(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: true)
         case .all:
-            return libraryFeedPresentation(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false)
+            return completeLibraryPresentation()
         case .bookmarks:
             return libraryFeedPresentation(entityTypes: [.bookmark], onlyUnassigned: false)
         case .notes:
@@ -302,6 +295,17 @@ struct WorkspaceRoutePresentation: Equatable {
                 showsLibraryViewOptions: true
             )
         }
+    }
+
+    private static func completeLibraryPresentation() -> WorkspaceRoutePresentation {
+        WorkspaceRoutePresentation(
+            sidebarDomain: .browse,
+            title: "Library",
+            systemImage: WorkspaceNavigationDomain.browse.systemImage,
+            contentKind: .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
+            visibleItemScope: .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
+            showsLibraryViewOptions: true
+        )
     }
 
     private static func libraryFeedPresentation(
@@ -427,7 +431,7 @@ struct WorkspaceRoutePresentation: Equatable {
         switch route {
         case .overview(let spaceID):
             return WorkspaceRoutePresentation(
-                sidebarDomain: .spaces,
+                sidebarDomain: .browse,
                 title: "Space",
                 systemImage: WorkspaceNavigationDomain.spaces.systemImage,
                 contentKind: .spacesOverview(spaceID: spaceID),
@@ -436,7 +440,7 @@ struct WorkspaceRoutePresentation: Equatable {
             )
         case .manager:
             return WorkspaceRoutePresentation(
-                sidebarDomain: .spaces,
+                sidebarDomain: .browse,
                 title: "Spaces",
                 systemImage: WorkspaceNavigationDomain.spaces.systemImage,
                 contentKind: .spacesManager,
@@ -475,7 +479,7 @@ enum WorkspaceRouteChromePolicy {
         case .review:
             return WorkspaceNavigationDomain.review.subtitle
         case .library:
-            return "Library / \(presentation.title)"
+            return presentation.title == "Library" ? "Complete collection" : "Library / \(presentation.title)"
         case .projects:
             return "Projects / \(presentation.title)"
         case .spaces(.manager):
@@ -777,9 +781,15 @@ enum WorkspaceRouteSidebarProjection {
     private static func spaceState(for route: SpaceRoute) -> WorkspaceRouteSidebarState {
         switch route {
         case .overview:
-            return WorkspaceRouteSidebarState(selectedNavigationDomain: .spaces)
+            return WorkspaceRouteSidebarState(
+                selectedNavigationDomain: .browse,
+                selectedDomainRouteKind: .spaces
+            )
         case .manager:
-            return WorkspaceRouteSidebarState(selectedNavigationDomain: .spaces)
+            return WorkspaceRouteSidebarState(
+                selectedNavigationDomain: .browse,
+                selectedDomainRouteKind: .spaces
+            )
         }
     }
 }
@@ -856,7 +866,7 @@ enum WorkspaceRouterCompatibility {
         case .mainDashboard:
             return .home
         case .browse:
-            return .library(libraryRoute(for: routeKind))
+            return libraryRoute(for: routeKind)
         case .projects:
             return projectRoute(projectID: selectedProjectWorkspaceID, section: .overview)
         case .spaces:
@@ -878,24 +888,26 @@ enum WorkspaceRouterCompatibility {
         }
     }
 
-    private static func libraryRoute(for routeKind: WorkspaceDomainRouteKind) -> LibraryRoute {
+    private static func libraryRoute(for routeKind: WorkspaceDomainRouteKind) -> WorkspaceRoute {
         switch routeKind {
         case .overview, .recent, .chats:
-            return .overview
+            return .library(.overview)
         case .inbox:
-            return .inbox
+            return .library(.inbox)
         case .all:
-            return .all
+            return .library(.all)
         case .bookmarks:
-            return .bookmarks
+            return .library(.bookmarks)
         case .notes:
-            return .notes
+            return .library(.notes)
         case .files:
-            return .files
+            return .library(.files)
         case .folders:
-            return .folders
+            return .library(.folders)
         case .tags:
-            return .tags
+            return .library(.tags)
+        case .spaces:
+            return .spaces(.manager)
         }
     }
 

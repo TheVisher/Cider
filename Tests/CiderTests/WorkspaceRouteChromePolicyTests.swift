@@ -27,6 +27,24 @@ final class WorkspaceRouteChromePolicyTests: XCTestCase {
                 )
             ),
             (
+                .library(.overview),
+                WorkspaceRouteChrome(
+                    title: "Library",
+                    subtitle: "Complete collection",
+                    systemImage: "books.vertical",
+                    showsLibraryViewOptions: true
+                )
+            ),
+            (
+                .library(.all),
+                WorkspaceRouteChrome(
+                    title: "Library",
+                    subtitle: "Complete collection",
+                    systemImage: "books.vertical",
+                    showsLibraryViewOptions: true
+                )
+            ),
+            (
                 .library(.files),
                 WorkspaceRouteChrome(
                     title: "Files",

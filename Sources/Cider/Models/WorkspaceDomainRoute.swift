@@ -9,6 +9,7 @@ enum WorkspaceDomainRouteKind: String, CaseIterable, Hashable {
     case files
     case folders
     case tags
+    case spaces
     case recent
     case chats
 
@@ -20,7 +21,7 @@ enum WorkspaceDomainRouteKind: String, CaseIterable, Hashable {
             return [.note]
         case .files:
             return [.vaultFile]
-        case .overview, .inbox, .all, .folders, .tags, .recent, .chats:
+        case .overview, .inbox, .all, .folders, .tags, .spaces, .recent, .chats:
             return nil
         }
     }
@@ -62,6 +63,9 @@ enum WorkspaceDomainRoutePolicy {
             if domain == .mainDashboard {
                 return .homeOverviewDashboard
             }
+            if domain == .browse {
+                return .libraryFeed(onlyUnassigned: false, entityTypes: LibraryEntityType.activeCases)
+            }
             return .dashboard
         case .folders:
             return .folderBrowser
@@ -84,7 +88,7 @@ enum WorkspaceDomainRoutePolicy {
                 return .libraryFeed(onlyUnassigned: false, entityTypes: entityTypes)
             }
             return .dashboard
-        case .recent:
+        case .spaces, .recent:
             return .dashboard
         }
     }
@@ -102,7 +106,7 @@ enum WorkspaceDomainRoutePolicy {
         case .review:
             return []
         case .browse:
-            return [.inbox, .all, .bookmarks, .notes, .files, .folders, .tags]
+            return [.inbox, .bookmarks, .notes, .files, .folders, .tags, .spaces]
         case .projects:
             return []
         case .aiAssistant:
@@ -138,6 +142,8 @@ enum WorkspaceDomainRoutePolicy {
             return WorkspaceDomainRoute(kind: kind, title: "Folders", systemImage: "folder")
         case .tags:
             return WorkspaceDomainRoute(kind: kind, title: "Tags", systemImage: "tag")
+        case .spaces:
+            return WorkspaceDomainRoute(kind: kind, title: "Spaces", systemImage: "square.grid.2x2")
         case .recent:
             return WorkspaceDomainRoute(kind: kind, title: "Recent", systemImage: "clock")
         case .chats:

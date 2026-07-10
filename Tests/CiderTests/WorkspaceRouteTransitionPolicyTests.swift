@@ -54,6 +54,40 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
         XCTAssertEqual(journal.systemImage, "book.closed")
     }
 
+    func testLibraryDefaultAndCompatibilityRoutesShareCompleteCollectionPresentation() {
+        let expectedScope = WorkspaceVisibleItemScope.libraryFeed(
+            entityTypes: LibraryEntityType.activeCases,
+            onlyUnassigned: false
+        )
+
+        for route in [WorkspaceRoute.library(.overview), .library(.all)] {
+            let presentation = WorkspaceRoutePresentation.presentation(for: route)
+
+            XCTAssertEqual(presentation.title, "Library", "\(route)")
+            XCTAssertEqual(
+                presentation.contentKind,
+                .libraryFeed(entityTypes: LibraryEntityType.activeCases, onlyUnassigned: false),
+                "\(route)"
+            )
+            XCTAssertEqual(presentation.visibleItemScope, expectedScope, "\(route)")
+        }
+    }
+
+    func testSpacesRoutesPresentAsNestedLibraryLensWithoutChangingSpacesContent() {
+        let expectations: [(WorkspaceRoute, WorkspaceRouteContentKind)] = [
+            (.spaces(.manager), .spacesManager),
+            (.spaces(.overview(spaceID: "media-space")), .spacesOverview(spaceID: "media-space")),
+        ]
+
+        for (route, contentKind) in expectations {
+            let presentation = WorkspaceRoutePresentation.presentation(for: route)
+
+            XCTAssertEqual(presentation.sidebarDomain, .browse, "\(route)")
+            XCTAssertEqual(presentation.contentKind, contentKind, "\(route)")
+            XCTAssertEqual(presentation.visibleItemScope, .none, "\(route)")
+        }
+    }
+
     func testProjectRoutesExposeSelectedLocalTabKind() {
         let expectations: [(ProjectSectionRoute, ProjectWorkspaceLocalTabKind, WorkspaceRouteContentKind)] = [
             (.overview, .overview, .projectOverview(projectID: "cider")),
@@ -113,8 +147,8 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             (.projects(.workspace(projectID: "cider", section: .assets)), .projects, .projectSurface(projectID: "cider", surface: .assets)),
             (.projects(.workspace(projectID: "cider", section: .qa)), .projects, .projectSurface(projectID: "cider", surface: .qaAudits)),
             (.projects(.workspace(projectID: "cider", section: .plans)), .projects, .projectSurface(projectID: "cider", surface: .plansHandoffs)),
-            (.spaces(.overview(spaceID: "media-space")), .spaces, .spacesOverview(spaceID: "media-space")),
-            (.spaces(.manager), .spaces, .spacesManager),
+            (.spaces(.overview(spaceID: "media-space")), .browse, .spacesOverview(spaceID: "media-space")),
+            (.spaces(.manager), .browse, .spacesManager),
             (.ai, .aiAssistant, .aiAssistant),
             (.journal, .journal, .journal),
         ]

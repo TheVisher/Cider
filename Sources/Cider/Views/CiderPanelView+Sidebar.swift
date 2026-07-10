@@ -257,7 +257,7 @@ extension CiderPanelView {
         closeAllDetails()
 
         switch route.kind {
-        case .overview, .all, .bookmarks, .notes, .files, .folders, .inbox, .recent:
+        case .overview, .all, .bookmarks, .notes, .files, .folders, .inbox, .spaces, .recent:
             break
         case .tags:
             openOrSelectTagTab()

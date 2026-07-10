@@ -169,7 +169,8 @@ final class WorkspaceRouterCompatibilityTests: XCTestCase {
             (.notes, .library(.notes)),
             (.files, .library(.files)),
             (.folders, .library(.folders)),
-            (.tags, .library(.tags))
+            (.tags, .library(.tags)),
+            (.spaces, .spaces(.manager))
         ]
 
         for (routeKind, expectedRoute) in cases {

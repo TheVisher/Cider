@@ -44,6 +44,20 @@ final class WorkspaceRouteSidebarProjectionTests: XCTestCase {
                     selectedDomainRouteKind: .all
                 )
             ),
+            (
+                .spaces(.manager),
+                WorkspaceRouteSidebarState(
+                    selectedNavigationDomain: .browse,
+                    selectedDomainRouteKind: .spaces
+                )
+            ),
+            (
+                .spaces(.overview(spaceID: "media-space")),
+                WorkspaceRouteSidebarState(
+                    selectedNavigationDomain: .browse,
+                    selectedDomainRouteKind: .spaces
+                )
+            ),
         ]
 
         for (route, expected) in expectations {
