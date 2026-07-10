@@ -10,6 +10,8 @@ During the journal-first product-scope reset, use this as the starting feature i
 
 The main Mac surface is a fast panel/window experience activated by hotkey. Cider uses AppKit where macOS behavior requires it and SwiftUI for content. It should avoid stealing focus, remember useful surface state, and support reanchoring floating work back into the main window.
 
+Keep the explicit **Float** action only for useful contextual/reference surfaces: Notes, Bookmarks, Files, Main Brain, and Test Checklists. Do not expose Float for every technically supported item type or treat each floating implementation as a separate product surface. Preserve shared panel infrastructure while removing unsupported Float actions from normal UI.
+
 Key code: `Sources/Cider/App/`, `Sources/Cider/Views/CiderPanelView.swift`, `Sources/Cider/Views/Shared/CiderPanelShell.swift`.
 
 ## Library
