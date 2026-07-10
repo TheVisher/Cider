@@ -244,7 +244,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(destinations.map(\.title), [
             "Overview",
-            "Inbox",
+            "Updates",
             "Board",
             "Milestones",
             "Docs",
@@ -341,7 +341,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(tabs.map(\.title), [
             "Overview",
-            "Inbox",
+            "Updates",
             "Board",
             "Milestones",
             "Docs",
@@ -385,7 +385,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
 
         XCTAssertEqual(tabs.map(\.title), [
             "Overview",
-            "Inbox",
+            "Updates",
             "Board",
             "Cider Roadmap",
             "Milestones",
@@ -431,7 +431,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
         )
 
         XCTAssertEqual(overviewTabs.first(where: { $0.isSelected })?.title, "Overview")
-        XCTAssertEqual(inboxTabs.first(where: { $0.isSelected })?.title, "Inbox")
+        XCTAssertEqual(inboxTabs.first(where: { $0.isSelected })?.title, "Updates")
         XCTAssertEqual(qaTabs.first(where: { $0.isSelected })?.title, "QA")
         XCTAssertEqual(milestoneTabs.first(where: { $0.isSelected })?.title, "Milestones")
     }
@@ -695,7 +695,7 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             selectedKind: .overview
         ).first { $0.kind == .inbox }
 
-        XCTAssertEqual(inbox?.title, "Inbox")
+        XCTAssertEqual(inbox?.title, "Updates")
         XCTAssertEqual(inbox?.badge, "1")
     }
 }

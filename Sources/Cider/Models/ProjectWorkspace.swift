@@ -500,7 +500,7 @@ enum ProjectWorkspaceLocalTabs {
             ),
             ProjectWorkspaceLocalTab(
                 id: "inbox",
-                title: "Inbox",
+                title: "Updates",
                 systemImage: inboxCount > 0 ? "tray.full" : "tray",
                 kind: .inbox,
                 isSelected: selectedKind == .inbox,

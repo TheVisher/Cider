@@ -380,7 +380,7 @@ struct WorkspaceRoutePresentation: Equatable {
         case .inbox:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .projects,
-                title: "Inbox",
+                title: "Updates",
                 systemImage: "tray",
                 contentKind: .projectInbox(projectID: projectID),
                 visibleItemScope: .none,

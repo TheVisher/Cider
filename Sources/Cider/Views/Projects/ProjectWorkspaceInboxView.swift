@@ -14,7 +14,7 @@ struct ProjectWorkspaceInboxView: View {
                 if entries.isEmpty {
                     EmptyStateView(
                         icon: "tray",
-                        title: "Inbox is clear",
+                        title: "Updates are clear",
                         subtitle: "Reviewed cards stay in their current board columns. New agent reports and QA-ready work will appear here."
                     )
                     .frame(maxWidth: .infinity, minHeight: 260)
@@ -34,11 +34,11 @@ struct ProjectWorkspaceInboxView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Label("Inbox", systemImage: entries.isEmpty ? "tray" : "tray.full")
+            Label("Updates", systemImage: entries.isEmpty ? "tray" : "tray.full")
                 .font(CiderFont.headingSemibold)
                 .foregroundColor(CiderColors.primary)
 
-            Text("Unread agent work and review items for \(workspace.title). Marking reviewed removes cards from this Inbox without changing board status.")
+            Text("Unread agent work and review items for \(workspace.title). Marking reviewed removes cards from Updates without changing board status.")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -95,7 +95,7 @@ struct ProjectWorkspaceInboxView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(CiderColors.controlAccent)
-                .help("Remove from Inbox without moving the card")
+                .help("Remove from Updates without moving the card")
             }
         }
         .padding(Spacing.md)
