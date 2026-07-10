@@ -46,7 +46,7 @@ Cider should feel like a calm native memory cockpit: fast capture, clear review,
 - Panel/sidebar padding should stay consistent across major surfaces.
 - Cards should remain scannable and stable under hover, selection, and metadata changes.
 - Tables/lists should keep predictable row heights and avoid text overlap.
-- Compact overlays should be discoverable without permanently stealing space.
+- Compact overlays should be discoverable without permanently stealing space. Administrative views such as Browse All Boards belong under a secondary More menu rather than primary navigation.
 - Accessibility adaptations should preserve the task flow, not only pass contrast checks.
 
 ## Design Debt

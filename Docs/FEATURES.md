@@ -94,6 +94,8 @@ Files, screenshots, Library references, and other supporting artifacts attach to
 
 Keep **Milestones** as explicit project goals. Milestone progress is derived from linked parent/child CID card status and evidence rather than manually re-entered percentages or a second task system. Milestones may summarize progress in Project Overview while the Board remains the execution surface.
 
+**Browse All Boards** remains an administrative/browse utility under a secondary **More** menu. It should not compete with the Projects summary, project-scoped Boards, or global search as a primary destination.
+
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
 Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
