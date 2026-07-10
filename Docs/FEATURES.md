@@ -170,7 +170,7 @@ Key code: `Sources/Cider/Services/ScreenCapture/`, `Sources/Cider/Views/ScreenCa
 
 Settings use five calm primary sections: **General**, **Capture**, **Reading & Appearance**, **Intelligence**, and **Data & Privacy**. Rare migration, cleanup, directory override, broad reprocessing, repair, and diagnostic controls belong under guarded **Advanced** surfaces rather than normal browsing. Settings search may help locate controls, but should not replace the stable categories.
 
-Keep startup/panel behavior, shortcuts, Journal formatting, capture prompts, data location, backup/export, permissions, and privacy legible. Sync remains secondary to local-first safety.
+Keep startup/panel behavior, shortcuts, Journal formatting, capture prompts, data location, backup/export, permissions, and privacy legible. Remove legacy Account/Sync from the visible current product because Cider has one supported native platform and the unavailable UI creates false expectations. Preserve compatibility data and a narrow backend seam rather than destructively deleting state. Revisit sync as a fresh multi-client design only when a real web, Linux, or other client makes it useful.
 
 Key code: `Sources/Cider/Views/Settings/`, `Sources/Cider/Services/SyncService.swift`.
 

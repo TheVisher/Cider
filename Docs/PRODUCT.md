@@ -35,12 +35,14 @@ The core loop is:
 
 ## Product Surfaces
 
-- Main Brain is the native Cider conversation and agent surface over the local second brain.
-- Dashboard/Home is the today/now command center: what matters, why it matters, and what action is available.
-- Capture is the lowest-friction intake path for URLs, notes, files, todos, reminders, dates, contacts, screenshots, and snippets.
-- Review Queue is the trust boundary for uncertain routing, metadata, duplicates, reminders, and agent suggestions.
-- Spaces are domain surfaces over shared memory state, such as Media, Food, Projects, Finance, People, and Recipes. They are not independent silos.
-- Library is the searchable inventory of captured and managed items.
+- Main Brain is the default native Cider conversation and agent surface over the local second brain.
+- Journal is the permanent top-level chronological life narrative.
+- Home is a compact Today view for reminders, open loops, and genuinely relevant resurfacing.
+- Capture is the lowest-friction intake path for URLs, Journal entries, notes, files/images, tasks, dates, contacts, and snippets.
+- Review is a contextual trust workflow for uncertain routing, metadata, duplicates, reminders, and agent suggestions.
+- Library opens to the complete visual collection with calm type, state, and Space/entity filtering.
+- Spaces are entity-aware semantic hubs/lenses under Library, not top-level silos or mere saved filters.
+- Projects opens to a calm cross-project summary; entering a project opens its Kanban Board.
 - Kanban is the product and development operating layer for roadmap work, QA, bugs, and agent handoff memory.
 - CLI is the agent-facing command surface for reliable inspection and mutation.
 
@@ -68,6 +70,7 @@ Cider still keeps important older capabilities, but they should now serve the se
 ## Non-Goals
 
 - Do not turn Cider into a cloud-first app.
+- Do not ship legacy Account/Sync UI or claim sync value before a real second platform/client exists; preserve a narrow compatibility seam and redesign when multi-client use becomes concrete.
 - Do not make Spaces independent data silos.
 - Do not make docs the roadmap.
 - Do not build clever auto-filing that hides uncertainty from the user.
