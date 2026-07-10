@@ -48,7 +48,7 @@ enum WorkspaceDomainRoutePolicy {
         switch domain {
         case .mainDashboard:
             return nil
-        case .spaces, .review, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .browse:
+        case .spaces, .review, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .journal, .browse:
             return .domainDashboard(domain)
         }
     }
@@ -107,6 +107,8 @@ enum WorkspaceDomainRoutePolicy {
             return []
         case .aiAssistant:
             return [.chats]
+        case .journal:
+            return []
         case .bookmarks:
             return [.inbox, .folders, .tags, .recent]
         case .tasksEvents:

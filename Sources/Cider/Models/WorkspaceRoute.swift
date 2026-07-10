@@ -7,6 +7,7 @@ enum WorkspaceRoute: Hashable, Codable {
     case projects(ProjectRoute)
     case spaces(SpaceRoute)
     case ai
+    case journal
 }
 
 enum LibraryRoute: Hashable, Codable {
@@ -157,6 +158,7 @@ enum WorkspaceRouteContentKind: Equatable {
     case spacesOverview(spaceID: String)
     case spacesManager
     case aiAssistant
+    case journal
 }
 
 struct WorkspaceRoutePresentation: Equatable {
@@ -218,6 +220,15 @@ struct WorkspaceRoutePresentation: Equatable {
                 title: WorkspaceNavigationDomain.aiAssistant.title,
                 systemImage: WorkspaceNavigationDomain.aiAssistant.systemImage,
                 contentKind: .aiAssistant,
+                visibleItemScope: .none,
+                showsLibraryViewOptions: false
+            )
+        case .journal:
+            return WorkspaceRoutePresentation(
+                sidebarDomain: .journal,
+                title: WorkspaceNavigationDomain.journal.title,
+                systemImage: WorkspaceNavigationDomain.journal.systemImage,
+                contentKind: .journal,
                 visibleItemScope: .none,
                 showsLibraryViewOptions: false
             )
@@ -473,6 +484,8 @@ enum WorkspaceRouteChromePolicy {
             return "Space"
         case .ai:
             return WorkspaceNavigationDomain.aiAssistant.subtitle
+        case .journal:
+            return WorkspaceNavigationDomain.journal.subtitle
         }
     }
 }
@@ -693,6 +706,8 @@ enum WorkspaceRouteSidebarProjection {
             return spaceState(for: spaceRoute)
         case .ai:
             return WorkspaceRouteSidebarState(selectedNavigationDomain: .aiAssistant)
+        case .journal:
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .journal)
         }
     }
 
@@ -850,6 +865,8 @@ enum WorkspaceRouterCompatibility {
             return .review
         case .aiAssistant:
             return .ai
+        case .journal:
+            return .journal
         case .bookmarks:
             return .library(.bookmarks)
         case .notes:
@@ -922,7 +939,7 @@ struct WorkspaceRouter: Equatable {
     }
 
     init(
-        currentRoute: WorkspaceRoute = .home,
+        currentRoute: WorkspaceRoute = .ai,
         companionState: WorkspaceRouteCompanionState = WorkspaceRouteCompanionState()
     ) {
         self.currentRoute = currentRoute

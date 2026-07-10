@@ -135,6 +135,11 @@ extension CiderPanelView {
             return
         }
 
+        if domain == .journal {
+            navigateToWorkspaceRoute(.journal)
+            return
+        }
+
         if domain == .browse {
             navigateToWorkspaceRoute(.library(.overview))
             return

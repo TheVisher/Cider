@@ -420,6 +420,8 @@ extension CiderPanelView {
                     presentationStyle: .embedded
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .journal:
+                journalDetailBody(projection: JournalLibraryReadModel.build(from: notesStorage.notes))
             case .search:
                 let query: String = {
                     if case .library(.search(let query)) = workspaceRouter.currentRoute {
@@ -499,7 +501,7 @@ extension CiderPanelView {
     var selectedStandaloneDomainDashboard: WorkspaceNavigationDomain? {
         guard let domain = selectedNavigationDomain else { return nil }
         switch domain {
-        case .mainDashboard, .browse, .review, .projects, .spaces, .aiAssistant:
+        case .mainDashboard, .browse, .review, .projects, .spaces, .aiAssistant, .journal:
             return nil
         case .media, .bookmarks, .notes, .tasksEvents, .files, .people:
             break

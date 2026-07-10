@@ -101,9 +101,18 @@ final class WorkspaceRouteChromePolicyTests: XCTestCase {
             (
                 .ai,
                 WorkspaceRouteChrome(
-                    title: "AI Assistant",
-                    subtitle: "Ask questions and run agent workflows",
+                    title: "Main Brain",
+                    subtitle: "Talk with Hermes over your Cider context",
                     systemImage: "sparkles",
+                    showsLibraryViewOptions: false
+                )
+            ),
+            (
+                .journal,
+                WorkspaceRouteChrome(
+                    title: "Journal",
+                    subtitle: "Daily journal entries and narrative",
+                    systemImage: "book.closed",
                     showsLibraryViewOptions: false
                 )
             ),

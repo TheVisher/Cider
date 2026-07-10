@@ -133,7 +133,7 @@ struct WorkspaceDomainSidebarView<DomainContent: View>: View {
             selectedSpaceID: selectedSpaceID,
             isSpacesManagerSelected: isSpacesManagerSelected
         )
-        let showsChildren = domain != .mainDashboard
+        let showsChildren = domain.opensDomainSidebar
         let isExpanded = isExpanded(domain)
 
         return HStack(spacing: Spacing.xs) {

@@ -150,6 +150,8 @@ extension CiderPanelView {
             guard selectedNavigationDomain == .spaces else { return nil }
         case .ai:
             guard selectedNavigationDomain == .aiAssistant else { return nil }
+        case .journal:
+            guard selectedNavigationDomain == .journal else { return nil }
         }
         return WorkspaceRouteChromePolicy.chrome(for: workspaceRouter.currentRoute)
     }

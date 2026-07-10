@@ -2,6 +2,14 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
+    func testFreshWorkspaceRouterOpensMainBrain() {
+        let router = WorkspaceRouter()
+
+        XCTAssertEqual(router.currentRoute, .ai)
+        XCTAssertEqual(router.presentation.sidebarDomain, .aiAssistant)
+        XCTAssertEqual(router.presentation.title, "Main Brain")
+    }
+
     func testWorkspaceRouteCodableIdentityRoundTripsNestedRoutes() throws {
         let routes: [WorkspaceRoute] = [
             .home,
@@ -14,6 +22,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             .projects(.workspace(projectID: "cider", section: .qa)),
             .spaces(.overview(spaceID: "media-space")),
             .ai,
+            .journal,
         ]
 
         let data = try JSONEncoder().encode(routes)
@@ -37,8 +46,12 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
         XCTAssertEqual(search.systemImage, "magnifyingglass")
 
         let ai = WorkspaceRoutePresentation.presentation(for: .ai)
-        XCTAssertEqual(ai.title, "AI Assistant")
+        XCTAssertEqual(ai.title, "Main Brain")
         XCTAssertEqual(ai.systemImage, "sparkles")
+
+        let journal = WorkspaceRoutePresentation.presentation(for: .journal)
+        XCTAssertEqual(journal.title, "Journal")
+        XCTAssertEqual(journal.systemImage, "book.closed")
     }
 
     func testProjectRoutesExposeSelectedLocalTabKind() {
@@ -103,6 +116,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             (.spaces(.overview(spaceID: "media-space")), .spaces, .spacesOverview(spaceID: "media-space")),
             (.spaces(.manager), .spaces, .spacesManager),
             (.ai, .aiAssistant, .aiAssistant),
+            (.journal, .journal, .journal),
         ]
 
         for (route, sidebarDomain, contentKind) in expectations {
@@ -110,6 +124,19 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             XCTAssertEqual(presentation.sidebarDomain, sidebarDomain, "\(route)")
             XCTAssertEqual(presentation.contentKind, contentKind, "\(route)")
         }
+    }
+
+    func testJournalRouteUsesPermanentRootWithoutLibraryScopeOrParallelStorageRoute() {
+        let presentation = WorkspaceRoutePresentation.presentation(for: .journal)
+        let sidebar = WorkspaceRouteSidebarProjection.state(for: .journal)
+
+        XCTAssertEqual(presentation.sidebarDomain, .journal)
+        XCTAssertEqual(presentation.contentKind, .journal)
+        XCTAssertEqual(presentation.visibleItemScope, .none)
+        XCTAssertFalse(presentation.showsLibraryViewOptions)
+        XCTAssertEqual(sidebar.selectedNavigationDomain, .journal)
+        XCTAssertNil(sidebar.selectedFolderID)
+        XCTAssertTrue(sidebar.selectedTagIDs.isEmpty)
     }
 
     func testTransitionClearsStaleCompanionStateWhenLeavingFolderForLibraryFeed() {

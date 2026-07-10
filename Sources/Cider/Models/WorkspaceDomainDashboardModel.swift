@@ -177,6 +177,7 @@ enum WorkspaceDomainDashboardProvider {
         case .files: "File views"
         case .people: "People views"
         case .aiAssistant: "Assistant"
+        case .journal: "Journal"
         case .browse: "All open views"
         }
     }

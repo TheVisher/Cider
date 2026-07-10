@@ -12,16 +12,17 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
     case files
     case people
     case aiAssistant
+    case journal
     case browse
 
     var id: String { rawValue }
 
     static let primaryRoots: [WorkspaceNavigationDomain] = [
+        .aiAssistant,
+        .journal,
         .mainDashboard,
         .browse,
-        .spaces,
-        .projects,
-        .aiAssistant
+        .projects
     ]
 
     var isPrimaryRoot: Bool {
@@ -32,14 +33,14 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         switch self {
         case .review, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people:
             return true
-        case .mainDashboard, .spaces, .aiAssistant, .browse:
+        case .mainDashboard, .spaces, .aiAssistant, .journal, .browse:
             return false
         }
     }
 
     var title: String {
         switch self {
-        case .mainDashboard: "Home"
+        case .mainDashboard: "Today"
         case .spaces: "Spaces"
         case .review: "Review"
         case .media: "Media"
@@ -49,14 +50,15 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .tasksEvents: "Tasks & Events"
         case .files: "Files"
         case .people: "People"
-        case .aiAssistant: "AI Assistant"
+        case .aiAssistant: "Main Brain"
+        case .journal: "Journal"
         case .browse: "Library"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .mainDashboard: "Command center, inbox, and active work"
+        case .mainDashboard: "What matters today"
         case .spaces: "Domain contexts and pinned spaces"
         case .review: "Trust boundary and review queue"
         case .media: "Movies, TV, games, and references"
@@ -66,7 +68,8 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .tasksEvents: "Todos, reminders, and calendar cards"
         case .files: "Vault files and attachments"
         case .people: "Contacts and relationships"
-        case .aiAssistant: "Ask questions and run agent workflows"
+        case .aiAssistant: "Talk with Hermes over your Cider context"
+        case .journal: "Daily journal entries and narrative"
         case .browse: "All items, folders, and tags"
         }
     }
@@ -84,6 +87,7 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
         case .files: "doc.text"
         case .people: "person.2"
         case .aiAssistant: "sparkles"
+        case .journal: "book.closed"
         case .browse: "books.vertical"
         }
     }
@@ -93,7 +97,12 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
     }
 
     var opensDomainSidebar: Bool {
-        true
+        switch self {
+        case .mainDashboard, .journal:
+            return false
+        case .spaces, .review, .media, .bookmarks, .notes, .projects, .tasksEvents, .files, .people, .aiAssistant, .browse:
+            return true
+        }
     }
 }
 

@@ -121,7 +121,7 @@ extension CiderPanelView {
             navigateToWorkspaceRoute(restoredRoute)
             return
         }
-        navigateToWorkspaceRoute(.home)
+        navigateToWorkspaceRoute(.ai)
     }
 
     private func workspaceRouteMatchesLegacyTab(_ tab: CiderTab) -> Bool {

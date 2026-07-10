@@ -79,7 +79,7 @@ extension CiderPanelView {
                 view: presentation.title,
                 visibleItemCount: libraryViewModel.items.count
             )
-        case .home, .reviewQueue, .libraryDashboard, .projectsHome, .projectOverview, .projectInbox, .projectSurface, .spacesOverview, .spacesManager, .aiAssistant:
+        case .home, .reviewQueue, .libraryDashboard, .projectsHome, .projectOverview, .projectInbox, .projectSurface, .spacesOverview, .spacesManager, .aiAssistant, .journal:
             return CiderLivePerformanceContext(view: presentation.title, visibleItemCount: nil)
         }
     }

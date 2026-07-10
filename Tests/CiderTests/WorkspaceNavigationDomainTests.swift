@@ -18,25 +18,29 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertTrue(domains.contains(.projects))
         XCTAssertTrue(domains.contains(.review))
         XCTAssertTrue(domains.contains(.aiAssistant))
+        XCTAssertTrue(domains.contains(.journal))
         XCTAssertTrue(domains.contains(.browse))
-        XCTAssertEqual(WorkspaceNavigationDomain.aiAssistant.title, "AI Assistant")
+        XCTAssertEqual(WorkspaceNavigationDomain.aiAssistant.title, "Main Brain")
+        XCTAssertEqual(WorkspaceNavigationDomain.journal.title, "Journal")
         XCTAssertTrue(WorkspaceNavigationDomain.aiAssistant.opensDomainSidebar)
         XCTAssertEqual(WorkspaceNavigationDomain.projects.systemImage, "square.split.2x1")
     }
 
     func testPrimarySidebarRootsAreExplicitAndStable() {
         XCTAssertEqual(WorkspaceNavigationDomain.primaryRoots, [
+            .aiAssistant,
+            .journal,
             .mainDashboard,
             .browse,
-            .spaces,
-            .projects,
-            .aiAssistant
+            .projects
         ])
         XCTAssertEqual(
             WorkspaceNavigationDomain.primaryRoots.map(\.title),
-            ["Home", "Library", "Spaces", "Projects", "AI Assistant"]
+            ["Main Brain", "Journal", "Today", "Library", "Projects"]
         )
         XCTAssertTrue(WorkspaceNavigationDomain.primaryRoots.allSatisfy(\.isPrimaryRoot))
+        XCTAssertFalse(WorkspaceNavigationDomain.review.isPrimaryRoot)
+        XCTAssertFalse(WorkspaceNavigationDomain.spaces.isPrimaryRoot)
     }
 
     func testDomainSurfacesAreClassifiedAsSpacesInsteadOfPrimaryRoots() {
@@ -56,11 +60,11 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         XCTAssertTrue(WorkspaceNavigationDomain.projects.isPrimaryRoot)
     }
 
-    func testHomeAndLibraryAreFirstClassTopLevelDestinations() {
+    func testTodayAndLibraryAreFirstClassTopLevelDestinations() {
         let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .projects)
 
-        XCTAssertEqual(domains.prefix(2), [.mainDashboard, .browse])
-        XCTAssertEqual(WorkspaceNavigationDomain.mainDashboard.title, "Home")
+        XCTAssertEqual(Array(domains.dropFirst(2).prefix(2)).map(\.title), ["Today", "Library"])
+        XCTAssertEqual(WorkspaceNavigationDomain.mainDashboard.title, "Today")
         XCTAssertEqual(WorkspaceNavigationDomain.browse.title, "Library")
     }
 
@@ -85,13 +89,7 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
     func testPersistentSidebarShowsWorkflowDomainsNotContentTypes() {
         let domains = WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: .browse)
 
-        XCTAssertEqual(domains, [
-            .mainDashboard,
-            .browse,
-            .spaces,
-            .projects,
-            .aiAssistant
-        ])
+        XCTAssertEqual(domains.map(\.title), ["Main Brain", "Journal", "Today", "Library", "Projects"])
         XCTAssertFalse(domains.contains(.review))
         XCTAssertTrue(domains.contains(.projects))
         XCTAssertFalse(domains.contains(.tasksEvents))
@@ -121,26 +119,14 @@ final class WorkspaceNavigationDomainTests: XCTestCase {
         )
 
         XCTAssertFalse(domains.contains(.media))
-        XCTAssertEqual(domains, [
-            .mainDashboard,
-            .browse,
-            .spaces,
-            .projects,
-            .aiAssistant
-        ])
+        XCTAssertEqual(domains.map(\.title), ["Main Brain", "Journal", "Today", "Library", "Projects"])
 
         XCTAssertEqual(
             WorkspaceDomainSidebarModel.primaryDomains(
                 selectedDomain: .spaces,
                 pinnedSpaces: [mediaSpace]
-            ),
-            [
-                .mainDashboard,
-                .browse,
-                .spaces,
-                .projects,
-                .aiAssistant
-            ]
+            ).map(\.title),
+            ["Main Brain", "Journal", "Today", "Library", "Projects"]
         )
     }
 
