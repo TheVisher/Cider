@@ -84,6 +84,8 @@ Key code: `Sources/Cider/Services/CiderRoutingDecisionService.swift`, `Sources/C
 
 Projects opens to a calm cross-project summary of **Active**, **Testing**, **Blocked**, and **Next Up** work—not one enormous combined board and not an administrative board list. The summary should help the user understand what agents are doing and what needs judgment without duplicating the compact Today view's personal reminders.
 
+Entering a specific project opens its **Board** first. A concise project Overview remains available as a secondary section for milestones, context, progress, and important artifacts; it should not duplicate the cross-project summary or hide active execution behind another landing page.
+
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
 Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
