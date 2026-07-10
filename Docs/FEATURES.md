@@ -88,6 +88,8 @@ Entering a specific project opens its **Board** first. A concise project Overvie
 
 Project **Updates** replaces the ambiguous Project Inbox label. It tracks unread or unreviewed project work and exposes quiet needs-attention badges from both the project and cross-project summary. Library Inbox remains the separate temporary state for unreviewed/unfiled captures; neither surface should make the user guess which kind of “inbox” they are opening.
 
+Project **Docs** is one calm section with filters for Docs, Decisions, QA, and Plans rather than four permanent tabs. Preserve the categories and searchable artifacts, but keep active implementation evidence and handoff history on the relevant cards; completed temporary plans should still yield durable decisions before being retired.
+
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
 Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
