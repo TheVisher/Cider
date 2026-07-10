@@ -116,14 +116,6 @@ extension CiderPanelView {
         closeTab(tab)
     }
 
-    func ensureDefaultTabs() {
-        if let restoredRoute = CiderWorkspaceTabStateStore.shared.restoredWorkspaceRoute() {
-            navigateToWorkspaceRoute(restoredRoute)
-            return
-        }
-        navigateToWorkspaceRoute(.ai)
-    }
-
     private func workspaceRouteMatchesLegacyTab(_ tab: CiderTab) -> Bool {
         WorkspaceRouterCompatibility.route(from: WorkspaceRouterCompatibilityState(
             legacyTab: tab,

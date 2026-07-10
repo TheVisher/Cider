@@ -2,12 +2,48 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
-    func testFreshWorkspaceRouterOpensMainBrain() {
+    func testFreshWorkspaceRouterOpensHomeOnColdProcessLaunch() {
         let router = WorkspaceRouter()
 
-        XCTAssertEqual(router.currentRoute, .ai)
-        XCTAssertEqual(router.presentation.sidebarDomain, .aiAssistant)
-        XCTAssertEqual(router.presentation.title, "Main Brain")
+        XCTAssertEqual(router.currentRoute, .home)
+        XCTAssertNil(router.presentation.sidebarDomain)
+        XCTAssertEqual(router.presentation.title, "Home")
+    }
+
+    func testWarmWindowReopenPreservesEveryCurrentRouteIncludingMainBrainCompatibility() {
+        let routes: [WorkspaceRoute] = [
+            .home,
+            .journal,
+            .library(.overview),
+            .projects(.home),
+            .review,
+            .spaces(.manager),
+            .ai,
+        ]
+
+        for route in routes {
+            XCTAssertEqual(
+                CiderMainWindowRouteLifecyclePolicy.route(
+                    for: .warmReopen,
+                    currentRoute: route
+                ),
+                route,
+                "Warm reopen should preserve \(route)"
+            )
+        }
+    }
+
+    func testColdProcessLaunchIgnoresPriorSessionRouteAndOpensHome() {
+        for priorRoute in [WorkspaceRoute.journal, .library(.files), .projects(.home), .ai] {
+            XCTAssertEqual(
+                CiderMainWindowRouteLifecyclePolicy.route(
+                    for: .coldProcessLaunch,
+                    currentRoute: priorRoute
+                ),
+                .home,
+                "Cold process launch should not restore \(priorRoute)"
+            )
+        }
     }
 
     func testWorkspaceRouteCodableIdentityRoundTripsNestedRoutes() throws {

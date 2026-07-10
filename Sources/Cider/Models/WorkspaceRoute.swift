@@ -942,6 +942,25 @@ enum WorkspaceRouterCompatibility {
     }
 }
 
+enum CiderMainWindowRouteLifecycleEvent: Equatable {
+    case coldProcessLaunch
+    case warmReopen
+}
+
+enum CiderMainWindowRouteLifecyclePolicy {
+    static func route(
+        for event: CiderMainWindowRouteLifecycleEvent,
+        currentRoute: WorkspaceRoute?
+    ) -> WorkspaceRoute {
+        switch event {
+        case .coldProcessLaunch:
+            return .home
+        case .warmReopen:
+            return currentRoute ?? .home
+        }
+    }
+}
+
 struct WorkspaceRouter: Equatable {
     private(set) var currentRoute: WorkspaceRoute
     private(set) var companionState: WorkspaceRouteCompanionState
@@ -951,7 +970,10 @@ struct WorkspaceRouter: Equatable {
     }
 
     init(
-        currentRoute: WorkspaceRoute = .ai,
+        currentRoute: WorkspaceRoute = CiderMainWindowRouteLifecyclePolicy.route(
+            for: .coldProcessLaunch,
+            currentRoute: nil
+        ),
         companionState: WorkspaceRouteCompanionState = WorkspaceRouteCompanionState()
     ) {
         self.currentRoute = currentRoute

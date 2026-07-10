@@ -152,7 +152,6 @@ struct CiderPanelView: View {
         .animation(reduceMotion ? .none : .snappy, value: isNoteDetailSlideOut)
         .animation(reduceMotion ? .none : .snappy, value: isKanbanDetailSlideOut)
         .ciderCardEnvironment(textScale: textScale, hideFooters: hideCardFooters, detailsOnHover: showCardDetailsOnHover)
-        .task { ensureDefaultTabs() }
         .onAppear {
             installKeyboardMonitor()
             CiderLivePerformanceRecorder.shared.startSession(surface: String(describing: surface))

@@ -18,9 +18,8 @@ enum WorkspaceNavigationDomain: String, CaseIterable, Codable, Hashable, Identif
     var id: String { rawValue }
 
     static let primaryRoots: [WorkspaceNavigationDomain] = [
-        .aiAssistant,
-        .journal,
         .mainDashboard,
+        .journal,
         .browse,
         .projects
     ]
