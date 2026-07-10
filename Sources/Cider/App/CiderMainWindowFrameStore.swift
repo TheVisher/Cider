@@ -57,12 +57,26 @@ final class CiderMainWindowFrameStore: @unchecked Sendable {
 
     static func screenKey(for screen: NSScreen) -> String {
         let screenNumberKey = NSDeviceDescriptionKey("NSScreenNumber")
-        if let number = screen.deviceDescription[screenNumberKey] as? NSNumber {
-            return "display-\(number.uint32Value)"
+        if let number = screen.deviceDescription[screenNumberKey] as? NSNumber,
+           let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue(),
+           let uuidString = CFUUIDCreateString(nil, uuid) as String? {
+            return "display-uuid-\(uuidString.lowercased())"
         }
 
         let size = screen.frame.size
         let scale = screen.backingScaleFactor
         return "size-\(Int(size.width * scale))x\(Int(size.height * scale))"
+    }
+
+    static func screen(_ screen: NSScreen, matches key: String) -> Bool {
+        if screenKey(for: screen) == key {
+            return true
+        }
+
+        let screenNumberKey = NSDeviceDescriptionKey("NSScreenNumber")
+        if let number = screen.deviceDescription[screenNumberKey] as? NSNumber {
+            return key == "display-\(number.uint32Value)"
+        }
+        return false
     }
 }

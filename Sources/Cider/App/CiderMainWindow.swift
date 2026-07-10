@@ -67,13 +67,10 @@ final class CiderMainWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 
     func showCentered() {
-        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(
-            environment: ProcessInfo.processInfo.environment
-        ) {
+        let environment = ProcessInfo.processInfo.environment
+        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment) {
             showInQAVisibleFrame()
-        } else if CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(
-            environment: ProcessInfo.processInfo.environment
-        ) {
+        } else if CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: environment) {
             showInVerificationVisibleFrame()
         } else if !restoreSavedFrameIfAvailable() {
             let targetScreen = screenContainingMouse() ?? NSScreen.main
@@ -87,10 +84,11 @@ final class CiderMainWindow: NSWindow {
         if isMiniaturized {
             deminiaturize(nil)
         }
-        shouldPersistFrame = true
+        shouldPersistFrame = CiderMainWindowChromePolicy.shouldPersistMainWindowFrame(
+            environment: environment
+        )
         persistCurrentFrame()
         makeKeyAndOrderFront(nil)
-        let environment = ProcessInfo.processInfo.environment
         if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment)
             || CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: environment) {
             collectionBehavior.insert(.moveToActiveSpace)
@@ -105,6 +103,12 @@ final class CiderMainWindow: NSWindow {
         guard shouldPersistFrame, CiderConfig.load().rememberPanelPosition else { return }
         let targetScreen = screen ?? CiderFloatingPanelPlacement.preferredScreen(for: frame)
         frameStore.save(frame: frame, screen: targetScreen)
+    }
+
+    func persistSettledFrame() {
+        framePersistenceDebouncer.flush { [weak self] in
+            self?.persistCurrentFrame()
+        }
     }
 
     override func sendEvent(_ event: NSEvent) {
@@ -308,17 +312,19 @@ final class CiderMainWindow: NSWindow {
             return false
         }
 
-        let targetScreen = screen(matching: snapshot.screenKey)
-            ?? CiderFloatingPanelPlacement.preferredScreen(for: snapshot.frame.rect)
-            ?? screenContainingMouse()
+        let savedScreen = screen(matching: snapshot.screenKey)
+        let targetScreen = savedScreen
             ?? NSScreen.main
+            ?? screenContainingMouse()
+            ?? NSScreen.screens.first
         guard let targetScreen else { return false }
 
         let restoredFrame = CiderMainWindowPlacement.restoredFrame(
             snapshot.frame.rect,
             savedScreenVisibleFrame: snapshot.screenVisibleFrame.rect,
             targetVisibleFrame: targetScreen.visibleFrame,
-            minimumSize: minSize
+            minimumSize: minSize,
+            savedScreenIsAvailable: savedScreen != nil
         )
         setFrame(restoredFrame, display: true)
         return true
@@ -326,7 +332,7 @@ final class CiderMainWindow: NSWindow {
 
     private func screen(matching key: String?) -> NSScreen? {
         guard let key else { return nil }
-        return NSScreen.screens.first { CiderMainWindowFrameStore.screenKey(for: $0) == key }
+        return NSScreen.screens.first { CiderMainWindowFrameStore.screen($0, matches: key) }
     }
 
     private func screenContainingMouse() -> NSScreen? {
@@ -351,9 +357,7 @@ final class CiderMainWindow: NSWindow {
     }
 
     private func flushDeferredFramePersistence() {
-        framePersistenceDebouncer.flush { [weak self] in
-            self?.persistCurrentFrame()
-        }
+        persistSettledFrame()
     }
 }
 
@@ -367,6 +371,11 @@ enum CiderMainWindowChromePolicy {
 
     static func usesVerificationVisibleWindowPlacement(environment: [String: String]) -> Bool {
         isTruthy(environment[verificationVisibleEnvironmentKey])
+    }
+
+    static func shouldPersistMainWindowFrame(environment: [String: String]) -> Bool {
+        !usesQAVisibleWindowChrome(environment: environment)
+            && !usesVerificationVisibleWindowPlacement(environment: environment)
     }
 
     private static func isTruthy(_ value: String?) -> Bool {

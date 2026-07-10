@@ -7,8 +7,17 @@ enum CiderMainWindowPlacement {
         _ savedFrame: NSRect,
         savedScreenVisibleFrame: NSRect,
         targetVisibleFrame: NSRect,
-        minimumSize: NSSize
+        minimumSize: NSSize,
+        savedScreenIsAvailable: Bool = true
     ) -> NSRect {
+        guard savedScreenIsAvailable else {
+            return centeredFrame(
+                preferredSize: savedFrame.size,
+                in: targetVisibleFrame,
+                minimumSize: minimumSize
+            )
+        }
+
         guard savedScreenVisibleFrame.width > 0, savedScreenVisibleFrame.height > 0 else {
             return clampedFrame(savedFrame, in: targetVisibleFrame, minimumSize: minimumSize)
         }
@@ -47,6 +56,14 @@ enum CiderMainWindowPlacement {
     static func qaVisibleFrame(
         in visibleFrame: NSRect,
         preferredSize: NSSize,
+        minimumSize: NSSize
+    ) -> NSRect {
+        centeredFrame(preferredSize: preferredSize, in: visibleFrame, minimumSize: minimumSize)
+    }
+
+    private static func centeredFrame(
+        preferredSize: NSSize,
+        in visibleFrame: NSRect,
         minimumSize: NSSize
     ) -> NSRect {
         let size = clampedSize(preferredSize, in: visibleFrame, minimumSize: minimumSize)

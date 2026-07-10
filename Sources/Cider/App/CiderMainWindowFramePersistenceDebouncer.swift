@@ -15,14 +15,14 @@ final class CiderMainWindowFramePersistenceDebouncer {
 
     func schedule(_ action: @escaping @MainActor @Sendable () -> Void) {
         pendingTask?.cancel()
-        pendingTask = Task { @MainActor [delayNanoseconds] in
+        pendingTask = Task.detached { [delayNanoseconds] in
             do {
                 try await Task.sleep(nanoseconds: delayNanoseconds)
             } catch {
                 return
             }
             guard !Task.isCancelled else { return }
-            action()
+            await action()
         }
     }
 

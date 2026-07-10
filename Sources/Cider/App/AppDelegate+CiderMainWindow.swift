@@ -132,7 +132,7 @@ extension AppDelegate {
 
     func hideCiderMainWindow() {
         qaCiderMainWindow?.orderOut(nil)
-        ciderMainWindow?.persistCurrentFrame()
+        ciderMainWindow?.persistSettledFrame()
         ciderMainWindow?.orderOut(nil)
     }
 
@@ -141,7 +141,7 @@ extension AppDelegate {
             qaCiderMainWindow.miniaturize(nil)
             return
         }
-        ciderMainWindow?.persistCurrentFrame()
+        ciderMainWindow?.persistSettledFrame()
         ciderMainWindow?.miniaturize(nil)
     }
 

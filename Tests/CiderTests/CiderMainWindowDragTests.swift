@@ -24,4 +24,51 @@ final class CiderMainWindowDragTests: XCTestCase {
 
         XCTAssertFalse(window.isLocationExcludedFromWindowDrag(NSPoint(x: 180, y: 724)))
     }
+
+    @MainActor
+    func testMainWindowResizeUsesItsUsefulMinimumSize() {
+        let window = CiderMainWindow()
+
+        let minimumSize = PanelEdgeResizeNSView.minimumResizeSize(for: window)
+
+        XCTAssertEqual(minimumSize.width, 920)
+        XCTAssertEqual(minimumSize.height, 560)
+    }
+
+    @MainActor
+    func testSettledFrameRestoresAcrossMainWindowRecreationOnSameDisplay() throws {
+        let suiteName = "CiderMainWindowDragTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let screen = try XCTUnwrap(NSScreen.screens.first)
+        let expectedFrame = CiderMainWindowPlacement.clampedFrame(
+            NSRect(
+                x: screen.visibleFrame.minX + 72,
+                y: screen.visibleFrame.minY + 64,
+                width: 1_040,
+                height: 680
+            ),
+            in: screen.visibleFrame,
+            minimumSize: NSSize(width: 920, height: 560)
+        )
+        let store = CiderMainWindowFrameStore(defaults: defaults)
+        let firstWindow = CiderMainWindow(frameStore: store)
+        firstWindow.showCentered()
+        firstWindow.setFrame(expectedFrame, display: false)
+        firstWindow.persistSettledFrame()
+        firstWindow.orderOut(nil)
+
+        let recreatedWindow = CiderMainWindow(
+            frameStore: CiderMainWindowFrameStore(defaults: defaults)
+        )
+        recreatedWindow.showCentered()
+        defer { recreatedWindow.orderOut(nil) }
+
+        XCTAssertEqual(recreatedWindow.frame, expectedFrame)
+        XCTAssertEqual(
+            store.snapshot()?.screenKey,
+            CiderMainWindowFrameStore.screenKey(for: screen)
+        )
+    }
 }

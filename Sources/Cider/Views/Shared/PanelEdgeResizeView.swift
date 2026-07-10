@@ -88,10 +88,9 @@ final class PanelEdgeResizeNSView: NSView {
         let initialFrame = window.frame
         let initialMouse = NSEvent.mouseLocation
 
-        // Use design constants directly — window.minSize reports (0,0)
-        // because borderless panels don't enforce minSize natively.
-        let minW = CiderPanelDesign.panelMinWidth
-        let minH = CiderPanelDesign.panelMinHeight
+        let minimumSize = Self.minimumResizeSize(for: window)
+        let minW = minimumSize.width
+        let minH = minimumSize.height
         let maxW = window.maxSize.width
 
         var keepRunning = true
@@ -113,12 +112,24 @@ final class PanelEdgeResizeNSView: NSView {
                 }
 
             case .leftMouseUp:
+                (window as? CiderMainWindow)?.persistSettledFrame()
                 keepRunning = false
 
             default:
                 break
             }
         }
+    }
+
+    static func minimumResizeSize(for window: NSWindow) -> NSSize {
+        let fallback = NSSize(
+            width: CiderPanelDesign.panelMinWidth,
+            height: CiderPanelDesign.panelMinHeight
+        )
+        return NSSize(
+            width: max(fallback.width, window.minSize.width),
+            height: max(fallback.height, window.minSize.height)
+        )
     }
 
     // MARK: - Zone Resolution
