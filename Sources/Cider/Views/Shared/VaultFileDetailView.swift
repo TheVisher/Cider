@@ -72,13 +72,20 @@ struct VaultFileDetailView: View {
             }
 
         case .video, .audio:
-            if let avPlayer {
+            switch VaultFileMediaPreviewPolicy.presentation(for: file) {
+            case .inlineVideo:
+                if let avPlayer {
                 VideoPlayer(player: avPlayer)
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: file.fileType == .audio ? VaultFileDesign.audioPlayerHeight : VaultFileDesign.detailPreviewMinHeight,
-                           maxHeight: file.fileType == .audio ? VaultFileDesign.audioPlayerMaxHeight : VaultFileDesign.detailPreviewMaxHeight)
+                    .frame(minHeight: VaultFileDesign.detailPreviewMinHeight,
+                           maxHeight: VaultFileDesign.detailPreviewMaxHeight)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-            } else {
+                } else {
+                    iconPlaceholder
+                }
+            case .externalAudio:
+                ExternalAudioPreview(file: file)
+            case .other:
                 iconPlaceholder
             }
 
@@ -207,7 +214,9 @@ struct VaultFileDetailView: View {
             pdfDocument = PDFDocument(url: url)
 
         case .video, .audio:
-            avPlayer = AVPlayer(url: url)
+            if VaultFileMediaPreviewPolicy.presentation(for: file) == .inlineVideo {
+                avPlayer = AVPlayer(url: url)
+            }
 
         case .document, .unknown:
             guard VaultFileTextPreview.canPreview(file) else { break }
@@ -219,6 +228,50 @@ struct VaultFileDetailView: View {
         default:
             break
         }
+    }
+}
+
+enum VaultFileMediaPreviewPresentation: Equatable {
+    case inlineVideo
+    case externalAudio
+    case other
+}
+
+enum VaultFileMediaPreviewPolicy {
+    static func presentation(for file: VaultFile) -> VaultFileMediaPreviewPresentation {
+        switch file.fileType {
+        case .video: return .inlineVideo
+        case .audio: return .externalAudio
+        default: return .other
+        }
+    }
+}
+
+private struct ExternalAudioPreview: View {
+    let file: VaultFile
+
+    var body: some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "waveform")
+                .font(CiderFont.vaultDetailIcon)
+                .foregroundColor(CiderColors.tertiary)
+
+            Text("Audio preview unavailable")
+                .font(CiderFont.titleMedium)
+                .foregroundColor(CiderColors.primary)
+
+            Text("Open this audio file in your default media app.")
+                .font(CiderFont.body)
+                .foregroundColor(CiderColors.secondary)
+
+            Button("Open Externally") {
+                NSWorkspace.shared.open(file.absoluteURL)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: VaultFileDesign.detailPlaceholderHeight)
+        .background(CiderColors.surfaceInput)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
     }
 }
 
