@@ -46,7 +46,6 @@ struct SettingsBackgroundView: View {
 
 struct SettingsPrimarySidebar: View {
     @Binding var selectedCategory: SettingsCategory
-    let onSelectAccount: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -56,46 +55,6 @@ struct SettingsPrimarySidebar: View {
                 SidebarTrafficLightButton(color: .systemYellow, help: "Floating panel", action: {})
                 SidebarTrafficLightButton(color: .systemGreen, help: "Floating panel", action: {})
             }
-
-            Button(action: onSelectAccount) {
-                HStack(spacing: Spacing.sm) {
-                    Circle()
-                        .fill(AuthService.shared.isLoggedIn ? CiderColors.accentMedium : CiderColors.separatorMedium)
-                        .frame(width: SettingsDesign.accountAvatarSmall, height: SettingsDesign.accountAvatarSmall)
-                        .overlay {
-                            Image(systemName: "person.fill")
-                                .font(CiderFont.navTitle)
-                                .foregroundColor(AuthService.shared.isLoggedIn ? CiderColors.controlAccent : CiderColors.tertiary)
-                        }
-
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text(AuthService.shared.isLoggedIn ? AuthService.shared.accountEmail : "Account")
-                            .font(CiderFont.labelSemibold)
-                            .foregroundColor(CiderColors.primary)
-                            .lineLimit(1)
-
-                        Text(AuthService.shared.isLoggedIn ? "Legacy sign-in saved" : "Local storage only")
-                            .font(CiderFont.body)
-                            .foregroundColor(CiderColors.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .fill(selectedCategory == .account ? CiderColors.surfaceHover : CiderColors.surfaceSubtle)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                        .stroke(selectedCategory == .account ? CiderColors.borderSelected : Color.clear, lineWidth: SettingsDesign.rowStrokeWidth)
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Open account profile")
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Spacing.xs) {

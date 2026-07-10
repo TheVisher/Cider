@@ -25,7 +25,6 @@ struct SettingsView: View {
             HStack(spacing: 0) {
                 SettingsPrimarySidebar(
                     selectedCategory: $selectedCategory,
-                    onSelectAccount: { selectedCategory = .account },
                     onClose: { NotificationCenter.default.post(name: .dismissSettings, object: nil) }
                 )
                 .frame(width: SettingsDesign.primarySidebarWidth, alignment: .topLeading)
@@ -76,20 +75,16 @@ struct SettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .settingsNavigate)) { notification in
             guard let category = notification.userInfo?["category"] as? String else { return }
-            if let sub = notification.userInfo?["subcategory"] as? String {
-                switch sub {
-                case "trash": pendingSubcategory = .dataTrash
-                case "directories": pendingSubcategory = .dataDirectories
-                default: break
-                }
-            }
-            switch category {
-            case "data": selectedCategory = .data
-            case "general": selectedCategory = .general
-            case "appearance": selectedCategory = .appearance
-            case "capture": selectedCategory = .capture
-            case "content": selectedCategory = .content
-            default: break
+            let subcategory = notification.userInfo?["subcategory"] as? String
+            guard let destination = SettingsNavigationDestination.resolve(
+                category: category,
+                subcategory: subcategory
+            ) else { return }
+            if selectedCategory == destination.category {
+                selectedSubcategory = destination.subcategory
+            } else {
+                pendingSubcategory = destination.subcategory
+                selectedCategory = destination.category
             }
         }
     }

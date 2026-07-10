@@ -2,49 +2,82 @@ import SwiftUI
 
 enum SettingsCategory: String, CaseIterable {
     case general = "General"
-    case content = "Content"
     case capture = "Capture"
-    case appearance = "Appearance"
+    case readingAppearance = "Reading & Appearance"
     case intelligence = "Intelligence"
-    case data = "Data"
-    case about = "About"
-    case account = "Account"
+    case dataPrivacy = "Data & Privacy"
+    case advanced = "Advanced"
 
     static var primaryCategories: [SettingsCategory] {
-        [.general, .content, .capture, .appearance, .intelligence, .data, .about]
+        [.general, .capture, .readingAppearance, .intelligence, .dataPrivacy, .advanced]
     }
 
     var icon: String {
         switch self {
         case .general: "gearshape"
-        case .content: "square.stack"
         case .capture: "arrow.down.to.line"
-        case .appearance: "paintbrush"
+        case .readingAppearance: "textformat.size"
         case .intelligence: "sparkles"
-        case .data: "externaldrive"
-        case .about: "info.circle"
-        case .account: "person.crop.circle"
+        case .dataPrivacy: "hand.raised"
+        case .advanced: "wrench.and.screwdriver"
         }
     }
 
     var subcategories: [SettingsSubcategory] {
         switch self {
         case .general:
-            [.startup, .activation, .panelBehavior, .shortcuts]
-        case .content:
-            [.contentBookmarks, .contentNotes]
+            [.startup, .activation, .panelBehavior, .shortcuts, .aboutOverview]
         case .capture:
             [.captureBookmarks, .captureClipboard, .captureStorage]
-        case .appearance:
-            [.appearanceText, .appearanceSounds, .appearanceToasts]
+        case .readingAppearance:
+            [.contentBookmarks, .contentNotes, .appearanceText, .appearanceSounds, .appearanceToasts]
         case .intelligence:
             [.intelligenceFeatures]
-        case .data:
-            [.dataDirectories, .dataTrash, .dataNotifications, .dataImportExport]
-        case .about:
-            [.aboutOverview]
-        case .account:
-            [.accountOverview]
+        case .dataPrivacy:
+            [.dataTrash, .dataNotifications]
+        case .advanced:
+            [.dataDirectories, .dataImportExport, .accountOverview, .syncSettings]
+        }
+    }
+}
+
+struct SettingsNavigationDestination: Equatable {
+    let category: SettingsCategory
+    let subcategory: SettingsSubcategory
+
+    static func resolve(category rawCategory: String, subcategory rawSubcategory: String? = nil) -> Self? {
+        let category = rawCategory.lowercased()
+        let subcategory = rawSubcategory?.lowercased()
+
+        switch (category, subcategory) {
+        case ("general", _):
+            return .init(category: .general, subcategory: .startup)
+        case ("capture", _):
+            return .init(category: .capture, subcategory: .captureBookmarks)
+        case ("content", _):
+            return .init(category: .readingAppearance, subcategory: .contentBookmarks)
+        case ("appearance", _):
+            return .init(category: .readingAppearance, subcategory: .appearanceText)
+        case ("reading", _), ("readingappearance", _), ("reading & appearance", _):
+            return .init(category: .readingAppearance, subcategory: .contentBookmarks)
+        case ("intelligence", _):
+            return .init(category: .intelligence, subcategory: .intelligenceFeatures)
+        case ("data", "directories"):
+            return .init(category: .advanced, subcategory: .dataDirectories)
+        case ("data", "importexport"), ("data", "import-export"):
+            return .init(category: .advanced, subcategory: .dataImportExport)
+        case ("data", "trash"):
+            return .init(category: .dataPrivacy, subcategory: .dataTrash)
+        case ("data", _), ("dataprivacy", _), ("data & privacy", _):
+            return .init(category: .dataPrivacy, subcategory: .dataTrash)
+        case ("account", _):
+            return .init(category: .advanced, subcategory: .accountOverview)
+        case ("sync", _):
+            return .init(category: .advanced, subcategory: .syncSettings)
+        case ("advanced", _):
+            return .init(category: .advanced, subcategory: .dataDirectories)
+        default:
+            return nil
         }
     }
 }
@@ -95,7 +128,7 @@ enum SettingsSubcategory: Hashable {
         case .panelBehavior: "Panel"
         case .shortcuts: "Shortcuts"
         case .contentBookmarks: "Bookmarks"
-        case .contentNotes: "Notes"
+        case .contentNotes: "Journal & Notes"
         case .captureBookmarks: "Bookmarks"
         case .captureClipboard: "Clipboard"
         case .captureStorage: "Storage"
@@ -103,13 +136,13 @@ enum SettingsSubcategory: Hashable {
         case .appearanceSounds: "Sounds"
         case .appearanceToasts: "Toasts"
         case .intelligenceFeatures: "Features"
-        case .dataDirectories: "Directories"
+        case .dataDirectories: "Storage & Directories"
         case .dataTrash: "Trash"
         case .dataNotifications: "Notifications"
-        case .dataImportExport: "Import & Export"
-        case .aboutOverview: "Overview"
-        case .accountOverview: "Profile"
-        case .syncSettings: "Sync"
+        case .dataImportExport: "Import, Export & Repair"
+        case .aboutOverview: "About"
+        case .accountOverview: "Legacy Account"
+        case .syncSettings: "Legacy Sync Support"
         }
     }
 }
