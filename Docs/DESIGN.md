@@ -39,7 +39,7 @@ Cider should feel like a calm native memory cockpit: fast capture, clear review,
 - Kanban should optimize for scanning and handoff. Projects opens to a calm cross-project summary of Active, Testing, Blocked, and Next Up work. Entering one project opens its Board; a concise Overview remains secondary. Call unread/unreviewed project work **Updates**, not another Inbox, and expose it through quiet needs-attention badges. Consolidate Docs, Decisions, QA, and Plans into one Project Docs section with filters instead of four permanent tabs. Attach supporting artifacts to their CID cards, then provide a read-only project References aggregation rather than a separate asset store. Keep Milestones as project goals whose progress is derived from linked CID cards.
 - Dashboard should answer what matters now, why it matters, and what action is available.
 - Spaces should feel like sibling command surfaces over the same memory system, not unrelated empty pages.
-- Chat should show state clearly: idle, running, awaiting approval, failed, repaired.
+- Chat should show a simple state clearly: connected/idle, running, awaiting approval, failed, and the active Hermes model. Do not expose multi-runtime/provider administration as normal Cider product UI.
 - Settings use five stable sections—General, Capture, Reading & Appearance, Intelligence, and Data & Privacy—with rare migration, repair, and diagnostic tools behind guarded Advanced disclosure. Developer-only Journal provenance/index/candidate diagnostics stay out of normal Journal UI entirely.
 
 ## Layout Contracts

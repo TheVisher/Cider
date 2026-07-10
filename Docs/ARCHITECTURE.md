@@ -50,7 +50,9 @@ Graph-native second-brain work should use the shared `graph_candidate` contract 
 
 ## Agent Boundary
 
-Cider owns the native UI, local memory state, vault artifacts, stable logical chat identity, commands, mirrored display history, and user-facing approval surfaces. Hermes or another runtime owns long-running agent execution, tool semantics, runtime session truth, and external session continuity.
+Cider owns the native UI, local memory state, vault artifacts, stable logical chat identity, commands, mirrored display history, and user-facing approval surfaces. Hermes is the sole supported current runtime and owns long-running agent execution, tool semantics, runtime session truth, and external session continuity. Keep the Hermes transport boundary narrow, but do not retain unused alternate-provider/runtime implementations merely for hypothetical flexibility; audit dependencies and delete safely unused code.
+
+Normal Main Brain UI exposes only simple connection and active-model status. Provider selection, channel management, runtime switching, and restart administration belong to Hermes operations rather than the Cider product surface.
 
 Raw runtime session IDs are rotating pointers, not product identity. Direct assumptions about one runtime should stay isolated in agent transport/client files. Prefer Runs/SSE-style APIs when available, with CLI/export fallback as a compatibility path.
 

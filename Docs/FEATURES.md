@@ -134,7 +134,9 @@ Key code: `Sources/Cider/Views/Spaces/`, `Sources/Cider/Services/CiderSpaceStora
 
 ## Main Brain Chat
 
-Main Brain is Cider's default opening experience and primary conversational front door. The native Cider chat surface preserves a stable logical Cider brain, `cider.main`, displayed as Cider, while bridging to Hermes runtime/session behavior. The visible transcript is a working surface; the vault is durable memory. Embedded and pop-out chat are two presentations of the same conversation identity, not separate products.
+Main Brain is Cider's default opening experience and primary conversational front door. Hermes is the sole supported current agent runtime. The normal surface shows only a simple connection state and active-model label; it does not expose provider pickers, channel controls, runtime switching, or restart administration. Embedded and pop-out chat are two presentations of the same stable logical Cider brain, `cider.main`, not separate products.
+
+Cider owns the native working surface and durable local memory; Hermes owns runtime execution and external session continuity. Audit dormant Apple Intelligence, local-model, alternate-provider, and runtime-management code during implementation, then remove code proven unused and dependency-safe instead of carrying speculative code debt.
 
 Key code: `Sources/Cider/Views/AIAssistant/`, `Sources/Cider/Services/Agent/`.
 

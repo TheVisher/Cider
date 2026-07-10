@@ -29,7 +29,7 @@ The core loop is:
 - Vault files and Kanban YAML remain durable artifacts and workflow stores where the file itself matters.
 - Conservative routing beats clever misfiling. When confidence is low, Cider should keep uncertainty visible in review instead of hiding a bad guess.
 - Dashboard, reminders, CLI JSON, and agent reports should share the same relevance truth and explain why something matters.
-- Main Brain should be excellent before Cider grows a broad roster of agents.
+- Main Brain should be excellent before Cider grows a broad roster of agents. Hermes is the sole supported current runtime; Cider shows simple connection/model status rather than becoming a provider or runtime management console.
 - Kanban is Cider's active roadmap, spec, testing, bug, and handoff surface.
 - Core docs should stay lean and durable.
 
