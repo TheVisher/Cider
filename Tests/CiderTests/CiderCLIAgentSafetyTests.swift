@@ -307,6 +307,64 @@ struct CiderCLIAgentSafetyTests {
         }
     }
 
+    @Test("recall context query json executes recall instead of help")
+    func recallContextQueryJSONExecutesRecallInsteadOfHelp() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-recall-context-query-dispatch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Recall Dispatch Sentinel",
+            content: "A source-backed fixture for recall-context query dispatch.",
+            vault: vault
+        )
+
+        for subcommand in ["recall-context", "context-bundle", "recall-bundle"] {
+            let result = try runCLI(
+                args: ["item", subcommand, "--query", "Recall Dispatch Sentinel", "--json"],
+                vault: vault
+            )
+            let payload = try parseJSONObject(result.stdout)
+
+            #expect(result.status == 0)
+            #expect(payload["command"] as? String == "item.recall-context")
+            #expect(payload["command"] as? String != "item.\(subcommand).help")
+            #expect(payload["readOnly"] as? Bool == true)
+            #expect(payload["changed"] as? Bool == false)
+            let anchors = try #require(payload["anchors"] as? [[String: Any]])
+            #expect(anchors.contains { (($0["item"] as? [String: Any])?["id"] as? String) == noteID })
+        }
+    }
+
+    @Test("recall context item json executes recall instead of help")
+    func recallContextItemJSONExecutesRecallInsteadOfHelp() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-recall-context-item-dispatch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteID = try createNote(
+            title: "Recall Item Dispatch Sentinel",
+            content: "A source-backed fixture for recall-context item dispatch.",
+            vault: vault
+        )
+
+        let result = try runCLI(
+            args: ["item", "recall-context", "--item", "note", noteID, "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["command"] as? String == "item.recall-context")
+        #expect(payload["command"] as? String != "item.recall-context.help")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let anchors = try #require(payload["anchors"] as? [[String: Any]])
+        #expect(anchors.contains { (($0["item"] as? [String: Any])?["id"] as? String) == noteID })
+    }
+
     @Test("reminder mutation result exposes shared action receipt")
     func reminderMutationResultExposesSharedActionReceipt() throws {
         let id = UUID()

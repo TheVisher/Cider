@@ -219,7 +219,8 @@ struct CiderCLI {
             return false
         }
 
-        if args.contains("--json"),
+        if hasHelpArg(args),
+           args.contains("--json"),
            let payload = itemRecallHelpContractPayload(subcommand: subcommand) {
             outputJSON(payload)
             return true
