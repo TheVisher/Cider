@@ -353,7 +353,13 @@ enum ProjectWorkspaceRoutePolicy {
         case .home:
             return .projects(.home)
         case .project:
-            return .projects(.workspace(projectID: workspace.id, section: .overview))
+            guard let primaryBoardID = workspace.boardIDs.first else {
+                return .projects(.workspace(projectID: workspace.id, section: .overview))
+            }
+            return .projects(.workspace(
+                projectID: workspace.id,
+                section: .board(boardID: primaryBoardID, milestoneCardID: nil)
+            ))
         case .browseAllBoards:
             return .projects(.browseAllBoards(section: .overview))
         }

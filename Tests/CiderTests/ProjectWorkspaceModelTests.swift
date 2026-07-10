@@ -2,6 +2,37 @@ import XCTest
 @testable import Cider
 
 final class ProjectWorkspaceModelTests: XCTestCase {
+    func testOpeningProjectDefaultsToPrimaryBoardAndFallsBackToOverviewWithoutOne() {
+        let project = ProjectWorkspace(
+            id: "cider",
+            kind: .project,
+            title: "Cider",
+            subtitle: "Main Cider product workspace",
+            boardIDs: ["2afee0", "a1b2c3"],
+            referenceSearchTerms: ["cider"]
+        )
+        let projectWithoutBoard = ProjectWorkspace(
+            id: "empty",
+            kind: .project,
+            title: "Empty",
+            subtitle: "Project without a board yet",
+            boardIDs: [],
+            referenceSearchTerms: []
+        )
+
+        XCTAssertEqual(
+            ProjectWorkspaceRoutePolicy.route(for: project),
+            .projects(.workspace(
+                projectID: "cider",
+                section: .board(boardID: "2afee0", milestoneCardID: nil)
+            ))
+        )
+        XCTAssertEqual(
+            ProjectWorkspaceRoutePolicy.route(for: projectWithoutBoard),
+            .projects(.workspace(projectID: "empty", section: .overview))
+        )
+    }
+
     func testDefaultCatalogBuildsCiderProjectFamilyFromKnownBoards() {
         let boards = [
             KanbanBoard(id: "2afee0", name: "Cider"),
@@ -254,7 +285,13 @@ final class ProjectWorkspaceModelTests: XCTestCase {
             referenceSearchTerms: []
         )
 
-        XCTAssertEqual(ProjectWorkspaceRoutePolicy.route(for: cider), .projects(.workspace(projectID: "cider", section: .overview)))
+        XCTAssertEqual(
+            ProjectWorkspaceRoutePolicy.route(for: cider),
+            .projects(.workspace(
+                projectID: "cider",
+                section: .board(boardID: "2afee0", milestoneCardID: nil)
+            ))
+        )
         XCTAssertEqual(ProjectWorkspaceRoutePolicy.route(for: browseAllBoards), .projects(.browseAllBoards(section: .overview)))
         XCTAssertEqual(
             ProjectWorkspaceRoutePolicy.route(

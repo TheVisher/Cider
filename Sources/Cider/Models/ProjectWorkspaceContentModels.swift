@@ -99,6 +99,57 @@ struct ProjectWorkspaceOverviewModel: Equatable {
     let recentArtifacts: [ProjectWorkspaceCoreDocRow]
     let artifacts: [ProjectWorkspaceArtifactRow]
     let boardCreationActionTitle: String?
+
+    var primaryStatusMetrics: [ProjectWorkspaceStatusMetric] {
+        ProjectWorkspaceStatusKind.allCases.map { kind in
+            ProjectWorkspaceStatusMetric(kind: kind, value: kind.value(in: totals))
+        }
+    }
+}
+
+enum ProjectWorkspaceStatusKind: String, CaseIterable, Identifiable {
+    case active
+    case testing
+    case blocked
+    case nextUp
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .active: "Active"
+        case .testing: "Testing"
+        case .blocked: "Blocked"
+        case .nextUp: "Next Up"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .active: "hammer"
+        case .testing: "checklist"
+        case .blocked: "exclamationmark.triangle"
+        case .nextUp: "tray"
+        }
+    }
+
+    fileprivate func value(in totals: ProjectWorkspaceCardTotals) -> Int {
+        switch self {
+        case .active: totals.inProgress
+        case .testing: totals.testing
+        case .blocked: totals.blocked
+        case .nextUp: totals.queued
+        }
+    }
+}
+
+struct ProjectWorkspaceStatusMetric: Identifiable, Equatable {
+    let kind: ProjectWorkspaceStatusKind
+    let value: Int
+
+    var id: String { kind.id }
+    var title: String { kind.title }
+    var systemImage: String { kind.systemImage }
 }
 
 struct ProjectWorkspaceCardTotals: Equatable {

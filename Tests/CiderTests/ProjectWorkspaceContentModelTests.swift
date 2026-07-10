@@ -140,6 +140,16 @@ final class ProjectWorkspaceContentModelTests: XCTestCase {
         XCTAssertEqual(projectModel.totals.blocked, 1)
         XCTAssertEqual(homeModel.projectRows.map(\.projectID), ["cider", "cider-web"])
         XCTAssertEqual(homeModel.totals.queued, 2)
+        XCTAssertEqual(
+            homeModel.primaryStatusMetrics,
+            [
+                ProjectWorkspaceStatusMetric(kind: .active, value: 1),
+                ProjectWorkspaceStatusMetric(kind: .testing, value: 2),
+                ProjectWorkspaceStatusMetric(kind: .blocked, value: 1),
+                ProjectWorkspaceStatusMetric(kind: .nextUp, value: 2)
+            ]
+        )
+        XCTAssertEqual(homeModel.primaryStatusMetrics.map(\.title), ["Active", "Testing", "Blocked", "Next Up"])
     }
 
     func testProjectOverviewExposesBoardCreationActionForProjectsOnly() {

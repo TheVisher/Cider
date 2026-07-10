@@ -56,10 +56,9 @@ struct ProjectWorkspaceOverviewView: View {
 
     private var statusStrip: some View {
         HStack(spacing: Spacing.sm) {
-            metricChip("Queued", value: model.totals.queued, symbol: "tray")
-            metricChip("In Progress", value: model.totals.inProgress, symbol: "hammer")
-            metricChip("Testing", value: model.totals.testing, symbol: "checklist")
-            metricChip("Blocked", value: model.totals.blocked, symbol: "exclamationmark.triangle")
+            ForEach(model.primaryStatusMetrics) { metric in
+                metricChip(metric.title, value: metric.value, symbol: metric.systemImage)
+            }
             Spacer(minLength: 0)
         }
     }
