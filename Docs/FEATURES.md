@@ -168,7 +168,9 @@ Key code: `Sources/Cider/Services/ScreenCapture/`, `Sources/Cider/Views/ScreenCa
 
 ## Settings And Sync
 
-Settings manage vault location, hotkeys, intelligence, storage, sync, update reminders, and connected services. Sync remains secondary to local-first safety.
+Settings use five calm primary sections: **General**, **Capture**, **Reading & Appearance**, **Intelligence**, and **Data & Privacy**. Rare migration, cleanup, directory override, broad reprocessing, repair, and diagnostic controls belong under guarded **Advanced** surfaces rather than normal browsing. Settings search may help locate controls, but should not replace the stable categories.
+
+Keep startup/panel behavior, shortcuts, Journal formatting, capture prompts, data location, backup/export, permissions, and privacy legible. Sync remains secondary to local-first safety.
 
 Key code: `Sources/Cider/Views/Settings/`, `Sources/Cider/Services/SyncService.swift`.
 
