@@ -28,6 +28,8 @@ Key code: `Sources/Cider/Models/WorkspaceRoute.swift`, `Sources/Cider/Models/Lib
 
 Bookmarks are one captured item type inside the second-brain loop. They capture URLs, metadata, thumbnails, tags, notes, related items, source provenance, routing/review state, and vault placement. `.webloc` files are durable vault artifacts while SQLite stores canonical metadata. Bookmark detail should conserve memory: keep the active live page useful, but avoid warming every web/reader/extraction surface in the background.
 
+For now, the visible manual browser-capture paths are the automatic copied-URL Save/Discard toast and **New → Bookmark**. Preserve the existing active-browser/Safari capture code and Option+B hotkeys, but hide/demote those entry points until real use justifies restoring them. Do not delete and later rebuild working capture capability.
+
 Key code: `Sources/Cider/Views/Bookmarks/`, `Sources/Cider/Services/VaultBookmarkService.swift`, `Sources/Cider/Services/BookmarksStorage.swift`, `Sources/Cider/Services/BookmarkFileService.swift`.
 
 ## Capture
