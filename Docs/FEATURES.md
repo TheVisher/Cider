@@ -134,6 +134,12 @@ Unsaved clipboard history remains transient and separate from durable Library tr
 
 Key code: `Sources/Cider/Services/ClipboardHistoryService.swift`, `Sources/Cider/Views/Shared/ClipboardPanelView.swift`.
 
+## Drop Zone
+
+Park the dedicated floating Drop Zone UI because it has not demonstrated everyday use. Preserve its working capture engine and tests: it already accepts files, URLs, text, and images; routes them through canonical capture; emits receipts; and supports recent-drop state. Do not delete and later rebuild that capability. It may return as a simpler universal drop target if real use or the future shell design calls for it.
+
+Key code: `Sources/Cider/Views/Floating/CiderDropZoneView.swift`, `Sources/Cider/App/CiderDropZoneContext.swift`, `Sources/Cider/App/CiderStatusDropTarget.swift`, `Sources/Cider/Views/CiderPanelView+URLDrop.swift`.
+
 ## Screen Capture
 
 Park Cider's dedicated screenshot/OCR routing workflow as a visible product surface; it has not demonstrated enough real use to justify separate UI. Preserve reusable capture and OCR capability in the backend where inexpensive, but do not require OCR or entity routing before an image can be saved.
