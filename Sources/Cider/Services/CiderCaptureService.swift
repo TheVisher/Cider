@@ -1287,7 +1287,7 @@ enum CiderCaptureIntentStagingService {
                 source: "capture.intent.place_signal"
             ))
         }
-        if hasRestaurantPlaceSignals(in: text) {
+        if hasRestaurantPlaceSignals(in: text) && !hasPayrollDeductionRecordSignals(in: text) {
             intents.append(.init(
                 kind: .space(spaceName: "Food", area: "Restaurants"),
                 confidence: 0.74,
@@ -1412,6 +1412,18 @@ enum CiderCaptureIntentStagingService {
         let hasLocalPlace = localSignals.contains { text.contains($0) }
         let hasFoodContext = foodSignals.contains { text.contains($0) }
         return hasLocalPlace && (hasRestaurant || hasFoodContext)
+    }
+
+    private static func hasPayrollDeductionRecordSignals(in text: String) -> Bool {
+        let payrollAnchors = ["paycheck", "pay period", "payroll"]
+        let payrollFields = [
+            "gross pay", "net pay", "taxes", "withholding", "deductions",
+            "pretax", "401(k)",
+        ]
+        let fieldCount = payrollFields.reduce(into: 0) { count, signal in
+            if text.contains(signal) { count += 1 }
+        }
+        return payrollAnchors.contains { text.contains($0) } && fieldCount >= 3
     }
 
     private static func firstURLString(in text: String) -> String? {

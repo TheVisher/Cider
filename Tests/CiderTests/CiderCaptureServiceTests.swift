@@ -478,6 +478,46 @@ struct CiderCaptureServiceTests {
         }
     }
 
+    @Test("payroll deduction labels do not stage restaurant intent")
+    func payrollDeductionLabelsDoNotStageRestaurantIntent() {
+        let intents = CiderCaptureIntentStagingService.stagedIntents(for: .init(
+            title: "Paycheck details — 2026-07-09",
+            urlString: nil,
+            sourceFile: nil,
+            sourceText: """
+            Pay period: 2026-06-23 through 2026-07-06
+            Work location: Seattle, Washington
+            Gross pay: $4,800.00
+            Taxes and withholding: $1,125.00
+            Deductions:
+            Pretax medical: $180.00
+            401(k) loan: $125.00
+            Compass Cafes — chicken and drinks: $18.40
+            Net pay: $3,351.60
+            """,
+            sourceContext: nil
+        ))
+
+        #expect(!intents.contains { intent in
+            intent.source == "capture.intent.social_restaurant_signal"
+        })
+    }
+
+    @Test("genuine restaurant place language still stages restaurant intent")
+    func genuineRestaurantPlaceLanguageStillStagesRestaurantIntent() {
+        let intents = CiderCaptureIntentStagingService.stagedIntents(for: .init(
+            title: "Dinner idea",
+            urlString: nil,
+            sourceFile: nil,
+            sourceText: "Save Tokuni in Lynnwood as a restaurant and place to try.",
+            sourceContext: nil
+        ))
+
+        #expect(intents.contains { intent in
+            intent.source == "capture.intent.social_restaurant_signal"
+        })
+    }
+
     @Test("url capture immediately indexes searchable chunks")
     func urlCaptureImmediatelyIndexesSearchableChunks() throws {
         try withIsolatedVault { db, bookmarks, notes, todos, files in
