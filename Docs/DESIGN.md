@@ -36,7 +36,7 @@ Cider should feel like a calm native memory cockpit: fast capture, clear review,
 - Use one global search interaction and result vocabulary. The visible Library search field and `⌘K` are two entry points to the same search; `⌘K` may additionally expose quick actions without becoming a second search product.
 - Review surfaces should make uncertainty visible and correction cheap.
 - Detail views should reveal metadata without overwhelming the main content. Default Library items to a calm slide-out detail; make **Open Full** and **Float** explicit secondary actions rather than equally prominent modes.
-- Kanban should optimize for scanning and handoff. Projects opens to a calm cross-project summary of Active, Testing, Blocked, and Next Up work. Entering one project opens its Board; a concise Overview remains secondary.
+- Kanban should optimize for scanning and handoff. Projects opens to a calm cross-project summary of Active, Testing, Blocked, and Next Up work. Entering one project opens its Board; a concise Overview remains secondary. Call unread/unreviewed project work **Updates**, not another Inbox, and expose it through quiet needs-attention badges.
 - Dashboard should answer what matters now, why it matters, and what action is available.
 - Spaces should feel like sibling command surfaces over the same memory system, not unrelated empty pages.
 - Chat should show state clearly: idle, running, awaiting approval, failed, repaired.

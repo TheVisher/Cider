@@ -86,6 +86,8 @@ Projects opens to a calm cross-project summary of **Active**, **Testing**, **Blo
 
 Entering a specific project opens its **Board** first. A concise project Overview remains available as a secondary section for milestones, context, progress, and important artifacts; it should not duplicate the cross-project summary or hide active execution behind another landing page.
 
+Project **Updates** replaces the ambiguous Project Inbox label. It tracks unread or unreviewed project work and exposes quiet needs-attention badges from both the project and cross-project summary. Library Inbox remains the separate temporary state for unreviewed/unfiled captures; neither surface should make the user guess which kind of “inbox” they are opening.
+
 Kanban is both a user feature and Cider's development workflow. It owns roadmap, active work, QA evidence, bugs, implementation notes, review findings, failed attempts, completed plan history, and handoff context. Markdown export is explicit and one-way; cards remain the source of truth.
 
 Card notes can be parsed into native dashboard sections and projected into the second-brain item graph for search and agent inspection. YAML still owns the card; SQLite projection is rebuildable.
