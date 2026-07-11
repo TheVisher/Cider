@@ -63,6 +63,7 @@ struct JournalDetailContentView: View {
     let projection: JournalLibraryReadModel
     @ObservedObject var notesViewModel: NotesViewModel
     @Binding var selectedEntryID: String?
+    @State private var isEditingSource = false
 
     private var selectedDay: JournalLibraryDay? {
         if let selectedEntryID {
@@ -91,8 +92,11 @@ struct JournalDetailContentView: View {
                 Divider()
                     .background(CiderColors.separator)
 
-                if selectedDay.isAggregate {
-                    JournalAggregateDayView(day: selectedDay)
+                if !selectedDay.captureCards.isEmpty, !isEditingSource {
+                    JournalCaptureCardsView(
+                        day: selectedDay,
+                        onEditSource: selectedDay.editableEntry == nil ? nil : { isEditingSource = true }
+                    )
                 } else {
                     InlineNoteEditorView(viewModel: notesViewModel)
                 }
@@ -106,7 +110,10 @@ struct JournalDetailContentView: View {
             selectedEntryID = selectedDay?.id
             selectJournalNoteIfNeeded()
         }
-        .onChange(of: selectedEntryID) { _, _ in selectJournalNoteIfNeeded() }
+        .onChange(of: selectedEntryID) { _, _ in
+            isEditingSource = false
+            selectJournalNoteIfNeeded()
+        }
         .onChange(of: projection.days) { _, _ in selectJournalNoteIfNeeded() }
     }
 
@@ -130,27 +137,51 @@ struct JournalDetailContentView: View {
     }
 }
 
-private struct JournalAggregateDayView: View {
+private struct JournalCaptureCardsView: View {
     let day: JournalLibraryDay
+    let onEditSource: (() -> Void)?
+
+    private var timestampFormat: JournalTimestampFormat {
+        CiderConfig.load().journalTimestampFormat
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                ForEach(day.sourceEntries) { entry in
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        Text(entry.note.title)
-                            .font(CiderFont.bodySemibold)
-                            .foregroundColor(CiderColors.primary)
+                if let onEditSource {
+                    HStack {
+                        Text("Capture cards are a read-only view of one physical note.")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.tertiary)
 
-                        Text(entry.note.relativePath)
+                        Spacer(minLength: Spacing.sm)
+
+                        Button("Edit source note", action: onEditSource)
+                            .buttonStyle(.bordered)
+                    }
+                }
+
+                ForEach(day.captureCards) { card in
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                            Text(card.displayTimestamp(format: timestampFormat))
+                                .font(CiderFont.bodySemibold)
+                                .foregroundColor(CiderColors.primary)
+
+                            Text(JournalLibraryReadModel.friendlyCaptureSourceLabel(for: card.captureSource))
+                                .font(CiderFont.captionMedium)
+                                .foregroundColor(CiderColors.secondary)
+
+                            Spacer(minLength: 0)
+                        }
+
+                        Text(card.sourceEntry.note.relativePath)
                             .font(CiderFont.captionMonospacedMedium)
                             .foregroundColor(CiderColors.tertiary)
                             .textSelection(.enabled)
 
                         MarkdownContentView(
-                            text: entry.preparedDisplayContent(
-                                timestampFormat: CiderConfig.load().journalTimestampFormat
-                            )
+                            text: card.preparedMarkdown(timestampFormat: timestampFormat)
                         )
                     }
                     .padding(Spacing.md)

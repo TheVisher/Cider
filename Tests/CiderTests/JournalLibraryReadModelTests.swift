@@ -320,6 +320,135 @@ struct JournalLibraryReadModelTests {
         #expect(projection.defaultDay?.dateLabel == "2026-05-31")
     }
 
+    @Test("single canonical note exposes deterministic source-backed capture cards without rewriting markdown")
+    func singleCanonicalNoteExposesSourceBackedCaptureCards() throws {
+        let content = """
+        # Journal 06-04-2026
+
+        ## 08:15
+        Source: discord_voice
+
+        Morning reflection with [Televero](https://televerohealth.com/).
+
+        ## 17:45
+        Source: capture.add
+
+        Evening reflection preserves **Markdown** exactly.
+        """
+        let note = Note(
+            title: "Journal 06-04-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 06-04-2026.md"
+        )
+
+        let projection = JournalLibraryReadModel.build(from: [note])
+        let day = try #require(projection.days.first)
+
+        #expect(projection.days.count == 1)
+        #expect(day.captureCards.map(\.timestamp24Hour) == ["08:15", "17:45"])
+        #expect(day.captureCards.map(\.captureSource) == ["discord_voice", "capture.add"])
+        #expect(day.captureCards[0].sourceContent == """
+        ## 08:15
+        Source: discord_voice
+
+        Morning reflection with [Televero](https://televerohealth.com/).
+        """)
+        #expect(day.captureCards[1].sourceContent == """
+        ## 17:45
+        Source: capture.add
+
+        Evening reflection preserves **Markdown** exactly.
+        """)
+        #expect(day.captureCards[0].preparedMarkdown(timestampFormat: .twelveHour).contains(
+            "[Televero](https://televerohealth.com/)"
+        ))
+        #expect(day.captureCards[0].sourceEntry.content == content)
+        #expect(day.editableEntry?.note.id == note.id)
+    }
+
+    @Test("single source without reliable capture boundaries is not fabricated into cards")
+    func sourceWithoutReliableCaptureBoundariesRemainsUnsplit() throws {
+        let content = """
+        # Journal 06-05-2026
+
+        08:15-ish morning reflection.
+
+        Another paragraph that must not become a capture merely because it is separated.
+        """
+        let note = Note(
+            title: "Journal 06-05-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 06-05-2026.md"
+        )
+
+        let day = try #require(JournalLibraryReadModel.build(from: [note]).days.first)
+
+        #expect(day.captureCards.isEmpty)
+        #expect(day.editableEntry?.content == content)
+    }
+
+    @Test("single explicit timestamp and source remains one source-backed capture card")
+    func singleExplicitCaptureUsesCardPresentationWithoutFabricatingMore() throws {
+        let content = """
+        # Daily Journal 2026-06-04
+
+        ## Entries
+        - 04:07 - Morning drive journal — 2026-06-04
+
+        Source: Discord voice message while driving to work.
+
+        Summary:
+        - Exact source-backed reflection.
+        """
+        let note = Note(
+            title: "Daily Journal 2026-06-04",
+            content: content,
+            relativePath: "Inbox/Notes/Daily Journal 2026-06-04.md"
+        )
+
+        let day = try #require(JournalLibraryReadModel.build(from: [note]).days.first)
+
+        #expect(day.captureCards.count == 1)
+        #expect(day.captureCards[0].timestamp24Hour == "04:07")
+        #expect(day.captureCards[0].sourceContent == """
+        - 04:07 - Morning drive journal — 2026-06-04
+
+        Source: Discord voice message while driving to work.
+
+        Summary:
+        - Exact source-backed reflection.
+        """)
+        #expect(day.editableEntry?.content == content)
+    }
+
+    @Test("multi-note day keeps one row and one source-preserving card per physical note")
+    func multiNoteDayKeepsExistingAggregateCards() throws {
+        let morning = Note(
+            title: "Morning voice journal — 2026-05-29",
+            content: "Morning source with https://example.com/plain",
+            modifiedAt: Self.date("2026-05-29T09:00:00Z"),
+            relativePath: "Inbox/Files/morning-voice-journal-20260529.md"
+        )
+        let evening = Note(
+            title: "Journal reflection — 2026-05-29 evening",
+            content: "Evening [source link](https://example.com/evening)",
+            modifiedAt: Self.date("2026-05-29T19:00:00Z"),
+            relativePath: "Inbox/Files/evening-journal-20260529.md"
+        )
+
+        let projection = JournalLibraryReadModel.build(from: [morning, evening])
+        let day = try #require(projection.days.first)
+        let dayNodes = projection.navigation.flatMap(\.children).flatMap(\.children).flatMap(\.children)
+
+        #expect(projection.days.count == 1)
+        #expect(dayNodes.filter { $0.kind == .day("2026-05-29") }.count == 1)
+        #expect(day.captureCards.map(\.sourceEntry.note.id) == [evening.id, morning.id])
+        #expect(day.captureCards.map(\.sourceContent) == [evening.content, morning.content])
+        #expect(day.captureCards[0].preparedMarkdown(timestampFormat: .twelveHour) == evening.content)
+        #expect(day.captureCards[1].preparedMarkdown(timestampFormat: .twelveHour) == morning.content)
+        #expect(day.editableEntry == nil)
+    }
+
     @Test("journal display timestamps can render as twelve hour without mutating source content")
     func journalDisplayTimestampsCanRenderAsTwelveHourWithoutMutatingSourceContent() throws {
         let content = """

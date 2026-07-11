@@ -26,12 +26,32 @@ struct JournalEntrySection: Identifiable, Hashable {
     let timestamp24Hour: String
     let capturedAt: Date?
     let captureSource: String
+    let hasExplicitCaptureSource: Bool
     let sourceSpan: JournalSourceSpan
     let sourceSnippet: String
 
     func displayTimestamp(format: JournalTimestampFormat) -> String {
         guard format == .twelveHour else { return timestamp24Hour }
         return JournalLibraryReadModel.twelveHourDisplayTime(from: timestamp24Hour) ?? timestamp24Hour
+    }
+}
+
+struct JournalCaptureCard: Identifiable, Hashable {
+    let id: String
+    let timestamp24Hour: String
+    let capturedAt: Date?
+    let captureSource: String
+    let sourceContent: String
+    let sourceSpan: JournalSourceSpan?
+    let sourceEntry: JournalLibraryEntry
+
+    func displayTimestamp(format: JournalTimestampFormat) -> String {
+        guard format == .twelveHour else { return timestamp24Hour }
+        return JournalLibraryReadModel.twelveHourDisplayTime(from: timestamp24Hour) ?? timestamp24Hour
+    }
+
+    func preparedMarkdown(timestampFormat: JournalTimestampFormat) -> String {
+        JournalLibraryReadModel.formatJournalTimestamps(in: sourceContent, format: timestampFormat)
     }
 }
 
@@ -98,6 +118,38 @@ struct JournalLibraryDay: Identifiable, Hashable {
 
     var editableEntry: JournalLibraryEntry? {
         sourceEntries.count == 1 ? sourceEntries[0] : nil
+    }
+
+    var captureCards: [JournalCaptureCard] {
+        if sourceEntries.count > 1 {
+            return sourceEntries.map { entry in
+                JournalCaptureCard(
+                    id: "journal-capture-\(entry.note.id.uuidString)",
+                    timestamp24Hour: entry.metadata.sections.first?.timestamp24Hour
+                        ?? JournalLibraryReadModel.captureTimeFormatter.string(from: entry.note.modifiedAt),
+                    capturedAt: entry.metadata.capturedAt ?? entry.note.modifiedAt,
+                    captureSource: entry.note.relativePath,
+                    sourceContent: entry.content,
+                    sourceSpan: nil,
+                    sourceEntry: entry
+                )
+            }
+        }
+
+        guard let entry = sourceEntries.first else { return [] }
+        let sections = entry.metadata.sections.filter(\.hasExplicitCaptureSource)
+        guard !sections.isEmpty else { return [] }
+        return sections.map { section in
+            JournalCaptureCard(
+                id: section.id,
+                timestamp24Hour: section.timestamp24Hour,
+                capturedAt: section.capturedAt,
+                captureSource: section.captureSource,
+                sourceContent: section.sourceSnippet,
+                sourceSpan: section.sourceSpan,
+                sourceEntry: entry
+            )
+        }
     }
 }
 
@@ -477,6 +529,7 @@ struct JournalLibraryReadModel: Hashable {
                 timestamp24Hour: marker.time,
                 capturedAt: capturedAt(journalDate: journalDate, time: marker.time),
                 captureSource: captureSource(in: snippet),
+                hasExplicitCaptureSource: hasCaptureSource(in: snippet),
                 sourceSpan: JournalSourceSpan(location: marker.offset, length: end - marker.offset),
                 sourceSnippet: snippet.trimmingCharacters(in: .whitespacesAndNewlines)
             )
@@ -528,6 +581,16 @@ struct JournalLibraryReadModel: Hashable {
             if !value.isEmpty { return value }
         }
         return "markdown"
+    }
+
+    private static func hasCaptureSource(in snippet: String) -> Bool {
+        snippet.components(separatedBy: .newlines).contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.localizedLowercase.hasPrefix("source:") else { return false }
+            return !String(trimmed.dropFirst("Source:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        }
     }
 
     private static func substring(in content: String, offset: Int, length: Int) -> String {
@@ -633,6 +696,15 @@ struct JournalLibraryReadModel: Hashable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return formatter
+    }()
+
+    static let captureTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "HH:mm"
         return formatter
     }()
 
