@@ -631,6 +631,108 @@ enum CiderSchema {
         );
         """
 
+    // MARK: - Conversation Core
+
+    static let createConversationRooms = """
+        CREATE TABLE IF NOT EXISTS conversation_rooms (
+            id                    TEXT PRIMARY KEY,
+            stable_key            TEXT UNIQUE,
+            title                 TEXT NOT NULL,
+            kind                  TEXT NOT NULL DEFAULT 'chat',
+            lifecycle_state       TEXT NOT NULL DEFAULT 'active',
+            next_turn_sequence    INTEGER NOT NULL DEFAULT 1,
+            next_message_sequence INTEGER NOT NULL DEFAULT 1,
+            metadata_json         TEXT NOT NULL DEFAULT '{}',
+            created_at            REAL NOT NULL,
+            updated_at            REAL NOT NULL,
+            archived_at           REAL,
+            trashed_at            REAL
+        );
+        """
+
+    static let createConversationRuntimeBindings = """
+        CREATE TABLE IF NOT EXISTS conversation_runtime_bindings (
+            id                  TEXT PRIMARY KEY,
+            room_id             TEXT NOT NULL REFERENCES conversation_rooms(id) ON DELETE CASCADE,
+            parent_binding_id   TEXT,
+            runtime_id          TEXT NOT NULL,
+            transport_id        TEXT NOT NULL,
+            source_namespace    TEXT NOT NULL,
+            external_session_id TEXT,
+            binding_state       TEXT NOT NULL DEFAULT 'active',
+            cursor_message_id   TEXT,
+            cursor_timestamp    REAL,
+            metadata_json       TEXT NOT NULL DEFAULT '{}',
+            created_at          REAL NOT NULL,
+            updated_at          REAL NOT NULL,
+            UNIQUE(room_id, id),
+            FOREIGN KEY(room_id, parent_binding_id)
+                REFERENCES conversation_runtime_bindings(room_id, id)
+                DEFERRABLE INITIALLY DEFERRED
+        );
+        """
+
+    static let createConversationTurns = """
+        CREATE TABLE IF NOT EXISTS conversation_turns (
+            id                 TEXT PRIMARY KEY,
+            room_id            TEXT NOT NULL REFERENCES conversation_rooms(id) ON DELETE CASCADE,
+            sequence           INTEGER NOT NULL,
+            runtime_binding_id TEXT,
+            source_namespace   TEXT,
+            source_turn_id     TEXT,
+            status             TEXT NOT NULL,
+            error_code         TEXT,
+            error_detail       TEXT,
+            metadata_json      TEXT NOT NULL DEFAULT '{}',
+            created_at         REAL NOT NULL,
+            started_at         REAL,
+            completed_at       REAL,
+            updated_at         REAL NOT NULL,
+            UNIQUE(room_id, id),
+            UNIQUE(room_id, sequence),
+            CHECK (
+                (source_namespace IS NULL AND source_turn_id IS NULL) OR
+                (source_namespace IS NOT NULL AND source_turn_id IS NOT NULL)
+            ),
+            FOREIGN KEY(room_id, runtime_binding_id)
+                REFERENCES conversation_runtime_bindings(room_id, id)
+        );
+        """
+
+    static let createConversationMessages = """
+        CREATE TABLE IF NOT EXISTS conversation_messages (
+            id                 TEXT PRIMARY KEY,
+            room_id            TEXT NOT NULL REFERENCES conversation_rooms(id) ON DELETE CASCADE,
+            turn_id            TEXT,
+            runtime_binding_id TEXT,
+            parent_message_id  TEXT,
+            sequence           INTEGER NOT NULL,
+            role               TEXT NOT NULL,
+            content_text       TEXT NOT NULL DEFAULT '',
+            status             TEXT NOT NULL,
+            finish_reason      TEXT,
+            source_namespace   TEXT,
+            source_message_id  TEXT,
+            source_created_at  REAL,
+            metadata_json      TEXT NOT NULL DEFAULT '{}',
+            created_at         REAL NOT NULL,
+            updated_at         REAL NOT NULL,
+            UNIQUE(room_id, id),
+            UNIQUE(room_id, sequence),
+            CHECK (
+                (source_namespace IS NULL AND source_message_id IS NULL) OR
+                (source_namespace IS NOT NULL AND source_message_id IS NOT NULL)
+            ),
+            FOREIGN KEY(room_id, turn_id)
+                REFERENCES conversation_turns(room_id, id),
+            FOREIGN KEY(room_id, runtime_binding_id)
+                REFERENCES conversation_runtime_bindings(room_id, id),
+            FOREIGN KEY(room_id, parent_message_id)
+                REFERENCES conversation_messages(room_id, id)
+                DEFERRABLE INITIALLY DEFERRED
+        );
+        """
+
     // MARK: - Trash
 
     static let createTrash = """
@@ -771,6 +873,13 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_action_receipts_action ON action_receipts(action, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_action_receipts_actor ON action_receipts(actor, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_action_receipts_status ON action_receipts(status, created_at);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS conversation_binding_external_identity ON conversation_runtime_bindings(source_namespace, external_session_id) WHERE external_session_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS conversation_bindings_room ON conversation_runtime_bindings(room_id, binding_state, created_at);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS conversation_turn_source_identity ON conversation_turns(source_namespace, source_turn_id) WHERE source_namespace IS NOT NULL AND source_turn_id IS NOT NULL;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS conversation_message_source_identity ON conversation_messages(source_namespace, source_message_id) WHERE source_namespace IS NOT NULL AND source_message_id IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS conversation_messages_room_order ON conversation_messages(room_id, sequence);",
+        "CREATE INDEX IF NOT EXISTS conversation_messages_parent ON conversation_messages(room_id, parent_message_id, sequence);",
+        "CREATE INDEX IF NOT EXISTS conversation_messages_turn ON conversation_messages(room_id, turn_id, sequence);",
         "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_owner ON second_brain_routing_decisions(owner_type, owner_id, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_second_brain_routing_status ON second_brain_routing_decisions(status, created_at);",
         "CREATE INDEX IF NOT EXISTS idx_bookmarks_url     ON bookmarks(url);",
@@ -828,6 +937,10 @@ enum CiderSchema {
         createSecondBrainRoutingDecisions,
         createAgentActions,
         createActionReceipts,
+        createConversationRooms,
+        createConversationRuntimeBindings,
+        createConversationTurns,
+        createConversationMessages,
         createTrash,
         createMutationAudit,
         createFolderSyncDecisions,

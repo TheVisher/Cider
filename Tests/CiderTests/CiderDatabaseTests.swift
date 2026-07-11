@@ -90,6 +90,8 @@ struct CiderDatabaseTests {
             "similarity_reconciliation_runs", "action_receipts",
             "trash", "mutation_audit", "folder_sync_decisions",
             "schema_version", "schema_migrations",
+            "conversation_rooms", "conversation_runtime_bindings",
+            "conversation_turns", "conversation_messages",
         ]
 
         for table in expectedTables {
@@ -99,6 +101,114 @@ struct CiderDatabaseTests {
             stmt.bind(table, at: 1)
             try stmt.step()
             #expect(stmt.int(at: 0) == 1, "Table '\(table)' should exist")
+        }
+    }
+
+    @Test("v30 creates conversation tables, indexes, checks, and same-room foreign keys")
+    func v30ConversationSchemaExists() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        let tables = [
+            "conversation_rooms",
+            "conversation_runtime_bindings",
+            "conversation_turns",
+            "conversation_messages",
+        ]
+        for table in tables {
+            let statement = try db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;")
+            statement.bind(table, at: 1)
+            #expect(try statement.step(), "Missing v30 table \(table)")
+            #expect(!statement.string(at: 0).isEmpty)
+        }
+
+        let indexes = [
+            "conversation_binding_external_identity",
+            "conversation_bindings_room",
+            "conversation_turn_source_identity",
+            "conversation_message_source_identity",
+            "conversation_messages_room_order",
+            "conversation_messages_parent",
+            "conversation_messages_turn",
+        ]
+        for index in indexes {
+            let statement = try db.prepare("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?;")
+            statement.bind(index, at: 1)
+            #expect(try statement.step())
+            #expect(statement.int(at: 0) == 1, "Missing v30 index \(index)")
+        }
+
+        let messageSQL = try db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation_messages';")
+        #expect(try messageSQL.step())
+        #expect(messageSQL.string(at: 0).contains("source_namespace IS NULL AND source_message_id IS NULL"))
+        #expect(messageSQL.string(at: 0).contains("FOREIGN KEY(room_id, parent_message_id)"))
+
+        let turnSQL = try db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation_turns';")
+        #expect(try turnSQL.step())
+        #expect(turnSQL.string(at: 0).contains("source_namespace IS NULL AND source_turn_id IS NULL"))
+        #expect(turnSQL.string(at: 0).contains("FOREIGN KEY(room_id, runtime_binding_id)"))
+
+        let bindingSQL = try db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation_runtime_bindings';")
+        #expect(try bindingSQL.step())
+        #expect(bindingSQL.string(at: 0).contains("FOREIGN KEY(room_id, parent_binding_id)"))
+
+        #expect(throws: CiderDatabaseError.self) {
+            try db.runSQL("""
+                INSERT INTO conversation_rooms (
+                    id, title, created_at, updated_at
+                ) VALUES ('room-check', 'Check', 0, 0);
+                INSERT INTO conversation_messages (
+                    id, room_id, sequence, role, status,
+                    source_namespace, source_message_id, created_at, updated_at
+                ) VALUES ('bad-source-pair', 'room-check', 1, 'user', 'complete', 'source', NULL, 0, 0);
+                """)
+        }
+    }
+
+    @Test("v29 to v30 migration preserves representative existing rows")
+    func v30MigrationPreservesV29Rows() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        do {
+            let db = CiderDatabase()
+            try db.open(at: url)
+            try db.runSQL("""
+                INSERT INTO projects (id, title, subtitle, status, metadata, created_at, updated_at)
+                VALUES ('preserved-project', 'Preserved', 'v29 row', 'active', '{}', 1, 2);
+                DROP TABLE conversation_messages;
+                DROP TABLE conversation_turns;
+                DROP TABLE conversation_runtime_bindings;
+                DROP TABLE conversation_rooms;
+                DELETE FROM schema_version;
+                INSERT INTO schema_version (version) VALUES (29);
+                """)
+            db.close()
+        }
+
+        let migrated = CiderDatabase()
+        try migrated.open(at: url)
+        defer { migrated.close() }
+
+        let version = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
+        #expect(try version.step())
+        #expect(version.int(at: 0) == 30)
+
+        let project = try migrated.prepare("SELECT title, subtitle, updated_at FROM projects WHERE id = 'preserved-project';")
+        #expect(try project.step())
+        #expect(project.string(at: 0) == "Preserved")
+        #expect(project.string(at: 1) == "v29 row")
+        #expect(project.double(at: 2) == 2)
+
+        for table in ["conversation_rooms", "conversation_runtime_bindings", "conversation_turns", "conversation_messages"] {
+            let statement = try migrated.prepare("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?;")
+            statement.bind(table, at: 1)
+            #expect(try statement.step())
+            #expect(statement.int(at: 0) == 1)
         }
     }
 
@@ -163,6 +273,86 @@ struct CiderDatabaseTests {
         stmt.bind("backup-label", at: 1)
         #expect(try stmt.step())
         #expect(stmt.string(at: 0) == "Backed Up")
+    }
+
+    @Test("Portable backup and isolated restore retain conversation core rows and identities")
+    func conversationCoreBackupAndRestore() throws {
+        let isolatedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-conversation-backup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: isolatedDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: isolatedDirectory) }
+        let databaseURL = isolatedDirectory.appendingPathComponent("cider.db")
+
+        let database = CiderDatabase()
+        try database.open(at: databaseURL)
+        defer { database.close() }
+        let repository = ConversationRepository(database: database)
+        let roomID = UUID()
+        let room = try repository.createRoom(.init(id: roomID, stableKey: "cider.backup", title: "Backup Room"))
+        let binding = try repository.upsertRuntimeBinding(.init(
+            roomID: room.id,
+            runtimeID: "hermes",
+            transportID: "runs",
+            sourceNamespace: "hermes.runs.v1",
+            externalSessionID: "session-backup"
+        ))
+        let turn = try repository.beginTurn(.init(
+            roomID: room.id,
+            runtimeBindingID: binding.id,
+            source: .init(namespace: "hermes.runs.v1", id: "turn-backup")
+        ))
+        let first = try repository.upsertMessage(.init(
+            roomID: room.id,
+            turnID: turn.id,
+            runtimeBindingID: binding.id,
+            role: "user",
+            contentText: "first",
+            source: .init(namespace: "hermes.export.v1", id: "session-backup:user")
+        )).message
+        let second = try repository.upsertMessage(.init(
+            roomID: room.id,
+            turnID: turn.id,
+            runtimeBindingID: binding.id,
+            parentMessageID: first.id,
+            role: "assistant",
+            contentText: "second",
+            source: .init(namespace: "hermes.export.v1", id: "session-backup:assistant")
+        )).message
+
+        let service = DatabaseSafetyService()
+        let backupURL = try service.createRollingBackup(reason: "conversation-core", database: database)
+
+        let isolatedRestoreURL = isolatedDirectory.appendingPathComponent("isolated-restore.db")
+        try FileManager.default.copyItem(at: backupURL, to: isolatedRestoreURL)
+        let isolatedRestore = CiderDatabase()
+        try isolatedRestore.open(at: isolatedRestoreURL)
+        let restoredRepository = ConversationRepository(database: isolatedRestore)
+        let restoredRoom = try #require(try restoredRepository.room(stableKey: "cider.backup"))
+        #expect(restoredRoom.id == roomID)
+        let restoredBindings = try restoredRepository.bindings(roomID: roomID)
+        #expect(restoredBindings.map(\.externalSessionID) == ["session-backup"])
+        let restoredTurn = try #require(try restoredRepository.turn(id: turn.id))
+        #expect(restoredTurn.source == .init(namespace: "hermes.runs.v1", id: "turn-backup"))
+        let restoredMessages = try restoredRepository.messages(roomID: roomID)
+        #expect(restoredMessages.map(\.id) == [first.id, second.id])
+        #expect(restoredMessages.map(\.sequence) == [1, 2])
+        #expect(restoredMessages.map(\.source) == [
+            .init(namespace: "hermes.export.v1", id: "session-backup:user"),
+            .init(namespace: "hermes.export.v1", id: "session-backup:assistant"),
+        ])
+        isolatedRestore.close()
+
+        _ = try repository.upsertMessage(.init(roomID: roomID, role: "user", contentText: "after backup"))
+        _ = try service.restoreRollingBackup(
+            from: backupURL,
+            into: databaseURL,
+            database: database,
+            reopenDatabase: true
+        )
+        let reopenedRepository = ConversationRepository(database: database)
+        #expect(try reopenedRepository.messages(roomID: roomID).map(\.id) == [first.id, second.id])
+        #expect(try reopenedRepository.bindings(roomID: roomID).map(\.id) == [binding.id])
+        #expect(try reopenedRepository.turn(id: turn.id)?.source?.id == "turn-backup")
     }
 
     @Test("DatabaseSafetyService captures a pre-open snapshot of database files")

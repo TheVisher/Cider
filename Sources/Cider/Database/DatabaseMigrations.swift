@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 29
+    static let latestVersion: Int = 30
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -143,7 +143,35 @@ enum DatabaseMigrations {
         }
         if currentVersion < 29 {
             try migrateToV29(db)
+            currentVersion = try readVersion(db)
         }
+        if currentVersion < 30 {
+            try migrateToV30(db)
+        }
+    }
+
+    // MARK: - V29 -> V30: Conversation shadow archive foundation
+
+    private static func migrateToV30(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 30...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createConversationRooms)
+            try runOnDB(db, CiderSchema.createConversationRuntimeBindings)
+            try runOnDB(db, CiderSchema.createConversationTurns)
+            try runOnDB(db, CiderSchema.createConversationMessages)
+            try runOnDB(db, "CREATE UNIQUE INDEX IF NOT EXISTS conversation_binding_external_identity ON conversation_runtime_bindings(source_namespace, external_session_id) WHERE external_session_id IS NOT NULL;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS conversation_bindings_room ON conversation_runtime_bindings(room_id, binding_state, created_at);")
+            try runOnDB(db, "CREATE UNIQUE INDEX IF NOT EXISTS conversation_turn_source_identity ON conversation_turns(source_namespace, source_turn_id) WHERE source_namespace IS NOT NULL AND source_turn_id IS NOT NULL;")
+            try runOnDB(db, "CREATE UNIQUE INDEX IF NOT EXISTS conversation_message_source_identity ON conversation_messages(source_namespace, source_message_id) WHERE source_namespace IS NOT NULL AND source_message_id IS NOT NULL;")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS conversation_messages_room_order ON conversation_messages(room_id, sequence);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS conversation_messages_parent ON conversation_messages(room_id, parent_message_id, sequence);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS conversation_messages_turn ON conversation_messages(room_id, turn_id, sequence);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (30);")
+        }
+
+        logger.info("Migration to v30 complete")
     }
 
     // MARK: - V28 -> V29: Enrichment output occurrence keys
