@@ -82,6 +82,25 @@ struct JournalLibraryEntry: Identifiable, Hashable {
     }
 }
 
+struct JournalLibraryDay: Identifiable, Hashable {
+    let id: String
+    let date: Date
+    let dateLabel: String
+    let sourceEntries: [JournalLibraryEntry]
+
+    var displayTitle: String {
+        JournalLibraryReadModel.canonicalDisplayTitle(for: date)
+    }
+
+    var isAggregate: Bool {
+        sourceEntries.count > 1
+    }
+
+    var editableEntry: JournalLibraryEntry? {
+        sourceEntries.count == 1 ? sourceEntries[0] : nil
+    }
+}
+
 struct JournalNavigationNode: Identifiable, Hashable {
     enum Kind: Hashable {
         case year(Int)
@@ -102,10 +121,15 @@ struct JournalLibraryReadModel: Hashable {
 
     var container: JournalLibraryContainer
     var entries: [JournalLibraryEntry]
+    var days: [JournalLibraryDay]
     var navigation: [JournalNavigationNode]
 
     var defaultSelection: JournalLibraryEntry? {
         entries.first
+    }
+
+    var defaultDay: JournalLibraryDay? {
+        days.first
     }
 
     static func build(from notes: [Note], calendar: Calendar = Self.calendar) -> JournalLibraryReadModel {
@@ -129,13 +153,28 @@ struct JournalLibraryReadModel: Hashable {
             if lhs.date != rhs.date {
                 return lhs.date > rhs.date
             }
-            return lhs.note.modifiedAt > rhs.note.modifiedAt
+            if lhs.note.modifiedAt != rhs.note.modifiedAt {
+                return lhs.note.modifiedAt > rhs.note.modifiedAt
+            }
+            return lhs.note.id.uuidString < rhs.note.id.uuidString
         }
 
+        let days = Dictionary(grouping: entries, by: \.dateLabel)
+            .map { dateLabel, sourceEntries in
+                JournalLibraryDay(
+                    id: "journal-day-\(dateLabel)",
+                    date: sourceEntries[0].date,
+                    dateLabel: dateLabel,
+                    sourceEntries: sourceEntries
+                )
+            }
+            .sorted { $0.date > $1.date }
+
         return JournalLibraryReadModel(
-            container: JournalLibraryContainer(entryCount: entries.count, latestEntryDate: entries.first?.date),
+            container: JournalLibraryContainer(entryCount: days.count, latestEntryDate: days.first?.date),
             entries: entries,
-            navigation: Self.navigation(for: entries, calendar: calendar)
+            days: days,
+            navigation: Self.navigation(for: days, calendar: calendar)
         )
     }
 
@@ -502,10 +541,10 @@ struct JournalLibraryReadModel: Hashable {
     }
 
     private static func navigation(
-        for entries: [JournalLibraryEntry],
+        for days: [JournalLibraryDay],
         calendar: Calendar
     ) -> [JournalNavigationNode] {
-        let groupedByYear = Dictionary(grouping: entries) { calendar.component(.year, from: $0.date) }
+        let groupedByYear = Dictionary(grouping: days) { calendar.component(.year, from: $0.date) }
         return groupedByYear.keys.sorted(by: >).map { year in
             let yearEntries = groupedByYear[year] ?? []
             let monthNodes = monthNodes(for: yearEntries, year: year, calendar: calendar)
@@ -519,7 +558,7 @@ struct JournalLibraryReadModel: Hashable {
     }
 
     private static func monthNodes(
-        for entries: [JournalLibraryEntry],
+        for entries: [JournalLibraryDay],
         year: Int,
         calendar: Calendar
     ) -> [JournalNavigationNode] {
@@ -537,7 +576,7 @@ struct JournalLibraryReadModel: Hashable {
     }
 
     private static func weekNodes(
-        for entries: [JournalLibraryEntry],
+        for entries: [JournalLibraryDay],
         year: Int,
         month: Int,
         calendar: Calendar
@@ -549,12 +588,12 @@ struct JournalLibraryReadModel: Hashable {
                 id: "journal-week-\(year)-\(month)-\(week)",
                 title: "Week \(week)",
                 kind: .week(year, week),
-                children: weekEntries.map { entry in
+                children: weekEntries.map { day in
                     JournalNavigationNode(
-                        id: "journal-day-\(entry.dateLabel)",
-                        title: dayTitleFormatter.string(from: entry.date),
-                        kind: .day(entry.dateLabel),
-                        entryID: entry.id
+                        id: day.id,
+                        title: dayTitleFormatter.string(from: day.date),
+                        kind: .day(day.dateLabel),
+                        entryID: day.id
                     )
                 }
             )

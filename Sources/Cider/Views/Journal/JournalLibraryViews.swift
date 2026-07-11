@@ -64,20 +64,25 @@ struct JournalDetailContentView: View {
     @ObservedObject var notesViewModel: NotesViewModel
     @Binding var selectedEntryID: String?
 
-    private var selectedEntry: JournalLibraryEntry? {
-        projection.entries.first { $0.id == selectedEntryID } ?? projection.defaultSelection
+    private var selectedDay: JournalLibraryDay? {
+        if let selectedEntryID {
+            return projection.days.first {
+                $0.id == selectedEntryID || $0.sourceEntries.contains { $0.id == selectedEntryID }
+            } ?? projection.defaultDay
+        }
+        return projection.defaultDay
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let selectedEntry {
+            if let selectedDay {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text(selectedEntry.displayTitle)
+                    Text(selectedDay.displayTitle)
                         .font(CiderFont.subheadingSemibold)
                         .foregroundColor(CiderColors.primary)
                         .lineLimit(2)
 
-                    Text(selectedEntry.displayTitle)
+                    Text(selectedDay.isAggregate ? "\(selectedDay.sourceEntries.count) preserved source notes" : selectedDay.displayTitle)
                         .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.tertiary)
                 }
@@ -86,7 +91,11 @@ struct JournalDetailContentView: View {
                 Divider()
                     .background(CiderColors.separator)
 
-                InlineNoteEditorView(viewModel: notesViewModel)
+                if selectedDay.isAggregate {
+                    JournalAggregateDayView(day: selectedDay)
+                } else {
+                    InlineNoteEditorView(viewModel: notesViewModel)
+                }
             } else {
                 EmptyStateView(icon: "book.closed", title: "No journal entries")
                     .padding(Spacing.md)
@@ -94,15 +103,20 @@ struct JournalDetailContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
-            selectedEntryID = selectedEntryID ?? projection.defaultSelection?.id
+            selectedEntryID = selectedDay?.id
             selectJournalNoteIfNeeded()
         }
         .onChange(of: selectedEntryID) { _, _ in selectJournalNoteIfNeeded() }
-        .onChange(of: projection.entries) { _, _ in selectJournalNoteIfNeeded() }
+        .onChange(of: projection.days) { _, _ in selectJournalNoteIfNeeded() }
     }
 
     private func selectJournalNoteIfNeeded() {
-        guard let entry = selectedEntry else {
+        guard let day = selectedDay else {
+            notesViewModel.setRichDisplayContentOverride(nil)
+            notesViewModel.clearSelectedNote()
+            return
+        }
+        guard let entry = day.editableEntry else {
             notesViewModel.setRichDisplayContentOverride(nil)
             notesViewModel.clearSelectedNote()
             return
@@ -112,6 +126,40 @@ struct JournalDetailContentView: View {
             notesViewModel.selectNote(entry.note, richDisplayContentOverride: displayContent)
         } else {
             notesViewModel.setRichDisplayContentOverride(displayContent)
+        }
+    }
+}
+
+private struct JournalAggregateDayView: View {
+    let day: JournalLibraryDay
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                ForEach(day.sourceEntries) { entry in
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        Text(entry.note.title)
+                            .font(CiderFont.bodySemibold)
+                            .foregroundColor(CiderColors.primary)
+
+                        Text(entry.note.relativePath)
+                            .font(CiderFont.captionMonospacedMedium)
+                            .foregroundColor(CiderColors.tertiary)
+                            .textSelection(.enabled)
+
+                        MarkdownContentView(
+                            text: entry.preparedDisplayContent(
+                                timestampFormat: CiderConfig.load().journalTimestampFormat
+                            )
+                        )
+                    }
+                    .padding(Spacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(CiderColors.surfaceInput)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                }
+            }
+            .padding(Spacing.md)
         }
     }
 }

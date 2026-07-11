@@ -260,7 +260,64 @@ struct JournalLibraryReadModelTests {
         #expect(month.title == "July")
         #expect(month.children.allSatisfy { $0.title.contains("Week") })
         #expect(dayNodes.map(\.title) == ["Jul 2", "Jul 1"])
-        #expect(Set(dayNodes.compactMap(\.entryID)) == Set(projection.entries.map(\.id)))
+        #expect(Set(dayNodes.compactMap(\.entryID)) == Set(projection.days.map(\.id)))
+    }
+
+    @Test("journal projection aggregates same-day legacy sources into one stable selectable day")
+    func projectionAggregatesSameDayLegacySourcesWithoutContentLoss() throws {
+        let previous = Note(
+            title: "Journal 05-28-2026",
+            content: "Previous day reflection",
+            modifiedAt: Self.date("2026-05-28T20:00:00Z"),
+            relativePath: "Inbox/Notes/Journal 05-28-2026.md"
+        )
+        let morning = Note(
+            title: "Morning voice journal — 2026-05-29",
+            content: "Morning source content",
+            modifiedAt: Self.date("2026-05-29T09:00:00Z"),
+            relativePath: "Inbox/Files/morning-voice-journal-20260529.md"
+        )
+        let midday = Note(
+            title: "Driving voice journal — 2026-05-29 midday",
+            content: "Midday source content",
+            modifiedAt: Self.date("2026-05-29T13:00:00Z"),
+            relativePath: "Inbox/Files/driving-voice-journal-20260529.md"
+        )
+        let evening = Note(
+            title: "Journal reflection — 2026-05-29 evening",
+            content: "Evening source content",
+            modifiedAt: Self.date("2026-05-29T19:00:00Z"),
+            relativePath: "Inbox/Files/evening-journal-20260529.md"
+        )
+        let next = Note(
+            title: "Journal 05-31-2026",
+            content: "Next day reflection",
+            modifiedAt: Self.date("2026-05-31T20:00:00Z"),
+            relativePath: "Inbox/Notes/Journal 05-31-2026.md"
+        )
+
+        let projection = JournalLibraryReadModel.build(from: [midday, next, morning, previous, evening])
+        let dayNodes = projection.navigation
+            .flatMap(\.children)
+            .flatMap(\.children)
+            .flatMap(\.children)
+        let allNodes = projection.navigation.flatMap { year in
+            [year] + year.children.flatMap { month in
+                [month] + month.children.flatMap { week in [week] + week.children }
+            }
+        }
+        let may29 = try #require(projection.days.first { $0.dateLabel == "2026-05-29" })
+
+        #expect(projection.days.map(\.dateLabel) == ["2026-05-31", "2026-05-29", "2026-05-28"])
+        #expect(dayNodes.filter { $0.kind == .day("2026-05-29") }.count == 1)
+        #expect(Set(allNodes.map(\.id)).count == allNodes.count)
+        #expect(dayNodes.filter { $0.entryID == may29.id }.count == 1)
+        #expect(may29.sourceEntries.map(\.note.id) == [evening.id, midday.id, morning.id])
+        #expect(Set(may29.sourceEntries.map(\.content)) == Set([
+            "Morning source content", "Midday source content", "Evening source content"
+        ]))
+        #expect(may29.isAggregate)
+        #expect(projection.defaultDay?.dateLabel == "2026-05-31")
     }
 
     @Test("journal display timestamps can render as twelve hour without mutating source content")
