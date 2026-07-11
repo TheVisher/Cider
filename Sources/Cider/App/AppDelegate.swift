@@ -65,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Services
     var servicesProvider: CiderServicesProvider?
+    private(set) var conversationShadowRuntimeComposition: ConversationShadowRuntimeComposition?
+    private var didAttemptConversationShadowRuntimeComposition = false
 
     // Spotlight
     var spotlightIndexer: SpotlightIndexer?
@@ -130,6 +132,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here; falling back to JSON can re-adopt the same filesystem as fresh
         // folders/items and recreate duplicate suffix trees.
         guard openSQLiteForStartupOrTerminate() else { return }
+        composeDormantConversationShadowRuntime(
+            database: CiderDatabase.shared,
+            vaultRootURL: StoragePaths.cachedVaultDirectoryURL,
+            registry: CiderAgentChatRegistry.shared,
+            conversationStorage: AIConversationStorage.shared,
+            runtimeLogger: .production(),
+            installCoordinator: AIAssistantViewModel.installDormantCoordinatorBeforeSharedInitialization
+        )
 
         VaultStructureMigration.migrateIfNeeded()
         VaultStructureMigration.migrateContentToInboxIfNeeded()
@@ -304,6 +314,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dismissStaleBookmarkCaptureToastOnActivation()
         transitionToCiderMainWindow()
         return true
+    }
+
+    func composeDormantConversationShadowRuntime(
+        database: CiderDatabase,
+        vaultRootURL: URL,
+        registry: CiderAgentChatRegistry,
+        conversationStorage: AIConversationStorage,
+        runtimeLogger: ConversationShadowRuntimeLogger,
+        writerCheckpoint: @escaping (ConversationShadowWriterCheckpoint) throws -> Void = { _ in },
+        installCoordinator: (LegacyConversationPrimarySaveCoordinator?) -> Bool
+    ) {
+        guard !didAttemptConversationShadowRuntimeComposition else { return }
+        didAttemptConversationShadowRuntimeComposition = true
+
+        guard database.isOpen else {
+            runtimeLogger.logStartupFailure(.databaseClosed)
+            if !installCoordinator(nil) {
+                runtimeLogger.logStartupFailure(.viewModelBootstrapUnavailable)
+            }
+            return
+        }
+
+        let diagnosticsDirectoryURL = vaultRootURL
+            .appendingPathComponent(StoragePaths.ciderInternalDir, isDirectory: true)
+            .appendingPathComponent("diagnostics", isDirectory: true)
+        do {
+            let composition = try ConversationShadowRuntimeComposition(
+                database: database,
+                diagnosticsDirectoryURL: diagnosticsDirectoryURL,
+                registry: registry,
+                conversationStorage: conversationStorage,
+                runtimeLogger: runtimeLogger,
+                writerCheckpoint: writerCheckpoint
+            )
+            guard installCoordinator(composition.coordinator) else {
+                runtimeLogger.logStartupFailure(.viewModelBootstrapUnavailable)
+                return
+            }
+            conversationShadowRuntimeComposition = composition
+        } catch {
+            runtimeLogger.logStartupFailure(.healthInitializationFailed)
+            if !installCoordinator(nil) {
+                runtimeLogger.logStartupFailure(.viewModelBootstrapUnavailable)
+            }
+        }
     }
 
     // MARK: - Spotlight Deep Links

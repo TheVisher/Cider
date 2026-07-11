@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os
 
 struct ConversationShadowSemanticFingerprint: Codable, Equatable, Sendable {
     static let formatVersion = "cider.conversation-shadow-semantic.v1"
@@ -208,24 +209,172 @@ struct ConversationShadowActivationReceipt: Equatable, Sendable {
     let terminalSourceID: String?
 }
 
+enum ConversationShadowLogSeverity: Equatable, Sendable {
+    case info
+    case error
+    case fault
+}
+
+enum ConversationShadowStartupFailureCode: String, Equatable, Sendable {
+    case databaseClosed = "database_closed"
+    case healthInitializationFailed = "health_initialization_failed"
+    case viewModelBootstrapUnavailable = "view_model_bootstrap_unavailable"
+}
+
+struct ConversationShadowLogEvent: Equatable, Sendable {
+    let severity: ConversationShadowLogSeverity
+    let generationID: String?
+    let conversationID: String?
+    let correlationID: String?
+    let registryStatus: String?
+    let primaryStatus: String?
+    let shadowStatus: String?
+    let code: String?
+    let planFingerprint: String?
+    let messageCount: Int?
+    let terminalSourceNamespace: String?
+    let terminalSourceID: String?
+
+    static func receipt(_ receipt: ConversationShadowActivationReceipt) -> Self {
+        Self(
+            severity: severity(for: receipt),
+            generationID: receipt.generationID.uuidString,
+            conversationID: receipt.conversationID.uuidString,
+            correlationID: receipt.shadowCorrelationID?.uuidString,
+            registryStatus: receipt.registryCommitted ? "committed" : "failed",
+            primaryStatus: receipt.jsonlStatus.rawValue,
+            shadowStatus: receipt.shadowStatus?.rawValue,
+            code: receipt.shadowCode?.rawValue,
+            planFingerprint: receipt.planFingerprint.map(bounded),
+            messageCount: receipt.messageCount,
+            terminalSourceNamespace: receipt.terminalSourceNamespace.map(bounded),
+            terminalSourceID: receipt.terminalSourceID.map(bounded)
+        )
+    }
+
+    static func startupFailure(_ code: ConversationShadowStartupFailureCode) -> Self {
+        Self(
+            severity: .fault,
+            generationID: nil,
+            conversationID: nil,
+            correlationID: nil,
+            registryStatus: nil,
+            primaryStatus: nil,
+            shadowStatus: nil,
+            code: code.rawValue,
+            planFingerprint: nil,
+            messageCount: nil,
+            terminalSourceNamespace: nil,
+            terminalSourceID: nil
+        )
+    }
+
+    var boundedFields: [String] {
+        [
+            generationID,
+            conversationID,
+            correlationID,
+            registryStatus,
+            primaryStatus,
+            shadowStatus,
+            code,
+            planFingerprint,
+            messageCount.map(String.init),
+            terminalSourceNamespace,
+            terminalSourceID,
+        ].compactMap { $0 }
+    }
+
+    var logLine: String {
+        [
+            "generation_id=\(generationID ?? "none")",
+            "conversation_id=\(conversationID ?? "none")",
+            "correlation_id=\(correlationID ?? "none")",
+            "registry_status=\(registryStatus ?? "none")",
+            "primary_status=\(primaryStatus ?? "none")",
+            "shadow_status=\(shadowStatus ?? "none")",
+            "code=\(code ?? "none")",
+            "plan_fingerprint=\(planFingerprint ?? "none")",
+            "message_count=\(messageCount.map(String.init) ?? "none")",
+            "terminal_source_namespace=\(terminalSourceNamespace ?? "none")",
+            "terminal_source_id=\(terminalSourceID ?? "none")",
+        ].joined(separator: " ")
+    }
+
+    private static func severity(
+        for receipt: ConversationShadowActivationReceipt
+    ) -> ConversationShadowLogSeverity {
+        if receipt.shadowCode == .diagnosticStoreSaturated ||
+            receipt.shadowStatus == .outcomeUnknown ||
+            receipt.shadowStatus == .reserved {
+            return .fault
+        }
+        if !receipt.registryCommitted ||
+            receipt.jsonlStatus == .failed ||
+            receipt.shadowStatus == .repairNeeded ||
+            receipt.shadowCode != nil {
+            return .error
+        }
+        return .info
+    }
+
+    private static func bounded(_ value: String) -> String {
+        String(value.prefix(ConversationShadowActivationReceiptReporter.maximumIdentityCharacters))
+    }
+}
+
+@MainActor
+final class ConversationShadowRuntimeLogger {
+    private let sink: (ConversationShadowLogEvent) -> Void
+
+    init(sink: @escaping (ConversationShadowLogEvent) -> Void) {
+        self.sink = sink
+    }
+
+    static func production(
+        subsystem: String = Bundle.main.bundleIdentifier ?? "com.cider.app"
+    ) -> ConversationShadowRuntimeLogger {
+        let logger = Logger(subsystem: subsystem, category: "ConversationShadow")
+        return ConversationShadowRuntimeLogger { event in
+            switch event.severity {
+            case .info:
+                logger.info("\(event.logLine, privacy: .public)")
+            case .error:
+                logger.error("\(event.logLine, privacy: .public)")
+            case .fault:
+                logger.fault("\(event.logLine, privacy: .public)")
+            }
+        }
+    }
+
+    func logReceipt(_ receipt: ConversationShadowActivationReceipt) {
+        sink(.receipt(receipt))
+    }
+
+    func logStartupFailure(_ code: ConversationShadowStartupFailureCode) {
+        sink(.startupFailure(code))
+    }
+}
+
 @MainActor
 final class ConversationShadowActivationReceiptReporter {
-    static let maximumReceipts = 100
-    static let maximumIdentityCharacters = 256
+    nonisolated static let maximumReceipts = 100
+    nonisolated static let maximumIdentityCharacters = 256
 
     private let maximumRecords: Int
+    private let runtimeLogger: ConversationShadowRuntimeLogger?
     private(set) var receipts: [ConversationShadowActivationReceipt] = []
     private(set) var droppedCount = 0
 
-    init(maximumRecords: Int = maximumReceipts) {
+    init(
+        maximumRecords: Int = maximumReceipts,
+        runtimeLogger: ConversationShadowRuntimeLogger? = nil
+    ) {
         self.maximumRecords = max(0, min(maximumRecords, Self.maximumReceipts))
+        self.runtimeLogger = runtimeLogger
     }
 
     func report(_ receipt: ConversationShadowActivationReceipt) {
-        guard maximumRecords > 0 else {
-            droppedCount += 1
-            return
-        }
         let bounded = ConversationShadowActivationReceipt(
             generationID: receipt.generationID,
             conversationID: receipt.conversationID,
@@ -239,6 +388,11 @@ final class ConversationShadowActivationReceiptReporter {
             terminalSourceNamespace: receipt.terminalSourceNamespace.map(Self.bounded),
             terminalSourceID: receipt.terminalSourceID.map(Self.bounded)
         )
+        runtimeLogger?.logReceipt(bounded)
+        guard maximumRecords > 0 else {
+            droppedCount += 1
+            return
+        }
         if receipts.count == maximumRecords {
             receipts.removeFirst()
             droppedCount += 1

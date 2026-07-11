@@ -21,10 +21,61 @@ enum HermesPanelSyncStatus: Equatable {
     case error(String)
 }
 
+@MainActor
+final class SharedInstanceBootstrap<Dependency, Instance> {
+    private enum Configuration {
+        case unconfigured
+        case installed(Dependency?)
+    }
+
+    private let factory: (Dependency?) -> Instance
+    private var configuration = Configuration.unconfigured
+    private var instance: Instance?
+
+    init(factory: @escaping (Dependency?) -> Instance) {
+        self.factory = factory
+    }
+
+    func install(_ dependency: Dependency?) -> Bool {
+        guard instance == nil, case .unconfigured = configuration else { return false }
+        configuration = .installed(dependency)
+        return true
+    }
+
+    var shared: Instance {
+        if let instance { return instance }
+        let dependency: Dependency?
+        switch configuration {
+        case .unconfigured:
+            configuration = .installed(nil)
+            dependency = nil
+        case .installed(let installed):
+            dependency = installed
+        }
+        let instance = factory(dependency)
+        self.instance = instance
+        return instance
+    }
+}
+
 /// ViewModel for the AI chat floating panel.
 @MainActor
 final class AIAssistantViewModel: ObservableObject {
-    static let shared = AIAssistantViewModel()
+    private static let sharedBootstrap = SharedInstanceBootstrap<
+        LegacyConversationPrimarySaveCoordinator,
+        AIAssistantViewModel
+    > { coordinator in
+        AIAssistantViewModel(dormantConversationShadowCoordinator: coordinator)
+    }
+
+    static var shared: AIAssistantViewModel { sharedBootstrap.shared }
+
+    static func installDormantCoordinatorBeforeSharedInitialization(
+        _ coordinator: LegacyConversationPrimarySaveCoordinator?
+    ) -> Bool {
+        sharedBootstrap.install(coordinator)
+    }
+
     private static let runtimeSelectionDefaultsKey = "cider.aiRuntimeSelection"
 
     @Published var messages: [AIAssistantMessage] = []
@@ -54,6 +105,7 @@ final class AIAssistantViewModel: ObservableObject {
     private let hermesBridgeTransport: any HermesBridgeTransport
     private let hermesTurnCoordinator: HermesTurnCoordinator
     private let agentChatRegistry: CiderAgentChatRegistry
+    let dormantConversationShadowCoordinator: LegacyConversationPrimarySaveCoordinator?
     private var streamTask: Task<Void, Never>?
     private var typewriterTask: Task<Void, Never>?
     private var hermesSyncInFlight = false
@@ -189,13 +241,15 @@ final class AIAssistantViewModel: ObservableObject {
         provider: AIAssistantProvider? = nil,
         agentChatRegistry: CiderAgentChatRegistry = .shared,
         hermesBridgeTransport: any HermesBridgeTransport = HermesRunTransport(),
-        hermesTurnCoordinator: HermesTurnCoordinator = .shared
+        hermesTurnCoordinator: HermesTurnCoordinator = .shared,
+        dormantConversationShadowCoordinator: LegacyConversationPrimarySaveCoordinator? = nil
     ) {
         let initialRuntimeSelection = Self.loadPersistedRuntimeSelection()
         runtimeSelection = initialRuntimeSelection
         self.agentChatRegistry = agentChatRegistry
         self.hermesBridgeTransport = hermesBridgeTransport
         self.hermesTurnCoordinator = hermesTurnCoordinator
+        self.dormantConversationShadowCoordinator = dormantConversationShadowCoordinator
         if let provider {
             self.provider = provider
         } else if initialRuntimeSelection == .codexCLI {
