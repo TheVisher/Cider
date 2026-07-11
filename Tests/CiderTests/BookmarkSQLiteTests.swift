@@ -1084,6 +1084,53 @@ struct BookmarkSQLiteTests {
         #expect(optedInRead.tags == ["legacy"])
     }
 
+    @Test("Bookmark file move reports an asset move failure with operation and path context")
+    func bookmarkFileMoveReportsAssetFailureContext() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "cider-bookmark-move-asset-failure-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("Source", isDirectory: true)
+        let destination = root.appendingPathComponent("Destination", isDirectory: true)
+        let sourceThumbnails = source.appendingPathComponent(BookmarkFileService.thumbnailsDir, isDirectory: true)
+        try fm.createDirectory(at: sourceThumbnails, withIntermediateDirectories: true)
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        let bookmark = Bookmark(
+            title: "Asset Move Failure",
+            urlString: "https://example.com/asset-move-failure",
+            thumbnailRelativePath: "\(BookmarkFileService.thumbnailsDir)/thumbnail.jpg"
+        )
+        let relativePath = try BookmarkFileService.shared.write(
+            bookmark: bookmark,
+            toDirectory: source,
+            dirRelativePath: "Source"
+        )
+        try Data("thumbnail".utf8).write(to: sourceThumbnails.appendingPathComponent("thumbnail.jpg"))
+
+        let blockingPath = destination.appendingPathComponent(BookmarkFileService.thumbnailsDir)
+        try Data("not a directory".utf8).write(to: blockingPath)
+
+        do {
+            _ = try BookmarkFileService.shared.move(
+                bookmark: bookmark,
+                filename: (relativePath as NSString).lastPathComponent,
+                from: source,
+                to: destination,
+                destDirRelativePath: "Destination"
+            )
+            Issue.record("Expected the partial asset move failure to be reported")
+        } catch {
+            let description = error.localizedDescription
+            #expect(description.contains("move bookmark asset"))
+            #expect(description.contains(blockingPath.path))
+            #expect(description.contains("thumbnail.jpg"))
+        }
+    }
+
     // MARK: - Sync Duplicate Prevention
 
     @Test("Synced bookmark with canonical duplicate URL merges instead of creating a second active bookmark")

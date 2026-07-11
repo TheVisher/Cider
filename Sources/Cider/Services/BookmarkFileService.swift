@@ -30,6 +30,17 @@ final class BookmarkFileService {
 
     private init() {}
 
+    struct FileOperationError: LocalizedError {
+        let operation: String
+        let sourceURL: URL
+        let destinationURL: URL
+        let underlyingError: Error
+
+        var errorDescription: String? {
+            "Failed to \(operation) from \(sourceURL.path) to \(destinationURL.path): \(underlyingError.localizedDescription)"
+        }
+    }
+
     // MARK: - Sidecar Model
 
     /// Per-folder sidecar file mapping filenames → bookmark metadata.
@@ -202,14 +213,14 @@ final class BookmarkFileService {
 
         let entry = sidecarEntry(from: bookmark)
         if let thumbName = entry.thumbnailFilename {
-            moveAsset(named: thumbName, subdir: Self.thumbnailsDir, from: sourceDirURL, to: destDirURL)
+            try moveAsset(named: thumbName, subdir: Self.thumbnailsDir, from: sourceDirURL, to: destDirURL)
         }
         if let origName = entry.originalImageFilename {
-            moveAsset(named: origName, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
+            try moveAsset(named: origName, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
         }
         if let carousel = entry.carouselImageFilenames {
             for name in carousel {
-                moveAsset(named: name, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
+                try moveAsset(named: name, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
             }
         }
 
@@ -366,14 +377,23 @@ final class BookmarkFileService {
     // MARK: - Asset Helpers
 
     /// Moves a single image asset between folder hidden directories.
-    private func moveAsset(named name: String, subdir: String, from sourceDir: URL, to destDir: URL) {
+    private func moveAsset(named name: String, subdir: String, from sourceDir: URL, to destDir: URL) throws {
         let sourceURL = sourceDir.appendingPathComponent(subdir).appendingPathComponent(name)
         guard fm.fileExists(atPath: sourceURL.path) else { return }
 
         let destSubdirURL = destDir.appendingPathComponent(subdir)
-        try? fm.createDirectory(at: destSubdirURL, withIntermediateDirectories: true)
         let destURL = destSubdirURL.appendingPathComponent(name)
-        try? fm.moveItem(at: sourceURL, to: destURL)
+        do {
+            try fm.createDirectory(at: destSubdirURL, withIntermediateDirectories: true)
+            try fm.moveItem(at: sourceURL, to: destURL)
+        } catch {
+            throw FileOperationError(
+                operation: "move bookmark asset",
+                sourceURL: sourceURL,
+                destinationURL: destURL,
+                underlyingError: error
+            )
+        }
     }
 
     // MARK: - Conversion Helpers
