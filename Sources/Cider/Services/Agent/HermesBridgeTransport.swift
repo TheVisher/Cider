@@ -67,8 +67,131 @@ struct HermesRunSnapshot: Equatable, Sendable {
 }
 
 struct HermesBridgeSendResult: Sendable {
-    let state: HermesConversationState
-    let messages: [AIAssistantMessage]
+    let completion: HermesRunCompletionEnvelope
+
+    var state: HermesConversationState { completion.finalState }
+    var messages: [AIAssistantMessage] { completion.finalMessages }
+}
+
+enum HermesTransportProvenance: Equatable, Sendable {
+    case hermesRunsAPI
+    case cliFallback
+    case other
+}
+
+enum HermesRunTerminalStatus: Equatable, Sendable {
+    case completed
+    case cancelled
+    case failed
+    case disconnected
+    case unknown
+}
+
+struct HermesRunObservedFacts: Equatable, Sendable {
+    let containedToolEvent: Bool
+    let containedReasoningEvent: Bool
+    let containedApprovalEvent: Bool
+    let containedAttachmentContentOrEvent: Bool
+    let containedPendingContentOrEvent: Bool
+    let containedStreamingContentOrEvent: Bool
+    let runIdentityConsistent: Bool
+
+    static let none = Self(
+        containedToolEvent: false,
+        containedReasoningEvent: false,
+        containedApprovalEvent: false,
+        containedAttachmentContentOrEvent: false,
+        containedPendingContentOrEvent: false,
+        containedStreamingContentOrEvent: false,
+        runIdentityConsistent: true
+    )
+
+    var containsExcludedEventOrContent: Bool {
+        containedToolEvent || containedReasoningEvent || containedApprovalEvent ||
+        containedAttachmentContentOrEvent || containedPendingContentOrEvent ||
+        containedStreamingContentOrEvent
+    }
+}
+
+struct HermesTerminalSourceIdentityEvidence: Equatable, Sendable {
+    let reportedTerminalRunID: String?
+    let userSourceID: String?
+    let assistantSourceID: String?
+    let userSourceSessionID: String?
+    let assistantSourceSessionID: String?
+}
+
+struct HermesRunCompletionEnvelope: Equatable, Sendable {
+    let provenance: HermesTransportProvenance
+    let runID: String?
+    let terminalStatus: HermesRunTerminalStatus
+    let observedFacts: HermesRunObservedFacts
+    let finalSessionSynchronizationComplete: Bool
+    let finalMessages: [AIAssistantMessage]
+    let finalState: HermesConversationState
+    let modelIdentity: String?
+    let terminalSourceEvidence: HermesTerminalSourceIdentityEvidence
+
+    var isEligibleForFutureShadowPersistence: Bool {
+        HermesRunCompletionEligibility.isEligible(self)
+    }
+}
+
+enum HermesRunCompletionEligibility {
+    static func isEligible(_ envelope: HermesRunCompletionEnvelope) -> Bool {
+        guard envelope.provenance == .hermesRunsAPI,
+              envelope.terminalStatus == .completed,
+              envelope.finalSessionSynchronizationComplete,
+              !envelope.observedFacts.containsExcludedEventOrContent,
+              envelope.observedFacts.runIdentityConsistent,
+              let runID = nonempty(envelope.runID),
+              nonempty(envelope.modelIdentity) != nil,
+              envelope.terminalSourceEvidence.reportedTerminalRunID == runID,
+              envelope.finalMessages.allSatisfy({ $0.attachments.isEmpty }),
+              !envelope.finalMessages.contains(where: hasPendingOrStreamingIdentity),
+              envelope.finalMessages.count >= 2
+        else { return false }
+
+        let user = envelope.finalMessages[envelope.finalMessages.count - 2]
+        let assistant = envelope.finalMessages[envelope.finalMessages.count - 1]
+        let expectedUserSourceID = "hermes-run:\(runID):user"
+        let expectedAssistantSourceID = "hermes-run:\(runID):assistant"
+        guard user.role == .user,
+              assistant.role == .assistant,
+              nonempty(user.content) != nil,
+              nonempty(assistant.content) != nil,
+              user.sourceID == expectedUserSourceID,
+              assistant.sourceID == expectedAssistantSourceID,
+              envelope.terminalSourceEvidence.userSourceID == expectedUserSourceID,
+              envelope.terminalSourceEvidence.assistantSourceID == expectedAssistantSourceID,
+              let userSessionID = nonempty(user.sourceSessionID),
+              let assistantSessionID = nonempty(assistant.sourceSessionID),
+              userSessionID == assistantSessionID,
+              envelope.terminalSourceEvidence.userSourceSessionID == userSessionID,
+              envelope.terminalSourceEvidence.assistantSourceSessionID == assistantSessionID
+        else { return false }
+
+        let state = envelope.finalState
+        return state.runtimeID == "hermes" &&
+            state.activeRuntimeSessionID == assistantSessionID &&
+            state.runtimeSessionLineage.last == assistantSessionID &&
+            Set(state.runtimeSessionLineage).count == state.runtimeSessionLineage.count &&
+            state.lastSyncedAt == assistant.timestamp &&
+            state.lastSyncedMessageID == expectedAssistantSourceID &&
+            state.lastSyncedTimestamp == assistant.timestamp &&
+            state.lastImportedRuntimeSessionID == assistantSessionID
+    }
+
+    private static func nonempty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private static func hasPendingOrStreamingIdentity(_ message: AIAssistantMessage) -> Bool {
+        guard let sourceID = message.sourceID else { return false }
+        return sourceID.hasPrefix("hermes:pending:") || sourceID.hasPrefix("hermes-live:")
+    }
 }
 
 protocol HermesBridgeTransport: Sendable {

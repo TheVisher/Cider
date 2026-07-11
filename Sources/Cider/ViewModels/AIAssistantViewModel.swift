@@ -864,7 +864,7 @@ final class AIAssistantViewModel: ObservableObject {
                 requestScrollToBottom()
 
                 let existingMessages = messages.filter { $0.id != pendingMessage.id }
-                var result = try await hermesBridgeTransport.send(
+                let result = try await hermesBridgeTransport.send(
                     text: text,
                     state: state,
                     existingMessages: existingMessages,
@@ -874,6 +874,7 @@ final class AIAssistantViewModel: ObservableObject {
                         }
                     }
                 )
+                var appliedState = result.state
                 if shouldRenameBackingSession,
                    let chatRecord,
                    let hermesTitle = chatRecord.hermesTitle,
@@ -882,28 +883,25 @@ final class AIAssistantViewModel: ObservableObject {
                         sessionID: result.state.activeRuntimeSessionID,
                         title: hermesTitle
                     )
-                    result = HermesBridgeSendResult(
-                        state: HermesConversationState(
-                            conversationID: result.state.conversationID,
-                            runtimeID: result.state.runtimeID,
-                            activeRuntimeSessionID: result.state.activeRuntimeSessionID,
-                            runtimeSessionLineage: result.state.runtimeSessionLineage,
-                            title: hermesTitle,
-                            source: result.state.source,
-                            lastSyncedAt: result.state.lastSyncedAt,
-                            lastSyncedMessageID: result.state.lastSyncedMessageID,
-                            lastSyncedTimestamp: result.state.lastSyncedTimestamp,
-                            lastImportedRuntimeSessionID: result.state.lastImportedRuntimeSessionID
-                        ),
-                        messages: result.messages
+                    appliedState = HermesConversationState(
+                        conversationID: result.state.conversationID,
+                        runtimeID: result.state.runtimeID,
+                        activeRuntimeSessionID: result.state.activeRuntimeSessionID,
+                        runtimeSessionLineage: result.state.runtimeSessionLineage,
+                        title: hermesTitle,
+                        source: result.state.source,
+                        lastSyncedAt: result.state.lastSyncedAt,
+                        lastSyncedMessageID: result.state.lastSyncedMessageID,
+                        lastSyncedTimestamp: result.state.lastSyncedTimestamp,
+                        lastImportedRuntimeSessionID: result.state.lastImportedRuntimeSessionID
                     )
                 }
                 await hermesTurnCoordinator.endTurn(turnID)
                 applyHermesSyncResult(
-                    HermesSyncResult(state: result.state, messages: result.messages),
+                    HermesSyncResult(state: appliedState, messages: result.messages),
                     forceMessages: true
                 )
-                hermesSyncStatus = result.state.activeRuntimeSessionID.isEmpty ? .notAttached : .idle
+                hermesSyncStatus = appliedState.activeRuntimeSessionID.isEmpty ? .notAttached : .idle
                 saveCurrentConversation()
                 } catch {
                     await hermesTurnCoordinator.endTurn(turnID)
