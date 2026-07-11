@@ -167,7 +167,7 @@ final class CiderSpaceStorageTests: XCTestCase {
         )
         XCTAssertEqual(
             WorkspaceDomainSidebarModel.primaryDomains(selectedDomain: nil),
-            [.aiAssistant, .journal, .mainDashboard, .browse, .projects]
+            [.mainDashboard, .journal, .browse, .projects]
         )
         XCTAssertFalse(WorkspaceNavigationDomain.spaces.isPrimaryRoot)
     }
