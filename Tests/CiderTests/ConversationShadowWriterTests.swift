@@ -450,6 +450,452 @@ struct ConversationShadowWriterTests {
         #expect(restartedHealth.snapshot().resolvedHistory.contains { $0.correlationID == oldCorrelation && $0.status == .resolved })
         #expect(try succeeding.hasExactParity(try fixture.payloadFrom(result: second)))
     }
+
+    @Test("Verified sequential snapshots append terminal rows and exact retry consumes nothing")
+    func verifiedSequentialProgression() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
+        let firstPayload = try fixture.payload()
+
+        try writer.writeVerifiedSequentialCompletedSnapshot(firstPayload)
+        let first = try fixture.coreSnapshot()
+        let safety = DatabaseSafetyService()
+        let preRunBackup = try safety.createRollingBackup(
+            reason: "cid776-pre-run",
+            database: fixture.database
+        )
+        let backupDatabase = CiderDatabase()
+        try backupDatabase.open(at: preRunBackup)
+        #expect(try backupDatabase.integrityCheck().isHealthy)
+        backupDatabase.close()
+        let isolatedRestoreURL = fixture.root.appendingPathComponent("isolated-restore.db")
+        try FileManager.default.copyItem(at: preRunBackup, to: isolatedRestoreURL)
+        let isolatedRestore = CiderDatabase()
+        try isolatedRestore.open(at: isolatedRestoreURL)
+        let restoredRepository = ConversationRepository(database: isolatedRestore)
+        let restored = Fixture.CoreSnapshot(
+            room: try restoredRepository.room(id: fixture.record.conversationID),
+            bindings: try restoredRepository.bindings(roomID: fixture.record.conversationID),
+            turns: try restoredRepository.turns(roomID: fixture.record.conversationID),
+            messages: try restoredRepository.messages(roomID: fixture.record.conversationID)
+        )
+        #expect(restored == first)
+        isolatedRestore.close()
+        let advanced = advancedSnapshot(fixture, appendLineage: true)
+        let secondPayload = try fixture.payload(
+            record: advanced.record,
+            messages: advanced.messages,
+            hermesState: advanced.state
+        )
+        try writer.writeVerifiedSequentialCompletedSnapshot(secondPayload)
+        let second = try fixture.coreSnapshot()
+
+        #expect(second.messages.count == first.messages.count + 2)
+        #expect(second.turns.count == first.turns.count + 1)
+        #expect(second.messages.map(\.sequence) == Array(1...Int64(second.messages.count)))
+        #expect(second.messages.suffix(2).map(\.role) == ["user", "assistant"])
+        #expect(second.messages.suffix(2).map(\.contentText) == ["repeat", "repeat"])
+        #expect(second.messages.suffix(2).map(\.createdAt).allSatisfy { $0 == advanced.appendedAt })
+        #expect(second.room?.updatedAt == advanced.record.updatedAt)
+        #expect(second.room?.nextMessageSequence == Int64(second.messages.count + 1))
+        #expect(second.room?.nextTurnSequence == Int64(second.turns.count + 1))
+        #expect(second.bindings.count == first.bindings.count + 1)
+        let activeBinding = second.bindings.first { $0.externalSessionID == advanced.record.activeRuntimeSessionID }
+        #expect(activeBinding?.cursorMessageID == advanced.record.lastSyncedMessageID)
+        #expect(activeBinding?.cursorTimestamp == advanced.record.lastSyncedTimestamp)
+        #expect(try writer.hasVerifiedSequentialCompletedSnapshotParity(secondPayload))
+
+        let beforeRetry = second
+        let retryPayload = try fixture.payload(
+            record: advanced.record,
+            messages: advanced.messages,
+            hermesState: advanced.state
+        )
+        try writer.writeVerifiedSequentialCompletedSnapshot(retryPayload)
+        #expect(try fixture.coreSnapshot() == beforeRetry)
+    }
+
+    @Test("Sequential mode rejects stale and divergent snapshots without mutation")
+    func sequentialStaleAndDivergentFailClosed() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
+        try writer.writeVerifiedSequentialCompletedSnapshot(try fixture.payload())
+        let before = try fixture.coreSnapshot()
+
+        var staleRecord = fixture.record
+        staleRecord.updatedAt = fixture.record.updatedAt.addingTimeInterval(-1)
+        let staleState = state(for: staleRecord, source: fixture.hermesState.source)
+        let stale = try fixture.payload(record: staleRecord, messages: fixture.messages, hermesState: staleState)
+        #expect(throws: ConversationShadowWriterError.self) {
+            try writer.writeVerifiedSequentialCompletedSnapshot(stale)
+        }
+        #expect(try fixture.coreSnapshot() == before)
+
+        var cursorRegressionRecord = fixture.record
+        cursorRegressionRecord.updatedAt = fixture.record.updatedAt.addingTimeInterval(1)
+        cursorRegressionRecord.lastSyncedTimestamp = fixture.now.addingTimeInterval(-1)
+        let cursorRegression = try fixture.payload(
+            record: cursorRegressionRecord,
+            messages: fixture.messages,
+            hermesState: state(for: cursorRegressionRecord, source: fixture.hermesState.source)
+        )
+        #expect(throws: ConversationShadowWriterError.self) {
+            try writer.writeVerifiedSequentialCompletedSnapshot(cursorRegression)
+        }
+        #expect(try fixture.coreSnapshot() == before)
+
+        let truncated = try fixture.payload(
+            record: fixture.record,
+            messages: Array(fixture.messages.prefix(2)),
+            hermesState: fixture.hermesState
+        )
+        #expect(throws: ConversationShadowWriterError.self) {
+            try writer.writeVerifiedSequentialCompletedSnapshot(truncated)
+        }
+        #expect(try fixture.coreSnapshot() == before)
+
+        var replacement = fixture.messages
+        replacement[0].content = "replacement"
+        let divergent = try fixture.payload(
+            record: fixture.record,
+            messages: replacement,
+            hermesState: fixture.hermesState
+        )
+        #expect(throws: ConversationShadowWriterError.self) {
+            try writer.writeVerifiedSequentialCompletedSnapshot(divergent)
+        }
+        #expect(try fixture.coreSnapshot() == before)
+    }
+
+    @Test("Historical content parent source role and created timestamp are immutable")
+    func sequentialHistoricalFieldsAreImmutable() throws {
+        enum Mutation: CaseIterable { case content, parent, source, role, createdAt }
+        for mutation in Mutation.allCases {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
+            try writer.writeVerifiedSequentialCompletedSnapshot(try fixture.payload())
+            let before = try fixture.coreSnapshot()
+            var changed = fixture.messages
+            switch mutation {
+            case .content:
+                changed[1].content = "changed"
+            case .parent:
+                changed.swapAt(0, 1)
+            case .source:
+                changed[1].sourceID = "future-source:different"
+            case .role:
+                changed[1] = replacing(changed[1], role: .user)
+            case .createdAt:
+                changed[1] = replacing(
+                    changed[1],
+                    timestamp: changed[1].timestamp.addingTimeInterval(1)
+                )
+            }
+            let payload = try fixture.payload(
+                record: fixture.record,
+                messages: changed,
+                hermesState: fixture.hermesState
+            )
+            #expect(throws: ConversationShadowWriterError.self) {
+                try writer.writeVerifiedSequentialCompletedSnapshot(payload)
+            }
+            #expect(try fixture.coreSnapshot() == before)
+        }
+    }
+
+    @Test("Sequential transaction rolls back after every mutation and parity phase", arguments: [
+        ConversationShadowWriterCheckpoint.room,
+        .roomUpdate,
+        .bindings,
+        .bindingUpdates,
+        .turns,
+        .messages,
+        .counterFinalization,
+        .parity,
+    ])
+    func sequentialRollbackAtEveryPhase(checkpoint: ConversationShadowWriterCheckpoint) throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let seed = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
+        try seed.writeVerifiedSequentialCompletedSnapshot(try fixture.payload())
+        let before = try fixture.coreSnapshot()
+        let advanced = advancedSnapshot(fixture, appendLineage: true)
+        let payload = try fixture.payload(
+            record: advanced.record,
+            messages: advanced.messages,
+            hermesState: advanced.state
+        )
+        let failing = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) {
+            if $0 == checkpoint { throw ForcedFailure.checkpoint }
+        }
+
+        #expect(throws: ForcedFailure.self) {
+            try failing.writeVerifiedSequentialCompletedSnapshot(payload)
+        }
+        #expect(try fixture.coreSnapshot() == before)
+    }
+
+    @Test("Later exact-prefix parity reconciles older semantic evidence after restart")
+    func laterPrefixReconcilesOlderEvidence() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let firstPayload = try fixture.payload()
+        let record = try fixture.healthStore.reserve(payload: firstPayload, at: fixture.now)
+        try fixture.healthStore.markRepairNeeded(
+            correlationID: record.correlationID,
+            code: .shadowRepositoryFailed,
+            detail: "fixture failure",
+            at: fixture.now
+        )
+        let restarted = try ConversationShadowHealthStore(
+            diagnosticsDirectoryURL: fixture.diagnosticsDirectory
+        )
+        let advanced = advancedSnapshot(fixture, appendLineage: true)
+        let newerPayload = try fixture.payload(
+            record: advanced.record,
+            messages: advanced.messages,
+            hermesState: advanced.state
+        )
+        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
+        try writer.writeVerifiedSequentialCompletedSnapshot(newerPayload)
+        let reconciler = ConversationShadowReconciler(
+            writer: writer,
+            healthStore: restarted,
+            now: { fixture.now.addingTimeInterval(20) }
+        )
+
+        #expect(try reconciler.reconcileAfterExactRetry(newerPayload) == 1)
+        #expect(restarted.snapshot().unresolved.isEmpty)
+        #expect(restarted.snapshot().resolvedHistory.first?.correlationID == record.correlationID)
+    }
+
+    @Test("Health v1 remains decodable and uses exact-hash fallback")
+    func healthV1BackwardDecode() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let payload = try fixture.payload()
+        _ = try fixture.healthStore.reserve(payload: payload, at: fixture.now)
+        var json = try String(contentsOf: fixture.healthStore.fileURL, encoding: .utf8)
+        json = json.replacingOccurrences(
+            of: "\"formatVersion\" : \"cider.conversation-shadow-health.v2\"",
+            with: "\"formatVersion\" : \"cider.conversation-shadow-health.v1\""
+        )
+        json = json.replacingOccurrences(
+            of: #",\n      "semanticFingerprint" : \{[\s\S]*?\n      \}"#,
+            with: "",
+            options: .regularExpression
+        )
+        try Data(json.utf8).write(to: fixture.healthStore.fileURL, options: .atomic)
+
+        let restarted = try ConversationShadowHealthStore(
+            diagnosticsDirectoryURL: fixture.diagnosticsDirectory
+        )
+        #expect(restarted.snapshot().unresolved.count == 1)
+        #expect(restarted.snapshot().unresolved.first?.semanticFingerprint == nil)
+    }
+
+    @Test("Activation receipts are content-free and bounded for success closed DB and saturation")
+    func boundedActivationReceipts() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let reporter = ConversationShadowActivationReceiptReporter(maximumRecords: 2)
+        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
+        let success = fixture.coordinator(
+            writer: writer,
+            healthStore: fixture.healthStore,
+            reporter: reporter
+        ).save(
+            record: fixture.record,
+            title: fixture.record.title,
+            messages: fixture.messages,
+            model: "hermes",
+            hermesState: fixture.hermesState
+        )
+        #expect(success.primaryReceipt.isCommitted)
+        #expect(reporter.receipts.last?.planFingerprint != nil)
+        #expect(reporter.receipts.last?.messageCount == fixture.messages.count)
+        #expect(reporter.receipts.last?.terminalSourceNamespace == "hermes.live.v1")
+        #expect(!String(
+            data: try Data(contentsOf: fixture.healthStore.fileURL),
+            encoding: .utf8
+        )!.contains("repeat"))
+
+        fixture.database.close()
+        let closed = fixture.coordinator(
+            writer: writer,
+            healthStore: fixture.healthStore,
+            reporter: reporter
+        ).save(
+            record: fixture.record,
+            title: fixture.record.title,
+            messages: fixture.messages,
+            model: "hermes",
+            hermesState: fixture.hermesState
+        )
+        #expect(closed.primaryReceipt.isCommitted)
+        #expect(closed.shadowStatus == .repairNeeded)
+        #expect(reporter.receipts.last?.shadowCode == .shadowRepositoryFailed)
+
+        let zeroStore = try ConversationShadowHealthStore(
+            diagnosticsDirectoryURL: fixture.root.appendingPathComponent("saturated"),
+            maximumUnresolvedRecords: 0
+        )
+        let saturated = fixture.coordinator(
+            writer: writer,
+            healthStore: zeroStore,
+            reporter: reporter
+        ).save(
+            record: fixture.record,
+            title: fixture.record.title,
+            messages: fixture.messages,
+            model: "hermes",
+            hermesState: fixture.hermesState
+        )
+        #expect(saturated.primaryReceipt.isCommitted)
+        #expect(saturated.shadowCode == .diagnosticStoreSaturated)
+        #expect(reporter.receipts.count == 2)
+        #expect(reporter.droppedCount == 1)
+        #expect(reporter.receipts.last?.shadowCode == .diagnosticStoreSaturated)
+    }
+
+    @Test("Gate-blocked attempts emit one bounded receipt without invoking SQLite")
+    func gateBlockedReceipt() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let reporter = ConversationShadowActivationReceiptReporter(maximumRecords: 1)
+        var sqliteCalled = false
+        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) {
+            _ in sqliteCalled = true
+        }
+        let reconciler = ConversationShadowReconciler(
+            writer: writer,
+            healthStore: fixture.healthStore,
+            now: { fixture.now.addingTimeInterval(600) }
+        )
+        let coordinator = LegacyConversationPrimarySaveCoordinator(
+            registry: fixture.registry,
+            conversationStorage: fixture.storage,
+            healthStore: fixture.healthStore,
+            shadowWriter: writer,
+            reconciler: reconciler,
+            receiptReporter: reporter,
+            now: { fixture.now.addingTimeInterval(600) }
+        )
+
+        let result = coordinator.save(
+            record: fixture.record,
+            title: fixture.record.title,
+            messages: fixture.messages,
+            model: "hermes",
+            hermesState: fixture.hermesState
+        )
+
+        #expect(result.primaryReceipt.isCommitted)
+        #expect(result.shadowCode == .gateStale)
+        #expect(!sqliteCalled)
+        #expect(reporter.receipts.count == 1)
+        #expect(reporter.receipts[0].generationID == result.generation.id)
+        #expect(reporter.receipts[0].conversationID == fixture.record.conversationID)
+        #expect(reporter.receipts[0].shadowCode == .gateStale)
+        #expect(reporter.receipts[0].planFingerprint != nil)
+    }
+
+    @Test("Completed snapshot eligibility includes only explicit completed Hermes Runs")
+    func completedSnapshotEligibility() {
+        let eligible = ConversationCompletedSnapshotEligibility(
+            provenance: .hermesRunsAPI,
+            runState: .completed,
+            containsTools: false,
+            containsReasoning: false,
+            containsApproval: false,
+            sessionSyncComplete: true
+        )
+        #expect(eligible.isEligible)
+        let excluded: [ConversationCompletedSnapshotEligibility] = [
+            .init(provenance: .hermesStreamingOrDelta, runState: .completed, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .commandLineOrExportMerge, runState: .completed, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .other, runState: .completed, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .pending, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .failed, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .cancelled, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .completed, containsTools: true, containsReasoning: false, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .completed, containsTools: false, containsReasoning: true, containsApproval: false, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .completed, containsTools: false, containsReasoning: false, containsApproval: true, sessionSyncComplete: true),
+            .init(provenance: .hermesRunsAPI, runState: .completed, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: false),
+        ]
+        #expect(excluded.allSatisfy { !$0.isEligible })
+    }
+
+    private func advancedSnapshot(
+        _ fixture: Fixture,
+        appendLineage: Bool
+    ) -> (record: CiderAgentChatRecord, state: HermesConversationState, messages: [AIAssistantMessage], appendedAt: Date) {
+        let appendedAt = fixture.now.addingTimeInterval(10)
+        var record = fixture.record
+        record.title = "Cider Sequential"
+        record.updatedAt = appendedAt
+        record.lastSyncedMessageID = "cursor-message-2"
+        record.lastSyncedTimestamp = appendedAt
+        if appendLineage {
+            record.activeRuntimeSessionID = "session-next"
+            record.runtimeSessionLineage.append("session-next")
+        }
+        var messages = fixture.messages
+        messages.append(.init(
+            id: UUID(uuidString: "20000000-0000-4000-8000-000000000006")!,
+            role: .user,
+            content: "repeat",
+            timestamp: appendedAt,
+            sourceID: "hermes-run:run-8:user",
+            sourceSessionID: record.activeRuntimeSessionID,
+            sourceName: "Hermes"
+        ))
+        messages.append(.init(
+            id: UUID(uuidString: "20000000-0000-4000-8000-000000000007")!,
+            role: .assistant,
+            content: "repeat",
+            timestamp: appendedAt,
+            sourceID: "hermes-run:run-8:assistant",
+            sourceSessionID: record.activeRuntimeSessionID,
+            sourceName: "Hermes"
+        ))
+        return (record, state(for: record, source: fixture.hermesState.source), messages, appendedAt)
+    }
+
+    private func state(for record: CiderAgentChatRecord, source: String?) -> HermesConversationState {
+        HermesConversationState(
+            conversationID: record.conversationID,
+            runtimeID: record.runtimeID,
+            activeRuntimeSessionID: record.activeRuntimeSessionID,
+            runtimeSessionLineage: record.runtimeSessionLineage,
+            title: record.title,
+            source: source,
+            lastSyncedAt: record.lastSyncedTimestamp,
+            lastSyncedMessageID: record.lastSyncedMessageID,
+            lastSyncedTimestamp: record.lastSyncedTimestamp,
+            lastImportedRuntimeSessionID: record.lastImportedRuntimeSessionID
+        )
+    }
+
+    private func replacing(
+        _ message: AIAssistantMessage,
+        role: AIAssistantMessage.Role? = nil,
+        timestamp: Date? = nil
+    ) -> AIAssistantMessage {
+        .init(
+            id: message.id,
+            role: role ?? message.role,
+            content: message.content,
+            timestamp: timestamp ?? message.timestamp,
+            sourceID: message.sourceID,
+            sourceSessionID: message.sourceSessionID,
+            sourceName: message.sourceName,
+            attachments: message.attachments
+        )
+    }
 }
 
 @MainActor
@@ -551,6 +997,14 @@ private final class Fixture {
     }
 
     func coordinator(writer: ConversationShadowWriter) -> LegacyConversationPrimarySaveCoordinator {
+        coordinator(writer: writer, healthStore: healthStore, reporter: nil)
+    }
+
+    func coordinator(
+        writer: ConversationShadowWriter,
+        healthStore: ConversationShadowHealthStore,
+        reporter: ConversationShadowActivationReceiptReporter?
+    ) -> LegacyConversationPrimarySaveCoordinator {
         let reconciler = ConversationShadowReconciler(writer: writer, healthStore: healthStore, now: { self.now })
         return LegacyConversationPrimarySaveCoordinator(
             registry: registry,
@@ -558,11 +1012,20 @@ private final class Fixture {
             healthStore: healthStore,
             shadowWriter: writer,
             reconciler: reconciler,
+            receiptReporter: reporter,
             now: { self.now }
         )
     }
 
     func payload() throws -> ConversationShadowPayload {
+        try payload(record: record, messages: messages, hermesState: hermesState)
+    }
+
+    func payload(
+        record: CiderAgentChatRecord,
+        messages: [AIAssistantMessage],
+        hermesState: HermesConversationState
+    ) throws -> ConversationShadowPayload {
         let generation = LegacyConversationWriteGeneration()
         let registryReceipt = try registry.updateChat(record, generation: generation)
         let conversationReceipt = storage.save(

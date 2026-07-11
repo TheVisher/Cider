@@ -14,6 +14,7 @@ struct ConversationShadowHealthRecord: Codable, Equatable, Sendable {
     var code: ConversationShadowDiagnosticCode?
     let jsonlHash: String
     let registryHash: String
+    let semanticFingerprint: ConversationShadowSemanticFingerprint?
     let firstSeenAt: Date
     var lastSeenAt: Date
     var occurrenceCount: Int
@@ -41,7 +42,10 @@ final class ConversationShadowHealthStore {
     }
 
     private struct State: Codable, Equatable {
-        var formatVersion = "cider.conversation-shadow-health.v1"
+        static let currentFormatVersion = "cider.conversation-shadow-health.v2"
+        static let legacyFormatVersion = "cider.conversation-shadow-health.v1"
+
+        var formatVersion = currentFormatVersion
         var unresolved: [ConversationShadowHealthRecord] = []
         var resolvedHistory: [ConversationShadowHealthRecord] = []
         var aggregateEvidence: [String: Int] = [:]
@@ -84,14 +88,18 @@ final class ConversationShadowHealthStore {
         self.decoder = decoder
         try fileManager.createDirectory(at: diagnosticsDirectoryURL, withIntermediateDirectories: true)
         if fileManager.fileExists(atPath: fileURL.path) {
-            state = try decoder.decode(State.self, from: persistence.read(fileURL))
-            guard state.unresolved.count <= self.maximumUnresolvedRecords,
-                  state.resolvedHistory.count <= self.maximumResolvedRecords
+            var decoded = try decoder.decode(State.self, from: persistence.read(fileURL))
+            guard decoded.formatVersion == State.currentFormatVersion ||
+                    decoded.formatVersion == State.legacyFormatVersion,
+                  decoded.unresolved.count <= self.maximumUnresolvedRecords,
+                  decoded.resolvedHistory.count <= self.maximumResolvedRecords
             else {
                 throw ConversationShadowHealthStoreError.persistence(
-                    "Persisted conversation shadow health exceeds configured bounds."
+                    "Persisted conversation shadow health has an unsupported version or exceeds configured bounds."
                 )
             }
+            decoded.formatVersion = State.currentFormatVersion
+            state = decoded
         } else {
             state = State()
         }
@@ -117,6 +125,7 @@ final class ConversationShadowHealthStore {
             code: nil,
             jsonlHash: payload.conversation.sha256,
             registryHash: payload.registry.sha256,
+            semanticFingerprint: semanticFingerprint(payload),
             firstSeenAt: date,
             lastSeenAt: date,
             occurrenceCount: 1,
@@ -195,6 +204,42 @@ final class ConversationShadowHealthStore {
         return resolved.count
     }
 
+    @discardableResult
+    func resolveRepresented(
+        conversationID: UUID,
+        newerPayload: ConversationShadowPayload,
+        representationProof: (ConversationShadowHealthRecord) -> Bool,
+        detail: String,
+        at date: Date
+    ) throws -> Int {
+        var next = state
+        let indexes = next.unresolved.indices.filter {
+            let record = next.unresolved[$0]
+            guard record.conversationID == conversationID else { return false }
+            if let fingerprint = record.semanticFingerprint {
+                return fingerprint.version == ConversationShadowSemanticFingerprint.formatVersion &&
+                    representationProof(record)
+            }
+            return record.jsonlHash == newerPayload.conversation.sha256 &&
+                record.registryHash == newerPayload.registry.sha256
+        }
+        guard !indexes.isEmpty else { return 0 }
+        var resolved: [ConversationShadowHealthRecord] = []
+        for index in indexes.reversed() {
+            var record = next.unresolved.remove(at: index)
+            record.status = .resolved
+            record.code = nil
+            record.lastSeenAt = date
+            record.occurrenceCount += 1
+            record.errorDetail = Self.bounded(detail)
+            resolved.append(record)
+        }
+        next.resolvedHistory.insert(contentsOf: resolved.reversed(), at: 0)
+        next.resolvedHistory = Array(next.resolvedHistory.prefix(maximumResolvedRecords))
+        try commit(next)
+        return resolved.count
+    }
+
     func snapshot(limit: Int = 100) -> ConversationShadowHealthSnapshot {
         let boundedLimit = max(0, min(limit, Self.maximumReadCount))
         return ConversationShadowHealthSnapshot(
@@ -254,5 +299,19 @@ final class ConversationShadowHealthStore {
 
     private static func bounded(_ value: String) -> String {
         String(value.prefix(maximumDetailCharacters))
+    }
+
+    private func semanticFingerprint(
+        _ payload: ConversationShadowPayload
+    ) -> ConversationShadowSemanticFingerprint? {
+        let plan = LegacyConversationSnapshotMapper().map(
+            record: payload.registry.record,
+            metadata: payload.conversation.metadata,
+            messages: payload.conversation.messages.enumerated().map {
+                .init(physicalLine: $0.offset + 2, message: $0.element)
+            }
+        )
+        guard plan.rooms.count == 1 else { return nil }
+        return ConversationShadowSemanticFingerprintBuilder().make(plan)
     }
 }

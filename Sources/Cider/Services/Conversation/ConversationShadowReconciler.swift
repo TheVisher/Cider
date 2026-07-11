@@ -19,12 +19,15 @@ final class ConversationShadowReconciler {
 
     @discardableResult
     func reconcileAfterExactRetry(_ payload: ConversationShadowPayload) throws -> Int {
-        guard try writer.hasExactParity(payload) else { return 0 }
-        return try healthStore.resolveMatching(
+        guard try writer.hasVerifiedSequentialCompletedSnapshotParity(payload) else { return 0 }
+        return try healthStore.resolveRepresented(
             conversationID: payload.conversation.metadata.id,
-            jsonlHash: payload.conversation.sha256,
-            registryHash: payload.registry.sha256,
-            detail: "Resolved after an exact same-hash historical replay and repository parity check.",
+            newerPayload: payload,
+            representationProof: { record in
+                guard let fingerprint = record.semanticFingerprint else { return false }
+                return (try? self.writer.provesRepresentation(of: fingerprint, by: payload)) == true
+            },
+            detail: "Resolved after newer repository parity proved the older semantic high-water is an exact prefix.",
             at: now()
         )
     }

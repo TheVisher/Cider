@@ -20,6 +20,7 @@ final class LegacyConversationPrimarySaveCoordinator {
     private let healthStore: ConversationShadowHealthStore
     private let shadowWriter: ConversationShadowWriter
     private let reconciler: ConversationShadowReconciler
+    private let receiptReporter: ConversationShadowActivationReceiptReporter?
     private let now: () -> Date
 
     init(
@@ -28,6 +29,7 @@ final class LegacyConversationPrimarySaveCoordinator {
         healthStore: ConversationShadowHealthStore,
         shadowWriter: ConversationShadowWriter,
         reconciler: ConversationShadowReconciler,
+        receiptReporter: ConversationShadowActivationReceiptReporter? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.registry = registry
@@ -35,6 +37,7 @@ final class LegacyConversationPrimarySaveCoordinator {
         self.healthStore = healthStore
         self.shadowWriter = shadowWriter
         self.reconciler = reconciler
+        self.receiptReporter = receiptReporter
         self.now = now
     }
 
@@ -72,7 +75,7 @@ final class LegacyConversationPrimarySaveCoordinator {
                   registryReceipt: registryReceipt,
                   conversationReceipt: primaryReceipt
               ) else {
-            return .init(
+            return reported(.init(
                 generation: generation,
                 registryReceipt: registryReceipt,
                 registryFailureDetail: registryFailureDetail,
@@ -82,7 +85,7 @@ final class LegacyConversationPrimarySaveCoordinator {
                 shadowCode: nil,
                 shadowDetail: nil,
                 invokedShadowWriter: false
-            )
+            ), payload: nil)
         }
 
         let gate = ConversationShadowSafetyGate(
@@ -94,7 +97,7 @@ final class LegacyConversationPrimarySaveCoordinator {
         var exactPayloadForImmediateReconciliation: ConversationShadowPayload?
         let attempt = gate.perform { payload in
             do {
-                try shadowWriter.write(payload)
+                try shadowWriter.writeVerifiedSequentialCompletedSnapshot(payload)
             } catch ConversationShadowWriterError.parity(let detail) {
                 return .parityFailed(detail)
             }
@@ -104,7 +107,7 @@ final class LegacyConversationPrimarySaveCoordinator {
         if attempt.status == .synchronized, let payload = exactPayloadForImmediateReconciliation {
             _ = try? reconciler.reconcileAfterExactRetry(payload)
         }
-        return .init(
+        return reported(.init(
             generation: generation,
             registryReceipt: registryReceipt,
             registryFailureDetail: registryFailureDetail,
@@ -114,7 +117,38 @@ final class LegacyConversationPrimarySaveCoordinator {
             shadowCode: attempt.code,
             shadowDetail: attempt.detail,
             invokedShadowWriter: attempt.invokedShadowClosure
-        )
+        ), payload: attempt.payload)
+    }
+
+    private func reported(
+        _ result: LegacyConversationCoordinatedSaveResult,
+        payload: ConversationShadowPayload?
+    ) -> LegacyConversationCoordinatedSaveResult {
+        guard let receiptReporter else { return result }
+        let receiptPayload = payload ?? result.registryReceipt.flatMap { registryReceipt in
+            result.primaryReceipt.snapshot.map {
+                ConversationShadowPayload(
+                    generation: result.generation,
+                    registry: registryReceipt.snapshot,
+                    conversation: $0
+                )
+            }
+        }
+        let fingerprint = receiptPayload.flatMap { try? shadowWriter.semanticFingerprint($0) }
+        receiptReporter.report(.init(
+            generationID: result.generation.id,
+            conversationID: result.primaryReceipt.conversationID,
+            registryCommitted: result.registryReceipt != nil,
+            jsonlStatus: result.primaryReceipt.status,
+            shadowCorrelationID: result.shadowCorrelationID,
+            shadowStatus: result.shadowStatus,
+            shadowCode: result.shadowCode,
+            planFingerprint: fingerprint?.planFingerprint,
+            messageCount: result.primaryReceipt.messageCount,
+            terminalSourceNamespace: fingerprint?.terminalSource?.namespace,
+            terminalSourceID: fingerprint?.terminalSource?.id
+        ))
+        return result
     }
 
     private func receiptsMatch(

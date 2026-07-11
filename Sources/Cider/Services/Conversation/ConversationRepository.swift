@@ -115,6 +115,34 @@ final class ConversationRepository {
         }
     }
 
+    /// Applies only mapper-proven mutable fields for a verified historical snapshot.
+    /// Callers must validate immutable identity and monotonicity before invoking it.
+    func advanceVerifiedHistoricalRoomSnapshot(
+        roomID: UUID,
+        title: String,
+        lifecycleState: ConversationRoomLifecycle,
+        metadata: [String: String],
+        updatedAt: Date,
+        archivedAt: Date?
+    ) throws {
+        try database.withTransaction {
+            _ = try requiredRoom(id: roomID)
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET title = ?, lifecycle_state = ?, metadata_json = ?,
+                    updated_at = ?, archived_at = ?, trashed_at = NULL
+                WHERE id = ?;
+                """)
+            statement.bind(title, at: 1)
+                .bind(lifecycleState.rawValue, at: 2)
+                .bind(DatabaseHelpers.encodeJSON(metadata) ?? "{}", at: 3)
+                .bind(DatabaseHelpers.encode(updatedAt), at: 4)
+                .bind(archivedAt.map(DatabaseHelpers.encode), at: 5)
+                .bind(roomID.uuidString, at: 6)
+            try statement.step()
+        }
+    }
+
     func upsertRuntimeBinding(_ draft: ConversationRuntimeBindingDraft) throws -> ConversationRuntimeBinding {
         try database.withTransaction {
             _ = try requiredRoom(id: draft.roomID)
