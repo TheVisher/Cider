@@ -100,8 +100,8 @@ final class AIAssistantViewModel: ObservableObject {
 
     private let logger = Logger(subsystem: "com.cider.app", category: "AIAssistant")
     private var provider: AIAssistantProvider
-    private let storage = AIConversationStorage.shared
-    private let hermesSessionService = HermesSessionService()
+    private let storage: AIConversationStorage
+    private let hermesSessionService: HermesSessionService
     private let hermesBridgeTransport: any HermesBridgeTransport
     private let hermesTurnCoordinator: HermesTurnCoordinator
     private let agentChatRegistry: CiderAgentChatRegistry
@@ -242,6 +242,8 @@ final class AIAssistantViewModel: ObservableObject {
         agentChatRegistry: CiderAgentChatRegistry = .shared,
         hermesBridgeTransport: any HermesBridgeTransport = HermesRunTransport(),
         hermesTurnCoordinator: HermesTurnCoordinator = .shared,
+        storage: AIConversationStorage? = nil,
+        hermesSessionService: HermesSessionService? = nil,
         dormantConversationShadowCoordinator: LegacyConversationPrimarySaveCoordinator? = nil
     ) {
         let initialRuntimeSelection = Self.loadPersistedRuntimeSelection()
@@ -249,6 +251,8 @@ final class AIAssistantViewModel: ObservableObject {
         self.agentChatRegistry = agentChatRegistry
         self.hermesBridgeTransport = hermesBridgeTransport
         self.hermesTurnCoordinator = hermesTurnCoordinator
+        self.storage = storage ?? .shared
+        self.hermesSessionService = hermesSessionService ?? HermesSessionService()
         self.dormantConversationShadowCoordinator = dormantConversationShadowCoordinator
         if let provider {
             self.provider = provider
@@ -1597,11 +1601,12 @@ final class AIAssistantViewModel: ObservableObject {
     }
 
     private func persistRuntimeSelection(_ selection: AIAgentRuntimeSelection) {
-        UserDefaults.standard.set(selection.rawValue, forKey: Self.runtimeSelectionDefaultsKey)
+        IsolationRuntime.userDefaults.set(selection.rawValue, forKey: Self.runtimeSelectionDefaultsKey)
     }
 
     private static func loadPersistedRuntimeSelection() -> AIAgentRuntimeSelection {
-        guard let raw = UserDefaults.standard.string(forKey: runtimeSelectionDefaultsKey),
+        IsolationRuntime.recordPathAccess("AIAssistantViewModel.UserDefaults")
+        guard let raw = IsolationRuntime.userDefaults.string(forKey: runtimeSelectionDefaultsKey),
               let selection = AIAgentRuntimeSelection(rawValue: raw)
         else {
             return MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence

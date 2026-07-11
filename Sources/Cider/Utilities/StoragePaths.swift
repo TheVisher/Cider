@@ -118,14 +118,23 @@ enum StoragePaths {
     // MARK: - Vault Root
 
     /// Returns the vault root directory URL, expanding tildes.
-    static func vaultDirectoryURL(config: CiderConfig = CiderConfig.load()) -> URL {
+    static func vaultDirectoryURL(
+        config: CiderConfig? = nil,
+        isolationConfiguration: IsolationConfiguration? = nil
+    ) -> URL {
+        IsolationRuntime.recordPathAccess("StoragePaths.vaultDirectoryURL")
+        if let isolatedVault = (isolationConfiguration ?? IsolationRuntime.configuration).vaultRoot {
+            return isolatedVault
+        }
         if let override = vaultOverride { return override }
-        let expanded = NSString(string: config.vaultDirectory).expandingTildeInPath
+        let effectiveConfig = config ?? CiderConfig.load()
+        let expanded = NSString(string: effectiveConfig.vaultDirectory).expandingTildeInPath
         return URL(fileURLWithPath: expanded)
     }
 
     /// Cached vault root URL.
     static var cachedVaultDirectoryURL: URL {
+        IsolationRuntime.recordPathAccess("StoragePaths.cachedVaultDirectoryURL")
         _lock.lock()
         defer { _lock.unlock() }
         if let cached = _cachedVaultURL { return cached }
@@ -140,14 +149,21 @@ enum StoragePaths {
     /// Checks for a user override first, then falls back to vault subdirectory.
     /// When `vaultOverride` is set (sandbox mode), per-type overrides are ignored
     /// so that all storage stays inside the sandbox vault.
-    static func directoryURL(for type: StorageType, config: CiderConfig = CiderConfig.load()) -> URL {
+    static func directoryURL(for type: StorageType, config: CiderConfig? = nil) -> URL {
+        IsolationRuntime.recordPathAccess("StoragePaths.directoryURL")
+        if let isolatedVault = IsolationRuntime.configuration.vaultRoot {
+            return isolatedVault
+                .appendingPathComponent(ciderInternalDir)
+                .appendingPathComponent(type.ciderSubpath)
+        }
+        let effectiveConfig = config ?? CiderConfig.load()
         if vaultOverride == nil,
-           let override = config.directoryOverrides[type.rawValue],
+           let override = effectiveConfig.directoryOverrides[type.rawValue],
            !override.isEmpty {
             let expanded = NSString(string: override).expandingTildeInPath
             return URL(fileURLWithPath: expanded)
         }
-        return vaultDirectoryURL(config: config)
+        return vaultDirectoryURL(config: effectiveConfig)
             .appendingPathComponent(ciderInternalDir)
             .appendingPathComponent(type.ciderSubpath)
     }
@@ -155,6 +171,7 @@ enum StoragePaths {
     /// Cached per-type directory URL — avoids repeated config loads in render paths.
     /// Thread-safe: called from background threads (NoteCardData, image loading).
     static func cachedDirectoryURL(for type: StorageType) -> URL {
+        IsolationRuntime.recordPathAccess("StoragePaths.cachedDirectoryURL")
         _lock.lock()
         if let cached = _cachedTypeURLs[type] {
             _lock.unlock()
@@ -180,7 +197,7 @@ enum StoragePaths {
     // MARK: - Inbox
 
     /// Returns the Inbox subdirectory URL for a given storage type (e.g. `~/CiderVault/Inbox/Bookmarks/`).
-    static func inboxSubdirectoryURL(for type: StorageType, config: CiderConfig = CiderConfig.load()) -> URL {
+    static func inboxSubdirectoryURL(for type: StorageType, config: CiderConfig? = nil) -> URL {
         let name = type.inboxSubfolderName ?? type.rawValue
         return vaultDirectoryURL(config: config)
             .appendingPathComponent(inboxDir)
@@ -212,7 +229,7 @@ enum StoragePaths {
     /// operation that failed so callers never mistake partial initialization for success.
     @discardableResult
     static func ensureVaultStructure(
-        config: CiderConfig = CiderConfig.load(),
+        config: CiderConfig? = nil,
         fileSystem: VaultStructureFileSystem = .live
     ) -> VaultStructureInitializationReport {
         var failures: [VaultStructureFailure] = []

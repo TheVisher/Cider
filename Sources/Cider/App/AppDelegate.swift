@@ -112,8 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let integrationPlan = IsolationRuntime.configuration.integrationPlan
         NSApplication.shared.setActivationPolicy(.regular)
-        AccessibilityHelpers.promptIfNeeded()
+        if integrationPlan.accessibilityPrompt {
+            AccessibilityHelpers.promptIfNeeded()
+        }
         let vaultStructureReport = StoragePaths.ensureVaultStructure()
         if !vaultStructureReport.isFullyInitialized {
             let logger = Logger(
@@ -140,6 +143,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runtimeLogger: .production(),
             installCoordinator: AIAssistantViewModel.installDormantCoordinatorBeforeSharedInitialization
         )
+
+        // Isolation mode intentionally exposes only the minimum in-process Hermes chat
+        // composition. It does not start global monitors, migrations, indexing, sync,
+        // notifications, Services, tools, watchers, or update infrastructure.
+        if IsolationRuntime.configuration.isDogfood {
+            configureAIAssistantPanel()
+            observeAIAssistantNotifications()
+            return
+        }
 
         VaultStructureMigration.migrateIfNeeded()
         VaultStructureMigration.migrateContentToInboxIfNeeded()
@@ -297,8 +309,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await TelegramBridge.shared.stop()
             }
         }
-        Task {
-            await AgentOrchestrator.shared.stopRuntimeIfNeeded()
+        if IsolationRuntime.configuration.integrationPlan.agentTools {
+            Task {
+                await AgentOrchestrator.shared.stopRuntimeIfNeeded()
+            }
         }
     }
 

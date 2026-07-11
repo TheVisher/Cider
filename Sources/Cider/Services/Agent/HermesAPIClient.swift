@@ -149,11 +149,33 @@ struct HermesAPIClient: Sendable {
     init(
         baseURL: URL = URL(string: "http://127.0.0.1:8642")!,
         apiKey: String? = ProcessInfo.processInfo.environment["HERMES_API_SERVER_KEY"],
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        isolationConfiguration: IsolationConfiguration? = nil
     ) {
-        self.baseURL = baseURL
-        self.apiKey = apiKey
-        self.session = session
+        IsolationRuntime.recordPathAccess("HermesAPIClient.init")
+        let isolation = isolationConfiguration ?? IsolationRuntime.configuration
+        if isolation.isDogfood {
+            self.baseURL = isolation.hermesEndpoint!
+            self.apiKey = isolation.hermesAPIKey!
+            self.session = Self.isolatedSession()
+        } else {
+            self.baseURL = baseURL
+            self.apiKey = apiKey
+            self.session = session
+        }
+    }
+
+    private static func isolatedSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(
+            configuration: configuration,
+            delegate: IsolationRedirectRejectingURLSessionDelegate.shared,
+            delegateQueue: nil
+        )
     }
 
     func capabilities() async throws -> HermesAPICapabilities {
@@ -290,5 +312,19 @@ struct HermesAPIClient: Sendable {
         guard let data = payload.data(using: .utf8) else { return }
         let event = try JSONDecoder().decode(HermesRunSSEEvent.self, from: data)
         continuation.yield(event)
+    }
+}
+
+private final class IsolationRedirectRejectingURLSessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = IsolationRedirectRejectingURLSessionDelegate()
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

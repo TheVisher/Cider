@@ -95,8 +95,8 @@ enum HermesSessionClientError: Error, LocalizedError {
 struct HermesSessionContinuationResolver {
     let stateDatabaseURL: URL
 
-    init(stateDatabaseURL: URL = HermesPaths.defaultStateDatabaseURL) {
-        self.stateDatabaseURL = stateDatabaseURL
+    init(stateDatabaseURL: URL? = nil) {
+        self.stateDatabaseURL = stateDatabaseURL ?? HermesPaths.defaultStateDatabaseURL
     }
 
     func resolveContinuation(from sessionID: String) throws -> HermesSessionContinuation {
@@ -641,11 +641,11 @@ final class HermesSessionService: @unchecked Sendable {
     private let runner: HermesCommandRunning
 
     init(
-        stateDatabaseURL: URL = HermesPaths.defaultStateDatabaseURL,
-        runner: HermesCommandRunning = HermesProcessRunner()
+        stateDatabaseURL: URL? = nil,
+        runner: HermesCommandRunning? = nil
     ) {
         self.resolver = HermesSessionContinuationResolver(stateDatabaseURL: stateDatabaseURL)
-        self.runner = runner
+        self.runner = runner ?? HermesProcessRunner()
     }
 
     func attachLatestTelegramConversation(conversationID: UUID = UUID()) async throws -> HermesSyncResult {
@@ -930,16 +930,35 @@ extension HermesCommandRunning {
 struct HermesProcessRunner: HermesCommandRunning {
     let executablePath: String
     let workingDirectoryURL: URL
+    let environment: [String: String]?
+    let cliExecutionAllowed: Bool
 
     init(
-        executablePath: String = HermesPaths.resolveHermesExecutablePath(),
-        workingDirectoryURL: URL = StoragePaths.cachedVaultDirectoryURL
+        executablePath: String? = nil,
+        workingDirectoryURL: URL? = nil,
+        environment: [String: String]? = nil,
+        cliExecutionAllowed: Bool? = nil,
+        isolationConfiguration: IsolationConfiguration? = nil
     ) {
-        self.executablePath = executablePath
-        self.workingDirectoryURL = workingDirectoryURL
+        IsolationRuntime.recordPathAccess("HermesProcessRunner.init")
+        let isolation = isolationConfiguration ?? IsolationRuntime.configuration
+        if isolation.isDogfood {
+            self.executablePath = isolation.hermesExecutable!.path
+            self.workingDirectoryURL = isolation.hermesWorkingDirectory!
+            self.environment = environment ?? isolation.hermesChildEnvironment(apiKey: isolation.hermesAPIKey!)
+            self.cliExecutionAllowed = cliExecutionAllowed ?? false
+        } else {
+            self.executablePath = executablePath ?? HermesPaths.resolveHermesExecutablePath()
+            self.workingDirectoryURL = workingDirectoryURL ?? StoragePaths.cachedVaultDirectoryURL
+            self.environment = environment
+            self.cliExecutionAllowed = cliExecutionAllowed ?? true
+        }
     }
 
     func runHermes(arguments: [String], timeout: TimeInterval) async throws -> Data {
+        guard cliExecutionAllowed else {
+            throw HermesSessionClientError.hermesCommandFailed("Hermes CLI fallback is disabled in isolation mode")
+        }
         guard FileManager.default.isExecutableFile(atPath: executablePath) else {
             throw HermesSessionClientError.hermesExecutableUnavailable(executablePath)
         }
@@ -952,6 +971,9 @@ struct HermesProcessRunner: HermesCommandRunning {
             process.executableURL = URL(fileURLWithPath: executablePath)
             process.arguments = arguments
             process.currentDirectoryURL = workingDirectoryURL
+            if let environment {
+                process.environment = environment
+            }
             process.standardOutput = stdout
             process.standardError = stderr
 
@@ -1038,12 +1060,20 @@ private final class HermesProcessCompletionBox: @unchecked Sendable {
 
 enum HermesPaths {
     static var defaultStateDatabaseURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        IsolationRuntime.recordPathAccess("HermesPaths.defaultStateDatabaseURL")
+        if let isolated = IsolationRuntime.configuration.hermesStateDatabaseURL {
+            return isolated
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".hermes", isDirectory: true)
             .appendingPathComponent("state.db")
     }
 
     static func resolveHermesExecutablePath() -> String {
+        IsolationRuntime.recordPathAccess("HermesPaths.resolveHermesExecutablePath")
+        if let isolated = IsolationRuntime.configuration.hermesExecutable {
+            return isolated.path
+        }
         let candidates = [
             FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".local/bin/hermes").path,
@@ -1054,7 +1084,11 @@ enum HermesPaths {
     }
 
     static func sessionFileURL(sessionID: String) -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        IsolationRuntime.recordPathAccess("HermesPaths.sessionFileURL")
+        if let isolated = IsolationRuntime.configuration.hermesSessionsRoot {
+            return isolated.appendingPathComponent("session_\(sessionID).json")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".hermes", isDirectory: true)
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent("session_\(sessionID).json")

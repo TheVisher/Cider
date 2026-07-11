@@ -22,5 +22,27 @@ struct CiderApp: App {
 /// Xcode App target's main.swift. Keeps CiderApp itself internal.
 @MainActor
 public func launchCider() {
-    CiderApp.main()
+    do {
+        try CiderLaunchOrdering.run(
+            bootstrap: {
+                try IsolationRuntime.installAtProcessStart(
+                    attestationSink: IsolationAttestationSink.writeInsideIsolationRoot
+                )
+            },
+            appMain: { CiderApp.main() }
+        )
+    } catch {
+        fatalError("Cider isolation bootstrap failed before application construction: \(error.localizedDescription)")
+    }
+}
+
+enum CiderLaunchOrdering {
+    @MainActor
+    static func run(
+        bootstrap: () throws -> IsolationStartupAttestation,
+        appMain: () -> Void
+    ) throws {
+        _ = try bootstrap()
+        appMain()
+    }
 }
