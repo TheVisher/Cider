@@ -29,7 +29,8 @@ final class ConversationRepository {
             try requireNonempty(draft.title, field: "room title")
             try requireNonempty(draft.kind, field: "room kind")
             let metadata = DatabaseHelpers.encodeJSON(draft.metadata) ?? "{}"
-            let timestamp = DatabaseHelpers.encode(draft.createdAt)
+            let createdAt = DatabaseHelpers.encode(draft.createdAt)
+            let updatedAt = DatabaseHelpers.encode(draft.updatedAt ?? draft.createdAt)
             let statement = try database.prepare("""
                 INSERT INTO conversation_rooms (
                     id, stable_key, title, kind, lifecycle_state,
@@ -43,8 +44,8 @@ final class ConversationRepository {
                 .bind(draft.kind, at: 4)
                 .bind(ConversationRoomLifecycle.active.rawValue, at: 5)
                 .bind(metadata, at: 6)
-                .bind(timestamp, at: 7)
-                .bind(timestamp, at: 8)
+                .bind(createdAt, at: 7)
+                .bind(updatedAt, at: 8)
             try statement.step()
             return try requiredRoom(id: draft.id)
         }
@@ -91,6 +92,29 @@ final class ConversationRepository {
         }
     }
 
+    func finalizeHistoricalRoomImport(
+        roomID: UUID,
+        nextTurnSequence: Int64,
+        nextMessageSequence: Int64,
+        updatedAt: Date
+    ) throws {
+        try database.withTransaction {
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET updated_at = ?
+                WHERE id = ? AND next_turn_sequence = ? AND next_message_sequence = ?
+                    AND updated_at != ?
+                RETURNING id;
+                """)
+            statement.bind(DatabaseHelpers.encode(updatedAt), at: 1)
+                .bind(roomID.uuidString, at: 2)
+                .bind(nextTurnSequence, at: 3)
+                .bind(nextMessageSequence, at: 4)
+                .bind(DatabaseHelpers.encode(updatedAt), at: 5)
+            _ = try statement.step()
+        }
+    }
+
     func upsertRuntimeBinding(_ draft: ConversationRuntimeBindingDraft) throws -> ConversationRuntimeBinding {
         try database.withTransaction {
             _ = try requiredRoom(id: draft.roomID)
@@ -103,7 +127,7 @@ final class ConversationRepository {
             try validateBindingParent(draft.parentBindingID, bindingID: bindingID, roomID: draft.roomID)
 
             let createdAt = existing?.createdAt ?? draft.createdAt
-            let updatedAt = Date()
+            let updatedAt = draft.updatedAt ?? Date()
             let statement = try database.prepare("""
                 INSERT INTO conversation_runtime_bindings (
                     id, room_id, parent_binding_id, runtime_id, transport_id,
@@ -219,6 +243,22 @@ final class ConversationRepository {
             """)
         statement.bind(id.uuidString, at: 1)
         return try statement.step() ? try decodeTurn(statement) : nil
+    }
+
+    func turns(roomID: UUID) throws -> [ConversationTurn] {
+        let statement = try database.prepare("""
+            SELECT id, room_id, sequence, runtime_binding_id,
+                   source_namespace, source_turn_id, status,
+                   error_code, error_detail, metadata_json,
+                   created_at, started_at, completed_at, updated_at
+            FROM conversation_turns
+            WHERE room_id = ?
+            ORDER BY sequence;
+            """)
+        statement.bind(roomID.uuidString, at: 1)
+        var results: [ConversationTurn] = []
+        while try statement.step() { results.append(try decodeTurn(statement)) }
+        return results
     }
 
     func transitionTurn(
@@ -605,7 +645,7 @@ final class ConversationRepository {
         return nil
     }
 
-    private func turn(source: ConversationSourceIdentity) throws -> ConversationTurn? {
+    func turn(source: ConversationSourceIdentity) throws -> ConversationTurn? {
         let statement = try database.prepare("""
             SELECT id, room_id, sequence, runtime_binding_id,
                    source_namespace, source_turn_id, status,

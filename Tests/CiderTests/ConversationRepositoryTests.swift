@@ -36,6 +36,36 @@ struct ConversationRepositoryTests {
         }
     }
 
+    @Test("Historical room and binding drafts preserve explicit updated timestamps")
+    func explicitHistoricalUpdatedTimestamps() throws {
+        try withRepository { _, repository in
+            let createdAt = Date(timeIntervalSince1970: 1_000)
+            let updatedAt = Date(timeIntervalSince1970: 2_000)
+            let room = try repository.createRoom(.init(
+                title: "Historical",
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            ))
+            let binding = try repository.upsertRuntimeBinding(.init(
+                roomID: room.id,
+                runtimeID: "hermes",
+                transportID: "legacy",
+                sourceNamespace: "legacy.runtime-binding.v1.hermes",
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            ))
+
+            #expect(room.createdAt == createdAt)
+            #expect(room.updatedAt == updatedAt)
+            #expect(binding.createdAt == createdAt)
+            #expect(binding.updatedAt == updatedAt)
+
+            let liveCreatedAt = Date(timeIntervalSince1970: 3_000)
+            let liveRoom = try repository.createRoom(.init(title: "Live", createdAt: liveCreatedAt))
+            #expect(liveRoom.updatedAt == liveCreatedAt)
+        }
+    }
+
     @Test("Equal timestamps read in allocated message sequence order")
     func deterministicMessageOrdering() throws {
         try withRepository { _, repository in
@@ -55,7 +85,14 @@ struct ConversationRepositoryTests {
         try withRepository { _, repository in
             let room = try repository.createRoom(roomDraft())
             let source = ConversationSourceIdentity(namespace: "hermes.export.v1", id: "session:message")
-            let draft = ConversationMessageDraft(roomID: room.id, role: "user", contentText: "hello", source: source)
+            let timestamp = Date(timeIntervalSince1970: 1_000)
+            let draft = ConversationMessageDraft(
+                roomID: room.id,
+                role: "user",
+                contentText: "hello",
+                source: source,
+                createdAt: timestamp
+            )
 
             let inserted = try repository.upsertMessage(draft, intent: .historicalReplay)
             let replayed = try repository.upsertMessage(draft, intent: .historicalReplay)

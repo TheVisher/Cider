@@ -72,6 +72,7 @@ struct ConversationRoomDraft: Codable, Equatable, Sendable {
     var kind: String = "chat"
     var metadata: [String: String] = [:]
     var createdAt: Date = Date()
+    var updatedAt: Date?
 }
 
 struct ConversationRuntimeBinding: Identifiable, Codable, Equatable, Sendable {
@@ -103,6 +104,7 @@ struct ConversationRuntimeBindingDraft: Codable, Equatable, Sendable {
     var cursorTimestamp: Date?
     var metadata: [String: String] = [:]
     var createdAt: Date = Date()
+    var updatedAt: Date?
 }
 
 struct ConversationTurnError: Codable, Equatable, Sendable {

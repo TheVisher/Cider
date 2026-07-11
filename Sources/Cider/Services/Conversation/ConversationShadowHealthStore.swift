@@ -164,6 +164,37 @@ final class ConversationShadowHealthStore {
         try finish(correlationID: correlationID, status: .resolved, code: nil, detail: detail, at: date)
     }
 
+    @discardableResult
+    func resolveMatching(
+        conversationID: UUID,
+        jsonlHash: String,
+        registryHash: String,
+        detail: String,
+        at date: Date
+    ) throws -> Int {
+        var next = state
+        let indexes = next.unresolved.indices.filter {
+            next.unresolved[$0].conversationID == conversationID &&
+            next.unresolved[$0].jsonlHash == jsonlHash &&
+            next.unresolved[$0].registryHash == registryHash
+        }
+        guard !indexes.isEmpty else { return 0 }
+        var resolved: [ConversationShadowHealthRecord] = []
+        for index in indexes.reversed() {
+            var record = next.unresolved.remove(at: index)
+            record.status = .resolved
+            record.code = nil
+            record.lastSeenAt = date
+            record.occurrenceCount += 1
+            record.errorDetail = Self.bounded(detail)
+            resolved.append(record)
+        }
+        next.resolvedHistory.insert(contentsOf: resolved.reversed(), at: 0)
+        next.resolvedHistory = Array(next.resolvedHistory.prefix(maximumResolvedRecords))
+        try commit(next)
+        return resolved.count
+    }
+
     func snapshot(limit: Int = 100) -> ConversationShadowHealthSnapshot {
         let boundedLimit = max(0, min(limit, Self.maximumReadCount))
         return ConversationShadowHealthSnapshot(
