@@ -308,7 +308,7 @@ struct CiderDatabaseTests {
             role: "user",
             contentText: "first",
             source: .init(namespace: "hermes.export.v1", id: "session-backup:user")
-        )).message
+        ), intent: .historicalReplay).message
         let second = try repository.upsertMessage(.init(
             roomID: room.id,
             turnID: turn.id,
@@ -317,7 +317,7 @@ struct CiderDatabaseTests {
             role: "assistant",
             contentText: "second",
             source: .init(namespace: "hermes.export.v1", id: "session-backup:assistant")
-        )).message
+        ), intent: .historicalReplay).message
 
         let service = DatabaseSafetyService()
         let backupURL = try service.createRollingBackup(reason: "conversation-core", database: database)
@@ -342,7 +342,10 @@ struct CiderDatabaseTests {
         ])
         isolatedRestore.close()
 
-        _ = try repository.upsertMessage(.init(roomID: roomID, role: "user", contentText: "after backup"))
+        _ = try repository.upsertMessage(
+            .init(roomID: roomID, role: "user", contentText: "after backup"),
+            intent: .historicalReplay
+        )
         _ = try service.restoreRollingBackup(
             from: backupURL,
             into: databaseURL,

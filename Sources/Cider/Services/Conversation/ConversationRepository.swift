@@ -5,11 +5,13 @@ enum ConversationRepositoryError: Error, Equatable, LocalizedError {
     case notFound(String)
     case integrity(String)
     case invalidTransition(from: ConversationTurnStatus, to: ConversationTurnStatus)
+    case invalidMessageTransition(from: ConversationMessageStatus, to: ConversationMessageStatus)
 
     var errorDescription: String? {
         switch self {
         case .invalidDraft(let message), .notFound(let message), .integrity(let message): message
         case .invalidTransition(let from, let to): "Invalid conversation turn transition from \(from.rawValue) to \(to.rawValue)."
+        case .invalidMessageTransition(let from, let to): "Invalid conversation message transition from \(from.rawValue) to \(to.rawValue)."
         }
     }
 }
@@ -250,7 +252,10 @@ final class ConversationRepository {
         }
     }
 
-    func upsertMessage(_ draft: ConversationMessageDraft) throws -> ConversationMessageUpsertResult {
+    func upsertMessage(
+        _ draft: ConversationMessageDraft,
+        intent: ConversationMessageWriteIntent
+    ) throws -> ConversationMessageUpsertResult {
         try database.withTransaction {
             try requireNonempty(draft.role, field: "message role")
             try validateSource(draft.source)
@@ -258,47 +263,49 @@ final class ConversationRepository {
 
             let existing = try messageForUpsert(draft)
             let messageID = existing?.id ?? draft.id
-            if let existing, existing.roomID != draft.roomID {
-                throw ConversationRepositoryError.integrity("Message identity already belongs to another room.")
-            }
+            if let existing { try validateMessageIdentity(existing, against: draft) }
             try validateMessageReferences(draft, messageID: messageID)
 
             if let existing {
-                var updateDraft = draft
-                updateDraft.source = draft.source ?? existing.source
-                updateDraft.sourceCreatedAt = draft.sourceCreatedAt ?? existing.sourceCreatedAt
                 let proposed = ConversationMessage(
-                    id: existing.id,
+                    id: draft.id,
                     roomID: draft.roomID,
-                    turnID: updateDraft.turnID,
-                    runtimeBindingID: updateDraft.runtimeBindingID,
-                    parentMessageID: updateDraft.parentMessageID,
+                    turnID: draft.turnID,
+                    runtimeBindingID: draft.runtimeBindingID,
+                    parentMessageID: draft.parentMessageID,
                     sequence: existing.sequence,
-                    role: updateDraft.role,
-                    contentText: updateDraft.contentText,
-                    status: updateDraft.status,
-                    finishReason: updateDraft.finishReason,
-                    source: updateDraft.source,
-                    sourceCreatedAt: updateDraft.sourceCreatedAt,
-                    metadata: updateDraft.metadata,
-                    createdAt: existing.createdAt,
+                    role: draft.role,
+                    contentText: draft.contentText,
+                    status: draft.status,
+                    finishReason: draft.finishReason,
+                    source: draft.source,
+                    sourceCreatedAt: draft.sourceCreatedAt,
+                    metadata: draft.metadata,
+                    createdAt: draft.createdAt,
                     updatedAt: existing.updatedAt
                 )
                 if samePersistedMessage(existing, proposed) {
                     return .init(disposition: .unchangedReplay, message: existing)
                 }
+
+                guard intent == .liveContinuation else {
+                    throw ConversationRepositoryError.integrity("Historical message replay conflicts with persisted values.")
+                }
+                try validateLiveContinuation(existing, against: draft)
+
                 let updatedAt = Date()
                 let statement = try database.prepare("""
                     UPDATE conversation_messages
-                    SET turn_id = ?, runtime_binding_id = ?, parent_message_id = ?,
-                        role = ?, content_text = ?, status = ?, finish_reason = ?,
-                        source_namespace = ?, source_message_id = ?, source_created_at = ?,
+                    SET content_text = ?, status = ?, finish_reason = ?,
                         metadata_json = ?, updated_at = ?
                     WHERE id = ?;
                     """)
-                bindMessageFields(updateDraft, to: statement, startingAt: 1)
-                statement.bind(DatabaseHelpers.encode(updatedAt), at: 12)
-                    .bind(existing.id.uuidString, at: 13)
+                statement.bind(draft.contentText, at: 1)
+                    .bind(draft.status.rawValue, at: 2)
+                    .bind(draft.finishReason?.rawValue, at: 3)
+                    .bind(DatabaseHelpers.encodeJSON(draft.metadata) ?? "{}", at: 4)
+                    .bind(DatabaseHelpers.encode(updatedAt), at: 5)
+                    .bind(existing.id.uuidString, at: 6)
                 try statement.step()
                 return .init(disposition: .updatedSameSource, message: try requiredMessage(id: existing.id))
             }
@@ -345,7 +352,7 @@ final class ConversationRepository {
                 guard draft.roomID == turn.roomID, draft.turnID == turn.id else {
                     throw ConversationRepositoryError.integrity("Snapshot messages must reference the snapshot turn and room.")
                 }
-                messages.append(try upsertMessage(draft).message)
+                messages.append(try upsertMessage(draft, intent: .historicalReplay).message)
             }
             return ConversationTurnSnapshot(turn: turn, messages: messages)
         }
@@ -435,6 +442,51 @@ final class ConversationRepository {
                 throw ConversationRepositoryError.integrity("Message parent would create a cycle.")
             }
             cursor = try requiredMessage(id: id).parentMessageID
+        }
+    }
+
+    private func validateMessageIdentity(
+        _ existing: ConversationMessage,
+        against draft: ConversationMessageDraft
+    ) throws {
+        guard existing.roomID == draft.roomID else {
+            throw ConversationRepositoryError.integrity("Message identity already belongs to another room.")
+        }
+        guard existing.id == draft.id else {
+            throw ConversationRepositoryError.integrity("Message source identity conflicts with its UUID.")
+        }
+        guard existing.source == draft.source else {
+            throw ConversationRepositoryError.integrity("Message UUID conflicts with its source identity.")
+        }
+    }
+
+    private func validateLiveContinuation(
+        _ existing: ConversationMessage,
+        against draft: ConversationMessageDraft
+    ) throws {
+        guard existing.turnID == draft.turnID,
+              existing.runtimeBindingID == draft.runtimeBindingID,
+              existing.parentMessageID == draft.parentMessageID,
+              existing.role == draft.role,
+              existing.sourceCreatedAt == draft.sourceCreatedAt,
+              existing.createdAt == draft.createdAt else {
+            throw ConversationRepositoryError.integrity("Live message continuation cannot change structural values.")
+        }
+        guard isValidMessageTransition(from: existing.status, to: draft.status) else {
+            throw ConversationRepositoryError.invalidMessageTransition(from: existing.status, to: draft.status)
+        }
+    }
+
+    private func isValidMessageTransition(
+        from: ConversationMessageStatus,
+        to: ConversationMessageStatus
+    ) -> Bool {
+        switch (from, to) {
+        case (.pending, .pending), (.pending, .streaming), (.pending, .complete), (.pending, .incomplete),
+             (.streaming, .streaming), (.streaming, .complete), (.streaming, .incomplete):
+            true
+        default:
+            false
         }
     }
 
@@ -544,7 +596,13 @@ final class ConversationRepository {
                 return existing
             }
         }
-        return try binding(id: draft.id)
+        if let existing = try binding(id: draft.id) {
+            guard existing.roomID == draft.roomID else {
+                throw ConversationRepositoryError.integrity("Runtime binding id already belongs to another room.")
+            }
+            return existing
+        }
+        return nil
     }
 
     private func turn(source: ConversationSourceIdentity) throws -> ConversationTurn? {
@@ -590,26 +648,13 @@ final class ConversationRepository {
         return try message(id: draft.id)
     }
 
-    private func bindMessageFields(_ draft: ConversationMessageDraft, to statement: SQLStatement, startingAt index: Int32) {
-        statement.bind(draft.turnID?.uuidString, at: index)
-            .bind(draft.runtimeBindingID?.uuidString, at: index + 1)
-            .bind(draft.parentMessageID?.uuidString, at: index + 2)
-            .bind(draft.role, at: index + 3)
-            .bind(draft.contentText, at: index + 4)
-            .bind(draft.status.rawValue, at: index + 5)
-            .bind(draft.finishReason?.rawValue, at: index + 6)
-            .bind(draft.source?.namespace, at: index + 7)
-            .bind(draft.source?.id, at: index + 8)
-            .bind(draft.sourceCreatedAt.map(DatabaseHelpers.encode), at: index + 9)
-            .bind(DatabaseHelpers.encodeJSON(draft.metadata) ?? "{}", at: index + 10)
-    }
-
     private func samePersistedMessage(_ lhs: ConversationMessage, _ rhs: ConversationMessage) -> Bool {
-        lhs.roomID == rhs.roomID && lhs.turnID == rhs.turnID &&
+        lhs.id == rhs.id && lhs.roomID == rhs.roomID && lhs.turnID == rhs.turnID &&
         lhs.runtimeBindingID == rhs.runtimeBindingID && lhs.parentMessageID == rhs.parentMessageID &&
         lhs.role == rhs.role && lhs.contentText == rhs.contentText && lhs.status == rhs.status &&
         lhs.finishReason == rhs.finishReason && lhs.source == rhs.source &&
-        lhs.sourceCreatedAt == rhs.sourceCreatedAt && lhs.metadata == rhs.metadata
+        lhs.sourceCreatedAt == rhs.sourceCreatedAt && lhs.metadata == rhs.metadata &&
+        lhs.createdAt == rhs.createdAt
     }
 
     private func decodeRoom(_ statement: SQLStatement) throws -> ConversationRoom {

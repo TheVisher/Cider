@@ -41,8 +41,8 @@ struct ConversationRepositoryTests {
         try withRepository { _, repository in
             let room = try repository.createRoom(roomDraft())
             let timestamp = Date(timeIntervalSince1970: 1_000)
-            let first = try repository.upsertMessage(.init(roomID: room.id, role: "user", contentText: "first", createdAt: timestamp))
-            let second = try repository.upsertMessage(.init(roomID: room.id, role: "assistant", contentText: "second", createdAt: timestamp))
+            let first = try repository.upsertMessage(.init(roomID: room.id, role: "user", contentText: "first", createdAt: timestamp), intent: .historicalReplay)
+            let second = try repository.upsertMessage(.init(roomID: room.id, role: "assistant", contentText: "second", createdAt: timestamp), intent: .historicalReplay)
 
             #expect(first.message.sequence == 1)
             #expect(second.message.sequence == 2)
@@ -57,9 +57,9 @@ struct ConversationRepositoryTests {
             let source = ConversationSourceIdentity(namespace: "hermes.export.v1", id: "session:message")
             let draft = ConversationMessageDraft(roomID: room.id, role: "user", contentText: "hello", source: source)
 
-            let inserted = try repository.upsertMessage(draft)
-            let replayed = try repository.upsertMessage(draft)
-            let local = try repository.upsertMessage(.init(roomID: room.id, role: "assistant", contentText: "next"))
+            let inserted = try repository.upsertMessage(draft, intent: .historicalReplay)
+            let replayed = try repository.upsertMessage(draft, intent: .historicalReplay)
+            let local = try repository.upsertMessage(.init(roomID: room.id, role: "assistant", contentText: "next"), intent: .historicalReplay)
 
             #expect(inserted.disposition == .inserted)
             #expect(replayed.disposition == .unchangedReplay)
@@ -96,13 +96,13 @@ struct ConversationRepositoryTests {
                 role: "user",
                 contentText: "Hermes",
                 source: .init(namespace: "hermes.export.v1", id: sharedID)
-            ))
+            ), intent: .historicalReplay)
             _ = try repository.upsertMessage(.init(
                 roomID: secondRoom.id,
                 role: "user",
                 contentText: "Codex",
                 source: .init(namespace: "codex.rollout.v1", id: sharedID)
-            ))
+            ), intent: .historicalReplay)
 
             #expect(throws: ConversationRepositoryError.self) {
                 try repository.upsertMessage(.init(
@@ -110,7 +110,7 @@ struct ConversationRepositoryTests {
                     role: "user",
                     contentText: "conflict",
                     source: .init(namespace: "hermes.export.v1", id: sharedID)
-                ))
+                ), intent: .historicalReplay)
             }
         }
     }
@@ -133,26 +133,323 @@ struct ConversationRepositoryTests {
         }
     }
 
+    @Test("Runtime binding UUID fallback rejects cross-room ownership before mutation")
+    func runtimeBindingUUIDFallbackRejectsCrossRoomOwnership() throws {
+        try withRepository { _, repository in
+            let firstRoom = try repository.createRoom(roomDraft())
+            let secondRoom = try repository.createRoom(roomDraft())
+            let bindingID = UUID()
+            let original = try repository.upsertRuntimeBinding(.init(
+                id: bindingID,
+                roomID: firstRoom.id,
+                runtimeID: "hermes",
+                transportID: "runs",
+                sourceNamespace: "hermes.runs.v1",
+                metadata: ["owner": "first"]
+            ))
+            let firstRoomBefore = try #require(try repository.room(id: firstRoom.id))
+            let secondRoomBefore = try #require(try repository.room(id: secondRoom.id))
+
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.upsertRuntimeBinding(.init(
+                    id: bindingID,
+                    roomID: secondRoom.id,
+                    runtimeID: "codex",
+                    transportID: "process",
+                    sourceNamespace: "codex.process.v1",
+                    externalSessionID: "external-lookup-miss",
+                    metadata: ["owner": "second"]
+                ))
+            }
+
+            #expect(try repository.bindings(roomID: firstRoom.id) == [original])
+            #expect(try repository.bindings(roomID: secondRoom.id).isEmpty)
+            #expect(try repository.room(id: firstRoom.id) == firstRoomBefore)
+            #expect(try repository.room(id: secondRoom.id) == secondRoomBefore)
+        }
+    }
+
+    @Test("Historical replay accepts only fully equivalent persisted messages")
+    func historicalReplayRequiresPersistedEquivalence() throws {
+        try withRepository { _, repository in
+            let room = try repository.createRoom(roomDraft())
+            let binding = try repository.upsertRuntimeBinding(.init(
+                roomID: room.id,
+                runtimeID: "hermes",
+                transportID: "runs",
+                sourceNamespace: "hermes.runs.v1"
+            ))
+            let turn = try repository.beginTurn(.init(roomID: room.id, runtimeBindingID: binding.id))
+            let parent = try repository.upsertMessage(.init(
+                roomID: room.id,
+                turnID: turn.id,
+                runtimeBindingID: binding.id,
+                role: "user",
+                contentText: "parent",
+                createdAt: Date(timeIntervalSince1970: 1_000)
+            ), intent: .historicalReplay).message
+            let createdAt = Date(timeIntervalSince1970: 2_000)
+            let sourceCreatedAt = Date(timeIntervalSince1970: 1_900)
+            let draft = ConversationMessageDraft(
+                id: UUID(),
+                roomID: room.id,
+                turnID: turn.id,
+                runtimeBindingID: binding.id,
+                parentMessageID: parent.id,
+                role: "assistant",
+                contentText: "historical",
+                status: .incomplete,
+                finishReason: .error,
+                source: .init(namespace: "hermes.export.v1", id: "session:message"),
+                sourceCreatedAt: sourceCreatedAt,
+                metadata: ["kind": "history"],
+                createdAt: createdAt
+            )
+            let inserted = try repository.upsertMessage(draft, intent: .historicalReplay)
+            let roomBefore = try #require(try repository.room(id: room.id))
+            let messagesBefore = try repository.messages(roomID: room.id)
+            let ancestryBefore = try repository.messages(roomID: room.id, throughHead: inserted.message.id)
+
+            let replay = try repository.upsertMessage(draft, intent: .historicalReplay)
+            #expect(replay.disposition == .unchangedReplay)
+            #expect(replay.message == inserted.message)
+            #expect(try repository.room(id: room.id) == roomBefore)
+
+            @MainActor
+            func expectRejected(_ conflicting: ConversationMessageDraft) throws {
+                #expect(throws: ConversationRepositoryError.self) {
+                    try repository.upsertMessage(conflicting, intent: .historicalReplay)
+                }
+                #expect(try repository.messages(roomID: room.id) == messagesBefore)
+                #expect(try repository.messages(roomID: room.id, throughHead: inserted.message.id) == ancestryBefore)
+                #expect(try repository.room(id: room.id) == roomBefore)
+            }
+
+            var conflict = draft
+            conflict.contentText = "changed"
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.role = "user"
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.parentMessageID = nil
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.status = .complete
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.finishReason = .length
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.metadata = ["kind": "changed"]
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.sourceCreatedAt = Date(timeIntervalSince1970: 1_901)
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.createdAt = Date(timeIntervalSince1970: 2_001)
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.turnID = nil
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.runtimeBindingID = nil
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.id = UUID()
+            try expectRejected(conflict)
+            conflict = draft
+            conflict.source = .init(namespace: "hermes.export.v1", id: "different")
+            try expectRejected(conflict)
+
+            let localID = UUID()
+            let localDraft = ConversationMessageDraft(
+                id: localID,
+                roomID: room.id,
+                role: "system",
+                contentText: "local",
+                createdAt: Date(timeIntervalSince1970: 3_000)
+            )
+            _ = try repository.upsertMessage(localDraft, intent: .historicalReplay)
+            let localRoomBefore = try #require(try repository.room(id: room.id))
+            let localMessagesBefore = try repository.messages(roomID: room.id)
+            var localConflict = localDraft
+            localConflict.contentText = "rewritten"
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.upsertMessage(localConflict, intent: .historicalReplay)
+            }
+            #expect(try repository.messages(roomID: room.id) == localMessagesBefore)
+            #expect(try repository.room(id: room.id) == localRoomBefore)
+        }
+    }
+
+    @Test("Live continuation advances active messages and rejects structural or terminal rewrites")
+    func liveContinuationStateMachineAndImmutability() throws {
+        try withRepository { _, repository in
+            let room = try repository.createRoom(roomDraft())
+            let binding = try repository.upsertRuntimeBinding(.init(
+                roomID: room.id,
+                runtimeID: "hermes",
+                transportID: "runs",
+                sourceNamespace: "hermes.runs.v1"
+            ))
+            let turn = try repository.beginTurn(.init(roomID: room.id, runtimeBindingID: binding.id))
+            let parent = try repository.upsertMessage(.init(
+                roomID: room.id,
+                turnID: turn.id,
+                runtimeBindingID: binding.id,
+                role: "user",
+                contentText: "prompt"
+            ), intent: .historicalReplay).message
+            let alternateParent = try repository.upsertMessage(.init(
+                roomID: room.id,
+                turnID: turn.id,
+                runtimeBindingID: binding.id,
+                role: "user",
+                contentText: "alternate"
+            ), intent: .historicalReplay).message
+            let messageID = UUID()
+            let source = ConversationSourceIdentity(namespace: "hermes.live.v1", id: "session:live")
+            let createdAt = Date(timeIntervalSince1970: 4_000)
+            let sourceCreatedAt = Date(timeIntervalSince1970: 3_900)
+            let pendingDraft = ConversationMessageDraft(
+                id: messageID,
+                roomID: room.id,
+                turnID: turn.id,
+                runtimeBindingID: binding.id,
+                parentMessageID: parent.id,
+                role: "assistant",
+                contentText: "",
+                status: .pending,
+                source: source,
+                sourceCreatedAt: sourceCreatedAt,
+                metadata: ["phase": "pending"],
+                createdAt: createdAt
+            )
+            let pending = try repository.upsertMessage(pendingDraft, intent: .liveContinuation).message
+
+            var streamingDraft = pendingDraft
+            streamingDraft.contentText = "partial"
+            streamingDraft.status = .streaming
+            streamingDraft.metadata = ["phase": "streaming"]
+            let streaming = try repository.upsertMessage(streamingDraft, intent: .liveContinuation).message
+            #expect(streaming.contentText == "partial")
+            #expect(streaming.status == .streaming)
+
+            var completeDraft = streamingDraft
+            completeDraft.contentText = "final"
+            completeDraft.status = .complete
+            completeDraft.finishReason = .stop
+            completeDraft.metadata = ["phase": "complete"]
+            let complete = try repository.upsertMessage(completeDraft, intent: .liveContinuation).message
+            #expect(complete.status == .complete)
+            #expect(complete.finishReason == .stop)
+            #expect(complete.id == pending.id)
+            #expect(complete.sequence == pending.sequence)
+            #expect(complete.createdAt == createdAt)
+            #expect(complete.sourceCreatedAt == sourceCreatedAt)
+            #expect(complete.parentMessageID == parent.id)
+
+            let terminalReplay = try repository.upsertMessage(completeDraft, intent: .liveContinuation)
+            #expect(terminalReplay.disposition == .unchangedReplay)
+            let terminalRoomBefore = try #require(try repository.room(id: room.id))
+            let terminalMessagesBefore = try repository.messages(roomID: room.id)
+            var terminalRewrite = completeDraft
+            terminalRewrite.contentText = "rewritten terminal"
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.upsertMessage(terminalRewrite, intent: .liveContinuation)
+            }
+            #expect(try repository.messages(roomID: room.id) == terminalMessagesBefore)
+            #expect(try repository.room(id: room.id) == terminalRoomBefore)
+
+            let incompleteFromPendingID = UUID()
+            var incompleteFromPending = pendingDraft
+            incompleteFromPending.id = incompleteFromPendingID
+            incompleteFromPending.source = .init(namespace: "hermes.live.v1", id: "session:pending-incomplete")
+            _ = try repository.upsertMessage(incompleteFromPending, intent: .liveContinuation)
+            incompleteFromPending.contentText = "cancelled"
+            incompleteFromPending.status = .incomplete
+            incompleteFromPending.finishReason = .cancelled
+            #expect(try repository.upsertMessage(incompleteFromPending, intent: .liveContinuation).message.status == .incomplete)
+
+            let incompleteFromStreamingID = UUID()
+            var incompleteFromStreaming = pendingDraft
+            incompleteFromStreaming.id = incompleteFromStreamingID
+            incompleteFromStreaming.source = .init(namespace: "hermes.live.v1", id: "session:streaming-incomplete")
+            _ = try repository.upsertMessage(incompleteFromStreaming, intent: .liveContinuation)
+            incompleteFromStreaming.contentText = "partial"
+            incompleteFromStreaming.status = .streaming
+            _ = try repository.upsertMessage(incompleteFromStreaming, intent: .liveContinuation)
+            incompleteFromStreaming.status = .incomplete
+            incompleteFromStreaming.finishReason = .error
+            #expect(try repository.upsertMessage(incompleteFromStreaming, intent: .liveContinuation).message.status == .incomplete)
+
+            let structuralID = UUID()
+            var structuralDraft = pendingDraft
+            structuralDraft.id = structuralID
+            structuralDraft.source = .init(namespace: "hermes.live.v1", id: "session:structural")
+            _ = try repository.upsertMessage(structuralDraft, intent: .liveContinuation)
+            let structuralRoomBefore = try #require(try repository.room(id: room.id))
+            let structuralMessagesBefore = try repository.messages(roomID: room.id)
+            let structuralAncestryBefore = try repository.messages(roomID: room.id, throughHead: structuralID)
+
+            @MainActor
+            func expectStructuralRejection(_ conflicting: ConversationMessageDraft) throws {
+                #expect(throws: ConversationRepositoryError.self) {
+                    try repository.upsertMessage(conflicting, intent: .liveContinuation)
+                }
+                #expect(try repository.messages(roomID: room.id) == structuralMessagesBefore)
+                #expect(try repository.messages(roomID: room.id, throughHead: structuralID) == structuralAncestryBefore)
+                #expect(try repository.room(id: room.id) == structuralRoomBefore)
+            }
+
+            var conflict = structuralDraft
+            conflict.role = "user"
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.parentMessageID = alternateParent.id
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.turnID = nil
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.runtimeBindingID = nil
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.createdAt = Date(timeIntervalSince1970: 4_001)
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.sourceCreatedAt = Date(timeIntervalSince1970: 3_901)
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.source = .init(namespace: "hermes.live.v1", id: "different")
+            try expectStructuralRejection(conflict)
+            conflict = structuralDraft
+            conflict.id = UUID()
+            try expectStructuralRejection(conflict)
+        }
+    }
+
     @Test("Message parents require an acyclic same-room ancestry")
     func parentIntegrity() throws {
         try withRepository { _, repository in
             let firstRoom = try repository.createRoom(roomDraft())
             let secondRoom = try repository.createRoom(roomDraft())
-            let root = try repository.upsertMessage(.init(roomID: firstRoom.id, role: "user", contentText: "root")).message
-            let child = try repository.upsertMessage(.init(roomID: firstRoom.id, parentMessageID: root.id, role: "assistant", contentText: "child")).message
+            let root = try repository.upsertMessage(.init(roomID: firstRoom.id, role: "user", contentText: "root"), intent: .historicalReplay).message
+            let child = try repository.upsertMessage(.init(roomID: firstRoom.id, parentMessageID: root.id, role: "assistant", contentText: "child"), intent: .historicalReplay).message
             #expect(try repository.messages(roomID: firstRoom.id, throughHead: child.id).map(\.id) == [root.id, child.id])
 
             #expect(throws: ConversationRepositoryError.self) {
-                try repository.upsertMessage(.init(roomID: firstRoom.id, parentMessageID: UUID(), role: "user", contentText: "missing"))
+                try repository.upsertMessage(.init(roomID: firstRoom.id, parentMessageID: UUID(), role: "user", contentText: "missing"), intent: .historicalReplay)
             }
             #expect(throws: ConversationRepositoryError.self) {
-                try repository.upsertMessage(.init(roomID: secondRoom.id, parentMessageID: root.id, role: "user", contentText: "cross-room"))
+                try repository.upsertMessage(.init(roomID: secondRoom.id, parentMessageID: root.id, role: "user", contentText: "cross-room"), intent: .historicalReplay)
             }
             #expect(throws: ConversationRepositoryError.self) {
-                try repository.upsertMessage(.init(id: root.id, roomID: firstRoom.id, parentMessageID: root.id, role: "user", contentText: "self"))
+                try repository.upsertMessage(.init(id: root.id, roomID: firstRoom.id, parentMessageID: root.id, role: "user", contentText: "self"), intent: .historicalReplay)
             }
             #expect(throws: ConversationRepositoryError.self) {
-                try repository.upsertMessage(.init(id: root.id, roomID: firstRoom.id, parentMessageID: child.id, role: "user", contentText: "cycle"))
+                try repository.upsertMessage(.init(id: root.id, roomID: firstRoom.id, parentMessageID: child.id, role: "user", contentText: "cycle"), intent: .historicalReplay)
             }
         }
     }
@@ -178,7 +475,7 @@ struct ConversationRepositoryTests {
                 contentText: "partial",
                 status: .incomplete,
                 finishReason: .error
-            )).message
+            ), intent: .historicalReplay).message
             let failedFinal = try repository.transitionTurn(
                 id: failed.id,
                 to: .failed,
@@ -197,7 +494,7 @@ struct ConversationRepositoryTests {
                 contentText: "cancelled partial",
                 status: .incomplete,
                 finishReason: .cancelled
-            )).message
+            ), intent: .historicalReplay).message
             _ = try repository.transitionTurn(id: partiallyCancelled.id, to: .cancelled, at: Date())
             #expect(try repository.messages(roomID: room.id).contains { $0.id == cancelledPartial.id && $0.contentText == "cancelled partial" })
 
@@ -226,7 +523,7 @@ struct ConversationRepositoryTests {
             #expect(try repository.turn(id: turnID) == nil)
             #expect(try repository.messages(roomID: room.id).isEmpty)
             let turn = try repository.beginTurn(.init(roomID: room.id))
-            let message = try repository.upsertMessage(.init(roomID: room.id, turnID: turn.id, role: "user", contentText: "after")).message
+            let message = try repository.upsertMessage(.init(roomID: room.id, turnID: turn.id, role: "user", contentText: "after"), intent: .historicalReplay).message
             #expect(turn.sequence == 1)
             #expect(message.sequence == 1)
         }

@@ -208,7 +208,7 @@ struct LegacyConversationImportPreviewTests {
                 sourceCreatedAt: timestamp,
                 metadata: missing.plan.messages[0].metadata,
                 createdAt: timestamp
-            ))
+            ), intent: .historicalReplay)
             let before = try fixture.databaseSnapshot()
 
             let equivalent = try fixture.service.preview()

@@ -175,6 +175,11 @@ enum ConversationMessageUpsertDisposition: String, Codable, Equatable, Sendable 
     case unchangedReplay
 }
 
+enum ConversationMessageWriteIntent: String, Codable, Equatable, Sendable {
+    case historicalReplay
+    case liveContinuation
+}
+
 struct ConversationMessageUpsertResult: Codable, Equatable, Sendable {
     var disposition: ConversationMessageUpsertDisposition
     var message: ConversationMessage
