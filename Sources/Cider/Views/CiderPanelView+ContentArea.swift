@@ -519,11 +519,7 @@ extension CiderPanelView {
     }
 
     var homeOverviewDashboard: some View {
-        let reviewQueue = CiderReviewQueueService()
-        let reviewModel = try? reviewQueue.homeDashboardReviewModel(
-            itemLimit: 30,
-            batchEnrichmentSampleLimit: 5
-        )
+        let reviewModel = homeDashboardReviewLoader.model
         let dateSuggestionResults = HomeOverviewDataProvider.bookmarkDateSuggestionResults(
             from: libraryViewModel.items
         )
@@ -561,6 +557,9 @@ extension CiderPanelView {
                 showNewItemPicker = true
             }
         )
+        .task {
+            await homeDashboardReviewLoader.loadIfNeeded()
+        }
     }
 
     var reviewQueueDashboard: some View {
@@ -618,16 +617,22 @@ extension CiderPanelView {
         _ reviewItem: HomeReviewCockpitItem,
         action: HomeReviewCockpitAction
     ) -> Bool {
+        let didChange: Bool
         switch action {
         case .accept:
-            return approveHomeReviewItem(reviewItem)
+            didChange = approveHomeReviewItem(reviewItem)
         case .reject:
-            return rejectHomeReviewItem(reviewItem)
+            didChange = rejectHomeReviewItem(reviewItem)
         case .deferReview:
-            return deferHomeReviewItem(reviewItem)
+            didChange = deferHomeReviewItem(reviewItem)
         case .openSource:
             return openDashboardReviewSource(reviewItem)
         }
+        if didChange {
+            homeDashboardReviewLoader.invalidate()
+            Task { await homeDashboardReviewLoader.loadIfNeeded() }
+        }
+        return didChange
     }
 
     private func approveHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
@@ -697,6 +702,8 @@ extension CiderPanelView {
     private func enrichHomeReviewBatch() -> Bool {
         do {
             _ = try CiderReviewQueueService().enrichBatch(actor: "user")
+            homeDashboardReviewLoader.invalidate()
+            Task { await homeDashboardReviewLoader.loadIfNeeded() }
             return true
         } catch {
             print("Failed to schedule Home review enrichment batch: \(error.localizedDescription)")

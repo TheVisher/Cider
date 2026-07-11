@@ -12,6 +12,7 @@ struct CiderPanelView: View {
     @ObservedObject var spaceStorage = CiderSpaceStorage.shared
     @ObservedObject var mediaItemStorage = MediaItemStorage()
     @StateObject var libraryViewModel = LibraryViewModel()
+    @StateObject var homeDashboardReviewLoader = HomeDashboardReviewLoader()
     @State var isCollapsed = false
     @State var selectedFolderID: UUID?
     @State var selectedItemIDs: Set<String> = []
