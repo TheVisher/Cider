@@ -94,4 +94,17 @@ struct JournalDetailMarkdownPresentationTests {
             "Leaving Journal should clear the rich-only presentation override so normal notes are unaffected."
         )
     }
+
+    @Test("journal capture card links use safe external and resolved internal navigation policies")
+    func journalCaptureCardLinksUseScopedNavigationPolicies() throws {
+        let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let journalViewsURL = repoRoot.appendingPathComponent("Sources/Cider/Views/Journal/JournalLibraryViews.swift")
+        let journalViews = try String(contentsOf: journalViewsURL, encoding: .utf8)
+
+        #expect(journalViews.contains(".environment(\\.openURL, OpenURLAction"))
+        #expect(journalViews.contains("openURLSafely(url)"))
+        #expect(journalViews.contains("isCanonicalItemResolvable: isCanonicalItemResolvable"))
+        #expect(journalViews.contains("onOpenCanonicalItem(ref)"))
+        #expect(journalViews.contains("return .discarded"))
+    }
 }

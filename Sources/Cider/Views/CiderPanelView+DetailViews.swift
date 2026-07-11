@@ -258,7 +258,9 @@ extension CiderPanelView {
             JournalDetailContentView(
                 projection: projection,
                 notesViewModel: notesViewModel,
-                selectedEntryID: $selectedJournalEntryID
+                selectedEntryID: $selectedJournalEntryID,
+                isCanonicalItemResolvable: isLinkedRefResolvable,
+                onOpenCanonicalItem: openLinkedRef
             )
 
             if journalNavigationVisible {

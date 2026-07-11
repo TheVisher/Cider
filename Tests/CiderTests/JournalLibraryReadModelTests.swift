@@ -366,6 +366,73 @@ struct JournalLibraryReadModelTests {
         #expect(day.editableEntry?.note.id == note.id)
     }
 
+    @Test("capture card exposes safe external Markdown links without changing source")
+    func captureCardExposesSafeExternalMarkdownLinks() throws {
+        let content = """
+        # Journal 06-03-2026
+
+        ## 08:15
+        Source: capture.add
+
+        Follow up with [Televero](https://televerohealth.com/).
+        """
+        let note = Note(
+            title: "Journal 06-03-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 06-03-2026.md"
+        )
+        let card = try #require(JournalLibraryReadModel.build(from: [note]).days.first?.captureCards.first)
+
+        #expect(card.links(isCanonicalItemResolvable: { _ in false }) == [
+            JournalCaptureLink(
+                label: "Televero",
+                destination: try #require(URL(string: "https://televerohealth.com/")),
+                target: .external(try #require(URL(string: "https://televerohealth.com/")))
+            )
+        ])
+        #expect(card.sourceEntry.content == content)
+        #expect(card.sourceContent.contains("[Televero](https://televerohealth.com/)"))
+    }
+
+    @Test("capture card exposes only explicit resolvable canonical Cider item links")
+    func captureCardExposesOnlyResolvableCanonicalCiderItemLinks() throws {
+        let resolvedID = UUID()
+        let unresolvedID = UUID()
+        let resolvedRef = LibraryEntityRef(type: .bookmark, entityID: resolvedID)
+        let content = """
+        # Journal 06-03-2026
+
+        ## 09:30
+        Source: capture.add
+
+        Revisit [saved article](cider://item/bookmark/\(resolvedID.uuidString)).
+        Keep Project Juniper plain text.
+        Do not link [missing note](cider://item/note/\(unresolvedID.uuidString)).
+        """
+        let note = Note(
+            title: "Journal 06-03-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 06-03-2026.md"
+        )
+        let card = try #require(JournalLibraryReadModel.build(from: [note]).days.first?.captureCards.first)
+
+        let links = card.links(isCanonicalItemResolvable: { $0 == resolvedRef })
+
+        #expect(links.count == 1)
+        #expect(links.first?.label == "saved article")
+        #expect(links.first?.target == .item(resolvedRef))
+        #expect(!links.contains { $0.label == "missing note" })
+        #expect(!links.contains { $0.label.contains("Juniper") })
+        let rendered = card.preparedMarkdown(
+            timestampFormat: .twentyFourHour,
+            isCanonicalItemResolvable: { $0 == resolvedRef }
+        )
+        #expect(rendered.contains("[saved article](cider://item/bookmark/\(resolvedID.uuidString))"))
+        #expect(rendered.contains("Do not link missing note."))
+        #expect(!rendered.contains("cider://item/note/\(unresolvedID.uuidString)"))
+        #expect(card.sourceEntry.content == content)
+    }
+
     @Test("single source without reliable capture boundaries is not fabricated into cards")
     func sourceWithoutReliableCaptureBoundariesRemainsUnsplit() throws {
         let content = """

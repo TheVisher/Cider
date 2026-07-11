@@ -241,6 +241,25 @@ extension CiderPanelView {
         }
     }
 
+    func isLinkedRefResolvable(_ ref: LibraryEntityRef) -> Bool {
+        switch ref.type {
+        case .bookmark:
+            bookmarksViewModel.bookmarks.contains { $0.id == ref.entityID }
+        case .note:
+            notesViewModel.notes.contains { $0.id == ref.entityID }
+        case .dateCard:
+            DateCardStorage.shared.dateCard(for: ref.entityID) != nil
+        case .contact:
+            ContactStorage.shared.contact(for: ref.entityID) != nil
+        case .todo:
+            TodoCardStorage.shared.todoCard(for: ref.entityID) != nil
+        case .vaultFile:
+            VaultFileService.shared.file(for: ref.entityID) != nil
+        case .externalFile, .session:
+            false
+        }
+    }
+
     func openHubNavigationTarget(_ target: LibraryHubNavigationTarget) {
         guard target.readOnly, !target.promotesTruth else { return }
         switch target {

@@ -63,6 +63,8 @@ struct JournalDetailContentView: View {
     let projection: JournalLibraryReadModel
     @ObservedObject var notesViewModel: NotesViewModel
     @Binding var selectedEntryID: String?
+    let isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+    let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     @State private var isEditingSource = false
 
     private var selectedDay: JournalLibraryDay? {
@@ -95,6 +97,8 @@ struct JournalDetailContentView: View {
                 if !selectedDay.captureCards.isEmpty, !isEditingSource {
                     JournalCaptureCardsView(
                         day: selectedDay,
+                        isCanonicalItemResolvable: isCanonicalItemResolvable,
+                        onOpenCanonicalItem: onOpenCanonicalItem,
                         onEditSource: selectedDay.editableEntry == nil ? nil : { isEditingSource = true }
                     )
                 } else {
@@ -139,6 +143,8 @@ struct JournalDetailContentView: View {
 
 private struct JournalCaptureCardsView: View {
     let day: JournalLibraryDay
+    let isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+    let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     let onEditSource: (() -> Void)?
 
     private var timestampFormat: JournalTimestampFormat {
@@ -181,8 +187,26 @@ private struct JournalCaptureCardsView: View {
                             .textSelection(.enabled)
 
                         MarkdownContentView(
-                            text: card.preparedMarkdown(timestampFormat: timestampFormat)
+                            text: card.preparedMarkdown(
+                                timestampFormat: timestampFormat,
+                                isCanonicalItemResolvable: isCanonicalItemResolvable
+                            )
                         )
+                        .environment(\.openURL, OpenURLAction { destination in
+                            switch JournalCaptureLink.target(
+                                for: destination,
+                                isCanonicalItemResolvable: isCanonicalItemResolvable
+                            ) {
+                            case .external(let url):
+                                openURLSafely(url)
+                                return .handled
+                            case .item(let ref):
+                                onOpenCanonicalItem(ref)
+                                return .handled
+                            case nil:
+                                return .discarded
+                            }
+                        })
                     }
                     .padding(Spacing.md)
                     .frame(maxWidth: .infinity, alignment: .leading)
