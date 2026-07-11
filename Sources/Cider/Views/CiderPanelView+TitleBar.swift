@@ -148,6 +148,8 @@ extension CiderPanelView {
             guard selectedNavigationDomain == .projects else { return nil }
         case .spaces:
             guard selectedNavigationDomain == .spaces else { return nil }
+        case .rooms:
+            guard selectedNavigationDomain == .aiAssistant else { return nil }
         case .ai:
             guard selectedNavigationDomain == .aiAssistant else { return nil }
         case .journal:

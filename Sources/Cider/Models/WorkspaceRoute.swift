@@ -6,6 +6,7 @@ enum WorkspaceRoute: Hashable, Codable {
     case library(LibraryRoute)
     case projects(ProjectRoute)
     case spaces(SpaceRoute)
+    case rooms
     case ai
     case journal
 }
@@ -157,6 +158,7 @@ enum WorkspaceRouteContentKind: Equatable {
     case projectSurface(projectID: String, surface: ProjectWorkspaceSurface)
     case spacesOverview(spaceID: String)
     case spacesManager
+    case agentRooms
     case aiAssistant
     case journal
 }
@@ -214,6 +216,15 @@ struct WorkspaceRoutePresentation: Equatable {
             return projectPresentation(for: projectRoute)
         case .spaces(let spaceRoute):
             return spacePresentation(for: spaceRoute)
+        case .rooms:
+            return WorkspaceRoutePresentation(
+                sidebarDomain: .aiAssistant,
+                title: "Rooms",
+                systemImage: "bubble.left.and.bubble.right",
+                contentKind: .agentRooms,
+                visibleItemScope: .none,
+                showsLibraryViewOptions: false
+            )
         case .ai:
             return WorkspaceRoutePresentation(
                 sidebarDomain: .aiAssistant,
@@ -486,6 +497,8 @@ enum WorkspaceRouteChromePolicy {
             return "Create, pin, and manage Spaces"
         case .spaces:
             return "Space"
+        case .rooms:
+            return "Durable agent threads and activity"
         case .ai:
             return WorkspaceNavigationDomain.aiAssistant.subtitle
         case .journal:
@@ -708,6 +721,8 @@ enum WorkspaceRouteSidebarProjection {
             return projectState(for: projectRoute)
         case .spaces(let spaceRoute):
             return spaceState(for: spaceRoute)
+        case .rooms:
+            return WorkspaceRouteSidebarState(selectedNavigationDomain: .aiAssistant)
         case .ai:
             return WorkspaceRouteSidebarState(selectedNavigationDomain: .aiAssistant)
         case .journal:

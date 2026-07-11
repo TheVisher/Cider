@@ -39,10 +39,12 @@ extension CiderPanelView {
     @ViewBuilder
     func domainSidebarContent(for domain: WorkspaceNavigationDomain) -> some View {
         if domain == .aiAssistant {
-            AIAssistantDomainSidebarView(
-                isChatListActive: workspaceRouter.currentRoute == .ai,
-                onOpenAssistant: openOrSelectAIAssistantTab
-            )
+            if workspaceRouter.currentRoute == .ai {
+                AIAssistantDomainSidebarView(
+                    isChatListActive: true,
+                    onOpenAssistant: openOrSelectAIAssistantTab
+                )
+            }
         } else if domain == .projects {
             ProjectsDomainSidebarView(
                 catalog: projectWorkspaceCatalog,

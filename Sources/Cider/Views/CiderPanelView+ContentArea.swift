@@ -409,6 +409,13 @@ extension CiderPanelView {
                     onCreateSpace: createSpace,
                     onOpenSpace: openSpace
                 )
+            case .agentRooms:
+                AgentRoomsWorkspaceView(
+                    state: AgentRoomsFixtureProvider.workspaceState,
+                    onOpenLiveChat: {
+                        requestFloat(.aiAssistant)
+                    }
+                )
             case .aiAssistant:
                 AIAssistantPanelView(
                     viewModel: AIAssistantViewModel.shared,

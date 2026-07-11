@@ -18,6 +18,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             .projects(.home),
             .review,
             .spaces(.manager),
+            .rooms,
             .ai,
         ]
 
@@ -34,7 +35,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
     }
 
     func testColdProcessLaunchIgnoresPriorSessionRouteAndOpensHome() {
-        for priorRoute in [WorkspaceRoute.journal, .library(.files), .projects(.home), .ai] {
+        for priorRoute in [WorkspaceRoute.journal, .library(.files), .projects(.home), .rooms, .ai] {
             XCTAssertEqual(
                 CiderMainWindowRouteLifecyclePolicy.route(
                     for: .coldProcessLaunch,
@@ -57,6 +58,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             )),
             .projects(.workspace(projectID: "cider", section: .qa)),
             .spaces(.overview(spaceID: "media-space")),
+            .rooms,
             .ai,
             .journal,
         ]
@@ -185,6 +187,7 @@ final class WorkspaceRouteTransitionPolicyTests: XCTestCase {
             (.projects(.workspace(projectID: "cider", section: .plans)), .projects, .projectSurface(projectID: "cider", surface: .plansHandoffs)),
             (.spaces(.overview(spaceID: "media-space")), .browse, .spacesOverview(spaceID: "media-space")),
             (.spaces(.manager), .browse, .spacesManager),
+            (.rooms, .aiAssistant, .agentRooms),
             (.ai, .aiAssistant, .aiAssistant),
             (.journal, .journal, .journal),
         ]

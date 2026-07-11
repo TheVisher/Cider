@@ -117,6 +117,15 @@ final class WorkspaceRouteChromePolicyTests: XCTestCase {
                 )
             ),
             (
+                .rooms,
+                WorkspaceRouteChrome(
+                    title: "Rooms",
+                    subtitle: "Durable agent threads and activity",
+                    systemImage: "bubble.left.and.bubble.right",
+                    showsLibraryViewOptions: false
+                )
+            ),
+            (
                 .ai,
                 WorkspaceRouteChrome(
                     title: "Main Brain",

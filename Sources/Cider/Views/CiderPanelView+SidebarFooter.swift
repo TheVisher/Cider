@@ -26,7 +26,7 @@ extension CiderPanelView {
                     showNewItemPicker.toggle()
                 },
                 onOpenAI: {
-                    openOrSelectAIAssistantTab()
+                    navigateToWorkspaceRoute(.rooms)
                 }
             ) {
                 expandedViewOptionsButton

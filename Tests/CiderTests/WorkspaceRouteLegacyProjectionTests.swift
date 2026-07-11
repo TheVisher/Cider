@@ -2,6 +2,14 @@ import XCTest
 @testable import Cider
 
 final class WorkspaceRouteSidebarProjectionTests: XCTestCase {
+    func testRoomsUsesHiddenAICompatibilitySelectionWithoutBecomingMainBrain() {
+        let rooms = WorkspaceRouteSidebarProjection.state(for: .rooms)
+
+        XCTAssertEqual(rooms.selectedNavigationDomain, .aiAssistant)
+        XCTAssertEqual(WorkspaceRoutePresentation.presentation(for: .rooms).contentKind, .agentRooms)
+        XCTAssertNotEqual(WorkspaceRoutePresentation.presentation(for: .rooms).contentKind, .aiAssistant)
+    }
+
     func testLibraryRoutesProjectToSidebarState() {
         let folderID = UUID()
         let tagID = UUID()
