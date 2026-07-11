@@ -57,6 +57,39 @@ enum StorageType: String, CaseIterable {
 }
 
 enum StoragePaths {
+    enum VaultStructureOperation: String, Equatable {
+        case createDirectory = "create directory"
+        case writeCompatibilityTemplate = "write compatibility template"
+    }
+
+    struct VaultStructureFailure: Equatable {
+        let operation: VaultStructureOperation
+        let path: String
+        let underlyingError: String
+    }
+
+    struct VaultStructureInitializationReport: Equatable {
+        let failures: [VaultStructureFailure]
+
+        var isFullyInitialized: Bool { failures.isEmpty }
+    }
+
+    struct VaultStructureFileSystem: Sendable {
+        let createDirectory: @Sendable (URL) throws -> Void
+        let fileExists: @Sendable (URL) -> Bool
+        let writeUTF8Atomically: @Sendable (String, URL) throws -> Void
+
+        static let live = VaultStructureFileSystem(
+            createDirectory: {
+                try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+            },
+            fileExists: { FileManager.default.fileExists(atPath: $0.path) },
+            writeUTF8Atomically: { content, url in
+                try content.write(to: url, atomically: true, encoding: .utf8)
+            }
+        )
+    }
+
     /// Hidden directory inside the vault root that holds all app-internal data.
     static let ciderInternalDir = ".cider"
 
@@ -175,39 +208,92 @@ enum StoragePaths {
         )
     }
 
-    /// Ensures all vault subdirectories exist (called on launch).
-    static func ensureVaultStructure(config: CiderConfig = CiderConfig.load()) {
+    /// Ensures all vault subdirectories exist (called on launch), returning every
+    /// operation that failed so callers never mistake partial initialization for success.
+    @discardableResult
+    static func ensureVaultStructure(
+        config: CiderConfig = CiderConfig.load(),
+        fileSystem: VaultStructureFileSystem = .live
+    ) -> VaultStructureInitializationReport {
+        var failures: [VaultStructureFailure] = []
         let vaultRoot = vaultDirectoryURL(config: config)
         // Create .cider/ parent first
-        ensureDirectory(vaultRoot.appendingPathComponent(ciderInternalDir))
+        createVaultDirectory(
+            vaultRoot.appendingPathComponent(ciderInternalDir),
+            fileSystem: fileSystem,
+            failures: &failures
+        )
         for type in StorageType.allCases {
-            ensureDirectory(directoryURL(for: type, config: config))
+            createVaultDirectory(
+                directoryURL(for: type, config: config),
+                fileSystem: fileSystem,
+                failures: &failures
+            )
         }
         // Create Inbox/ and its subfolders
         let inboxRoot = vaultRoot.appendingPathComponent(inboxDir)
-        ensureDirectory(inboxRoot)
+        createVaultDirectory(inboxRoot, fileSystem: fileSystem, failures: &failures)
         for type in StorageType.allCases {
             if type.inboxSubfolderName != nil {
-                ensureDirectory(inboxSubdirectoryURL(for: type, config: config))
+                createVaultDirectory(
+                    inboxSubdirectoryURL(for: type, config: config),
+                    fileSystem: fileSystem,
+                    failures: &failures
+                )
             }
         }
         // Create Spaces/ so user-owned contexts are Finder-visible even before the first Space is created.
-        ensureDirectory(vaultRoot.appendingPathComponent(spacesDir))
+        createVaultDirectory(
+            vaultRoot.appendingPathComponent(spacesDir),
+            fileSystem: fileSystem,
+            failures: &failures
+        )
         // Create agent memory directories
         let memoryDir = vaultRoot.appendingPathComponent(ciderInternalDir).appendingPathComponent("memory")
-        ensureDirectory(memoryDir)
-        ensureDirectory(memoryDir.appendingPathComponent("daily"))
-        ensureDirectory(memoryDir.appendingPathComponent("concepts"))
-        ensureDirectory(memoryDir.appendingPathComponent("reviews"))
-        seedMemoryTemplates(memoryDir: memoryDir)
+        createVaultDirectory(memoryDir, fileSystem: fileSystem, failures: &failures)
+        createVaultDirectory(
+            memoryDir.appendingPathComponent("daily"),
+            fileSystem: fileSystem,
+            failures: &failures
+        )
+        createVaultDirectory(
+            memoryDir.appendingPathComponent("concepts"),
+            fileSystem: fileSystem,
+            failures: &failures
+        )
+        createVaultDirectory(
+            memoryDir.appendingPathComponent("reviews"),
+            fileSystem: fileSystem,
+            failures: &failures
+        )
+        seedMemoryTemplates(memoryDir: memoryDir, fileSystem: fileSystem, failures: &failures)
+        return VaultStructureInitializationReport(failures: failures)
+    }
+
+    private static func createVaultDirectory(
+        _ directoryURL: URL,
+        fileSystem: VaultStructureFileSystem,
+        failures: inout [VaultStructureFailure]
+    ) {
+        do {
+            try fileSystem.createDirectory(directoryURL)
+        } catch {
+            failures.append(VaultStructureFailure(
+                operation: .createDirectory,
+                path: directoryURL.path,
+                underlyingError: error.localizedDescription
+            ))
+        }
     }
 
     /// Seeds default memory template files if they don't already exist.
-    private static func seedMemoryTemplates(memoryDir: URL) {
-        let fm = FileManager.default
-
+    private static func seedMemoryTemplates(
+        memoryDir: URL,
+        fileSystem: VaultStructureFileSystem,
+        failures: inout [VaultStructureFailure]
+    ) {
         let indexURL = memoryDir.appendingPathComponent("index.md")
-        if !fm.fileExists(atPath: indexURL.path) {
+        if !fileSystem.fileExists(indexURL) {
             let content = """
             ---
             type: index
@@ -230,11 +316,16 @@ enum StoragePaths {
             ## Concepts (load on-demand when relevant)
             - *(none yet — add when synthesis needs emerge)*
             """
-            try? content.write(to: indexURL, atomically: true, encoding: .utf8)
+            writeCompatibilityTemplate(
+                content,
+                to: indexURL,
+                fileSystem: fileSystem,
+                failures: &failures
+            )
         }
 
         let openLoopsURL = memoryDir.appendingPathComponent("open_loops.md")
-        if !fm.fileExists(atPath: openLoopsURL.path) {
+        if !fileSystem.fileExists(openLoopsURL) {
             let content = """
             ---
             type: open-loops
@@ -245,11 +336,16 @@ enum StoragePaths {
 
             *(No obvious open loops detected yet.)*
             """
-            try? content.write(to: openLoopsURL, atomically: true, encoding: .utf8)
+            writeCompatibilityTemplate(
+                content,
+                to: openLoopsURL,
+                fileSystem: fileSystem,
+                failures: &failures
+            )
         }
 
         let userURL = memoryDir.appendingPathComponent("user.md")
-        if !fm.fileExists(atPath: userURL.path) {
+        if !fileSystem.fileExists(userURL) {
             let content = """
             ---
             type: user
@@ -265,11 +361,16 @@ enum StoragePaths {
 
             *(Agent will fill this in as it learns about you)*
             """
-            try? content.write(to: userURL, atomically: true, encoding: .utf8)
+            writeCompatibilityTemplate(
+                content,
+                to: userURL,
+                fileSystem: fileSystem,
+                failures: &failures
+            )
         }
 
         let agentURL = memoryDir.appendingPathComponent("agent.md")
-        if !fm.fileExists(atPath: agentURL.path) {
+        if !fileSystem.fileExists(agentURL) {
             let content = """
             ---
             type: agent
@@ -286,7 +387,29 @@ enum StoragePaths {
 
             *(Agent will fill this in as it learns your workflows)*
             """
-            try? content.write(to: agentURL, atomically: true, encoding: .utf8)
+            writeCompatibilityTemplate(
+                content,
+                to: agentURL,
+                fileSystem: fileSystem,
+                failures: &failures
+            )
+        }
+    }
+
+    private static func writeCompatibilityTemplate(
+        _ content: String,
+        to url: URL,
+        fileSystem: VaultStructureFileSystem,
+        failures: inout [VaultStructureFailure]
+    ) {
+        do {
+            try fileSystem.writeUTF8Atomically(content, url)
+        } catch {
+            failures.append(VaultStructureFailure(
+                operation: .writeCompatibilityTemplate,
+                path: url.path,
+                underlyingError: error.localizedDescription
+            ))
         }
     }
 

@@ -112,7 +112,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         AccessibilityHelpers.promptIfNeeded()
-        StoragePaths.ensureVaultStructure()
+        let vaultStructureReport = StoragePaths.ensureVaultStructure()
+        if !vaultStructureReport.isFullyInitialized {
+            let logger = Logger(
+                subsystem: Bundle.main.bundleIdentifier ?? "Cider",
+                category: "Startup"
+            )
+            for failure in vaultStructureReport.failures {
+                logger.error(
+                    "Vault initialization incomplete: \(failure.operation.rawValue, privacy: .public) at \(failure.path, privacy: .public): \(failure.underlyingError, privacy: .public)"
+                )
+            }
+        }
 
         // Open SQLite before any migration/reconcile/storage singleton can mutate
         // the vault. A stale build that cannot read the current schema must stop

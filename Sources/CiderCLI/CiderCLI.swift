@@ -673,7 +673,15 @@ struct CiderCLI {
         }
 
         // Initialize storage services
-        StoragePaths.ensureVaultStructure()
+        let vaultStructureReport = StoragePaths.ensureVaultStructure()
+        if !vaultStructureReport.isFullyInitialized {
+            let logger = Logger(subsystem: "Cider", category: "CLI")
+            for failure in vaultStructureReport.failures {
+                logger.error(
+                    "Vault initialization incomplete: \(failure.operation.rawValue, privacy: .public) at \(failure.path, privacy: .public): \(failure.underlyingError, privacy: .public)"
+                )
+            }
+        }
         CiderUsageAuditService.shared.recordCLI(command: command, subcommand: subcommand)
 
         // Open SQLite before any storage service is touched — services check

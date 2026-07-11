@@ -181,7 +181,12 @@ final class AgentDurableMemoryRecorder {
         do {
             try FileManager.default.createDirectory(at: memoryDirectory, withIntermediateDirectories: true)
             if !FileManager.default.fileExists(atPath: userURL.path) {
-                StoragePaths.ensureVaultStructure()
+                let report = StoragePaths.ensureVaultStructure()
+                for failure in report.failures {
+                    logger.error(
+                        "Durable-memory compatibility initialization incomplete: \(failure.operation.rawValue, privacy: .public) at \(failure.path, privacy: .public): \(failure.underlyingError, privacy: .public)"
+                    )
+                }
             }
 
             let existing = (try? String(contentsOf: userURL, encoding: .utf8)) ?? ""
