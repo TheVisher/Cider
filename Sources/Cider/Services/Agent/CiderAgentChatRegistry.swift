@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct CiderAgentChatRecord: Codable, Equatable, Sendable {
     var stableID: String
@@ -94,11 +95,29 @@ struct CiderAgentChatRecord: Codable, Equatable, Sendable {
     }
 }
 
-enum CiderAgentChatRegistryError: Error {
+enum CiderAgentChatRegistryError: Error, Equatable {
     case invalidStableID(String)
+    case persistence(ConversationShadowDiagnosticCode, String)
 }
 
 final class CiderAgentChatRegistry: @unchecked Sendable {
+    struct Persistence {
+        var encode: (CiderAgentChatRecord) throws -> Data
+        var writeAtomically: (Data, URL) throws -> Void
+        var read: (URL) throws -> Data
+
+        static func live() -> Persistence {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            return Persistence(
+                encode: { try encoder.encode($0) },
+                writeAtomically: { try $0.write(to: $1, options: .atomic) },
+                read: { try Data(contentsOf: $0) }
+            )
+        }
+    }
+
     static let shared = CiderAgentChatRegistry()
 
     static let mainBrainStableID = "cider.main"
@@ -109,23 +128,23 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
 
     private let storageDirectoryURL: URL
     private let fileManager: FileManager
-    private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let persistence: Persistence
+    private let now: () -> Date
     private let lock = NSLock()
 
     init(
         storageDirectoryURL: URL = StoragePaths.vaultDirectoryURL()
             .appendingPathComponent(StoragePaths.ciderInternalDir, isDirectory: true)
             .appendingPathComponent("agent-chats", isDirectory: true),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        persistence: Persistence = .live(),
+        now: @escaping () -> Date = Date.init
     ) {
         self.storageDirectoryURL = storageDirectoryURL
         self.fileManager = fileManager
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        self.encoder = encoder
+        self.persistence = persistence
+        self.now = now
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -195,7 +214,11 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         return record
     }
 
-    func saveMainBrain(_ record: CiderAgentChatRecord) throws {
+    @discardableResult
+    func saveMainBrain(
+        _ record: CiderAgentChatRecord,
+        generation: LegacyConversationWriteGeneration = .init()
+    ) throws -> LegacyRegistryWriteReceipt {
         guard record.stableID == Self.mainBrainStableID else {
             throw CiderAgentChatRegistryError.invalidStableID(record.stableID)
         }
@@ -203,7 +226,7 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         try ensureDirectory()
-        try saveUnlocked(record)
+        return try saveUnlocked(record, generation: generation)
     }
 
     func updateMainBrain(from state: HermesConversationState) throws -> CiderAgentChatRecord {
@@ -255,11 +278,15 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         return record
     }
 
-    func updateChat(_ record: CiderAgentChatRecord) throws {
+    @discardableResult
+    func updateChat(
+        _ record: CiderAgentChatRecord,
+        generation: LegacyConversationWriteGeneration = .init()
+    ) throws -> LegacyRegistryWriteReceipt {
         lock.lock()
         defer { lock.unlock() }
         try ensureDirectory()
-        try saveUnlocked(record)
+        return try saveUnlocked(record, generation: generation)
     }
 
     func archiveChat(stableID: String) throws {
@@ -303,7 +330,7 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
     }
 
     private func persistedDate() -> Date {
-        Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        Date(timeIntervalSince1970: floor(now().timeIntervalSince1970))
     }
 
     private func uniqueStableID(for title: String) throws -> String {
@@ -333,9 +360,62 @@ final class CiderAgentChatRegistry: @unchecked Sendable {
         try fileManager.createDirectory(at: storageDirectoryURL, withIntermediateDirectories: true)
     }
 
-    private func saveUnlocked(_ record: CiderAgentChatRecord) throws {
-        let data = try encoder.encode(record)
-        try data.write(to: recordURL(for: record.stableID), options: .atomic)
+    private func saveUnlocked(
+        _ record: CiderAgentChatRecord,
+        generation: LegacyConversationWriteGeneration
+    ) throws -> LegacyRegistryWriteReceipt {
+        let url = recordURL(for: record.stableID)
+        let priorBytes = try? Data(contentsOf: url)
+        let data: Data
+        do {
+            data = try persistence.encode(record)
+        } catch {
+            throw CiderAgentChatRegistryError.persistence(.primaryEncodeFailed, bounded(error))
+        }
+        do {
+            try persistence.writeAtomically(data, url)
+        } catch {
+            restore(at: url, priorBytes: priorBytes)
+            throw CiderAgentChatRegistryError.persistence(.primaryWriteFailed, bounded(error))
+        }
+        do {
+            let readBack = try persistence.read(url)
+            let decoded = try decoder.decode(CiderAgentChatRecord.self, from: readBack)
+            guard readBack == data, decoded == record else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let hash = SHA256.hash(data: readBack).map { String(format: "%02x", $0) }.joined()
+            let snapshot = LegacyRegistrySnapshot(
+                generation: generation,
+                record: decoded,
+                filename: url.lastPathComponent,
+                bytes: readBack,
+                sha256: hash
+            )
+            return LegacyRegistryWriteReceipt(
+                generation: generation,
+                conversationID: record.conversationID,
+                committedAt: now(),
+                filename: url.lastPathComponent,
+                sha256: hash,
+                snapshot: snapshot
+            )
+        } catch {
+            restore(at: url, priorBytes: priorBytes)
+            throw CiderAgentChatRegistryError.persistence(.primaryVerificationFailed, bounded(error))
+        }
+    }
+
+    private func restore(at url: URL, priorBytes: Data?) {
+        if let priorBytes {
+            try? priorBytes.write(to: url, options: .atomic)
+        } else {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    private func bounded(_ error: Error) -> String {
+        String(String(describing: error).prefix(512))
     }
 
     private func recordURL(for stableID: String) -> URL {

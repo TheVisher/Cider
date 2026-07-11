@@ -1,8 +1,11 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import Cider
 
 struct CiderAgentChatRegistryTests {
+    private struct TestFailure: Error {}
+
     @Test("empty registry does not create seeded Hermes main brain")
     func emptyRegistryDoesNotCreateSeededMainBrain() throws {
         let tempDir = try makeTemporaryDirectory()
@@ -241,6 +244,61 @@ struct CiderAgentChatRegistryTests {
         let chat = try registry.createHermesChat(title: "Cider Dashboard Worktree", scope: nil)
 
         #expect(CiderAgentChatRegistry.telegramResumeCommand(for: chat) == "/resume Cider Dashboard Worktree")
+    }
+
+    @Test("registry save returns a strict verified receipt and hash")
+    func verifiedRegistryReceipt() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let registry = CiderAgentChatRegistry(storageDirectoryURL: tempDir, now: { now })
+        let record = try registry.createMainBrain(from: HermesConversationState(
+            activeRuntimeSessionID: "session-a",
+            runtimeSessionLineage: ["session-a"],
+            title: "Cider",
+            source: "telegram"
+        ))
+        let generation = LegacyConversationWriteGeneration()
+
+        let receipt = try registry.saveMainBrain(record, generation: generation)
+
+        let url = tempDir.appendingPathComponent("cider.main.json")
+        let bytes = try Data(contentsOf: url)
+        let hash = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        #expect(receipt.generation == generation)
+        #expect(receipt.conversationID == record.conversationID)
+        #expect(receipt.snapshot.record == record)
+        #expect(receipt.snapshot.bytes == bytes)
+        #expect(receipt.sha256 == hash)
+    }
+
+    @Test("failed registry replacement restores prior bytes")
+    func failedRegistryReplacementPreservesPriorFile() throws {
+        let tempDir = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let seed = CiderAgentChatRegistry(storageDirectoryURL: tempDir)
+        var record = try seed.createMainBrain(from: HermesConversationState(
+            activeRuntimeSessionID: "session-a",
+            runtimeSessionLineage: ["session-a"],
+            title: "Cider",
+            source: "telegram"
+        ))
+        let url = tempDir.appendingPathComponent("cider.main.json")
+        let oldBytes = try Data(contentsOf: url)
+        record.activeRuntimeSessionID = "session-b"
+        record.runtimeSessionLineage.append("session-b")
+        var persistence = CiderAgentChatRegistry.Persistence.live()
+        persistence.writeAtomically = { data, destination in
+            try data.write(to: destination, options: .atomic)
+            throw TestFailure()
+        }
+        let failing = CiderAgentChatRegistry(storageDirectoryURL: tempDir, persistence: persistence)
+
+        #expect(throws: CiderAgentChatRegistryError.self) {
+            try failing.saveMainBrain(record)
+        }
+        #expect(try Data(contentsOf: url) == oldBytes)
+        #expect(try seed.loadMainBrain()?.activeRuntimeSessionID == "session-a")
     }
 
     private func makeTemporaryDirectory() throws -> URL {

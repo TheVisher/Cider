@@ -1,7 +1,7 @@
 import Foundation
 
 /// A message in an AI assistant conversation.
-struct AIAssistantMessage: Identifiable, Codable, Equatable {
+struct AIAssistantMessage: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let role: Role
     var content: String
@@ -11,7 +11,7 @@ struct AIAssistantMessage: Identifiable, Codable, Equatable {
     var sourceName: String?
     var attachments: [AIAssistantAttachment]
 
-    enum Role: String, Codable, Equatable {
+    enum Role: String, Codable, Equatable, Sendable {
         case user
         case assistant
     }
