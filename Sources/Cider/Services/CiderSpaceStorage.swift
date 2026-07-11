@@ -146,6 +146,30 @@ final class CiderSpaceStorage: ObservableObject {
         return space
     }
 
+    /// Resolves the sidebar's preset action idempotently. A repeated click opens
+    /// the already-managed preset space instead of manufacturing a numbered
+    /// directory. Direct `createSpace` calls intentionally keep their unique-name
+    /// behavior so an explicit same-name space remains a distinct user object.
+    @discardableResult
+    func createPresetSpaceIfNeeded(_ preset: CiderSpacePresetKind) throws -> CiderSpace {
+        guard preset != .blank else {
+            let defaults = CiderSpacePreset.defaults(for: preset)
+            return try createSpace(name: defaults.title, preset: preset, isPinned: true)
+        }
+
+        if var existing = spaces.first(where: { $0.preset == preset }) {
+            if !existing.isPinned {
+                existing.isPinned = true
+                try updateSpace(existing)
+                return spaces.first(where: { $0.id == existing.id }) ?? existing
+            }
+            return existing
+        }
+
+        let defaults = CiderSpacePreset.defaults(for: preset)
+        return try createSpace(name: defaults.title, preset: preset, isPinned: true)
+    }
+
     func updateSpace(_ space: CiderSpace) throws {
         guard let index = spaces.firstIndex(where: { $0.id == space.id }) else {
             throw CiderSpaceStorageError.missingSpace(space.id)

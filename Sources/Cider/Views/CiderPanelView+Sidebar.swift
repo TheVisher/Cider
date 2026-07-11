@@ -201,13 +201,8 @@ extension CiderPanelView {
     }
 
     func createSpace(_ preset: CiderSpacePresetKind) {
-        let defaults = CiderSpacePreset.defaults(for: preset)
         do {
-            let space = try spaceStorage.createSpace(
-                name: defaults.title,
-                preset: preset,
-                isPinned: true
-            )
+            let space = try spaceStorage.createPresetSpaceIfNeeded(preset)
             openSpace(space)
         } catch {
             print("Failed to create Space: \(error.localizedDescription)")

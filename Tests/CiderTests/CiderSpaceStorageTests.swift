@@ -79,6 +79,27 @@ final class CiderSpaceStorageTests: XCTestCase {
     }
 
     @MainActor
+    func testCreatePresetSpaceIfNeededIsIdempotent() throws {
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let storage = CiderSpaceStorage(vaultRoot: tempRoot)
+
+        let first = try storage.createPresetSpaceIfNeeded(.media)
+        let second = try storage.createPresetSpaceIfNeeded(.media)
+        let spaceDirectories = try FileManager.default.contentsOfDirectory(
+            at: tempRoot.appendingPathComponent("Spaces", isDirectory: true),
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
+
+        XCTAssertEqual(second.id, first.id)
+        XCTAssertEqual(storage.spaces.map(\.id), [first.id])
+        XCTAssertEqual(spaceDirectories.map(\.lastPathComponent), ["Media"])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: tempRoot.appendingPathComponent("Spaces/Media 2", isDirectory: true).path
+        ))
+    }
+
+    @MainActor
     func testUpdateSpacePreservesIDAndRootPath() throws {
         let tempRoot = try makeTempRoot()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
