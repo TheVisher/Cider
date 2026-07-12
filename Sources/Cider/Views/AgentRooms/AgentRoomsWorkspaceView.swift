@@ -4,6 +4,7 @@ import SwiftUI
 struct AgentRoomsWorkspaceView: View {
     let loadWorkspace: @MainActor () async -> AgentRoomsWorkspaceState
     let onOpenLiveChat: () -> Void
+    let onOpenCiderReference: (AgentRoomsCiderOpenRoute) -> Void
 
     @ObservedObject private var session: AgentRoomsSessionModel
     @ObservedObject private var liveChat: AgentRoomsLiveChatModel
@@ -20,10 +21,12 @@ struct AgentRoomsWorkspaceView: View {
     init(
         loadWorkspace: @escaping @MainActor () async -> AgentRoomsWorkspaceState,
         session: AgentRoomsSessionModel,
-        onOpenLiveChat: @escaping () -> Void
+        onOpenLiveChat: @escaping () -> Void,
+        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
     ) {
         self.loadWorkspace = loadWorkspace
         self.onOpenLiveChat = onOpenLiveChat
+        self.onOpenCiderReference = onOpenCiderReference
         _session = ObservedObject(wrappedValue: session)
         _liveChat = ObservedObject(wrappedValue: session.liveChat)
         _state = State(initialValue: .loading(authority: .canonicalIncomplete))
@@ -33,10 +36,12 @@ struct AgentRoomsWorkspaceView: View {
     init(
         state: AgentRoomsWorkspaceState,
         session: AgentRoomsSessionModel,
-        onOpenLiveChat: @escaping () -> Void
+        onOpenLiveChat: @escaping () -> Void,
+        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
     ) {
         self.loadWorkspace = { state }
         self.onOpenLiveChat = onOpenLiveChat
+        self.onOpenCiderReference = onOpenCiderReference
         _session = ObservedObject(wrappedValue: session)
         _liveChat = ObservedObject(wrappedValue: session.liveChat)
         _state = State(initialValue: state)
@@ -46,7 +51,8 @@ struct AgentRoomsWorkspaceView: View {
     init(
         state: AgentRoomsWorkspaceState,
         liveChat: AgentRoomsLiveChatModel = AgentRoomsLiveChatModel(transport: HermesRunTransport()),
-        onOpenLiveChat: @escaping () -> Void
+        onOpenLiveChat: @escaping () -> Void,
+        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
     ) {
         let session = AgentRoomsSessionModel(liveChat: liveChat)
         if case .loaded(_, _, let selectedRoomID) = state {
@@ -54,7 +60,12 @@ struct AgentRoomsWorkspaceView: View {
         } else if case .eligibleLoaded(_, _, let selectedRoomID, _) = state {
             session.selectedRoomID = selectedRoomID
         }
-        self.init(state: state, session: session, onOpenLiveChat: onOpenLiveChat)
+        self.init(
+            state: state,
+            session: session,
+            onOpenLiveChat: onOpenLiveChat,
+            onOpenCiderReference: onOpenCiderReference
+        )
     }
 
     private var selectedRoomID: String? {
@@ -645,6 +656,9 @@ struct AgentRoomsWorkspaceView: View {
 
                     if let receipt = room.transcript.receipt {
                         receiptRow(receipt)
+                        if let objectReceipt = receipt.objectReceipt {
+                            ciderObjectReceiptRow(objectReceipt)
+                        }
                     }
 
                     if let artifact = room.transcript.futureArtifact {
@@ -905,6 +919,72 @@ struct AgentRoomsWorkspaceView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label), \(value)")
+    }
+
+    private func ciderObjectReceiptRow(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Spacing.md) {
+                ciderObjectReceiptIdentity(receipt)
+                Spacer(minLength: Spacing.sm)
+                ciderObjectOpenButton(receipt)
+            }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ciderObjectReceiptIdentity(receipt)
+                ciderObjectOpenButton(receipt)
+            }
+        }
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceSubtle))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func ciderObjectReceiptIdentity(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: ciderObjectSymbol(receipt.kind))
+                .foregroundColor(CiderColors.controlAccent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(receipt.title)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+                Text(receipt.identifier)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                Text("\(receipt.provenance) · \(receipt.truthBoundary)")
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(2)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Source-backed Cider \(ciderObjectKindLabel(receipt.kind)), \(receipt.title), \(receipt.identifier), \(receipt.truthBoundary)")
+    }
+
+    private func ciderObjectSymbol(_ kind: AgentRoomsCiderObjectReceipt.Kind) -> String {
+        switch kind {
+        case .bookmark: "bookmark"
+        case .task: "checklist"
+        case .projectArtifact: "doc.text"
+        }
+    }
+
+    private func ciderObjectKindLabel(_ kind: AgentRoomsCiderObjectReceipt.Kind) -> String {
+        switch kind {
+        case .bookmark: "saved bookmark"
+        case .task: "task"
+        case .projectArtifact: "project artifact"
+        }
+    }
+
+    private func ciderObjectOpenButton(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
+        Button("Open") {
+            onOpenCiderReference(receipt.openRoute)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Open \(receipt.title) in Cider")
+        .help("Open this source-backed object in Cider")
     }
 
     private func receiptActivityRow(_ activity: AgentRoomsLiveActivity) -> some View {

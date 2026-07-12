@@ -433,6 +433,9 @@ extension CiderPanelView {
                     session: agentRoomsSession,
                     onOpenLiveChat: {
                         requestFloat(.aiAssistant)
+                    },
+                    onOpenCiderReference: { route in
+                        handleExternalOpenTarget(route.userInfo)
                     }
                 )
             case .aiAssistant:

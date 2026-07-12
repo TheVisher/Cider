@@ -68,6 +68,196 @@ struct AgentRoomsLiveChatModelTests {
         #expect(await transport.sentTexts() == ["Tonight?"])
     }
 
+    @Test("one explicit canonical task reference projects a bounded safe-open receipt")
+    func canonicalTaskReceipt() async throws {
+        let reference = HermesCiderReference(
+            kind: "task",
+            id: "8d2bd6",
+            title: "Show source-backed task receipts",
+            boardID: "2afee0",
+            projectID: nil,
+            artifactType: nil,
+            source: "cider",
+            sourceRef: "kanban_card:2afee0/8d2bd6"
+        )
+        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference]))
+
+        #expect(receipt.kind == .task)
+        #expect(receipt.title == "Show source-backed task receipts")
+        #expect(receipt.identifier == "Task · 8d2bd6")
+        #expect(receipt.provenance == "Cider canonical read")
+        #expect(receipt.truthBoundary == "Source-backed object, not transcript truth")
+        #expect(receipt.openRoute == .card(boardID: "2afee0", cardID: "8d2bd6"))
+        #expect(receipt.openRoute.userInfo == [
+            CiderExternalOpenBridge.Key.targetType: "card",
+            CiderExternalOpenBridge.Key.targetID: "8d2bd6",
+            CiderExternalOpenBridge.Key.boardID: "2afee0",
+        ])
+    }
+
+    @Test("one explicit canonical project artifact projects a native note route")
+    func canonicalArtifactReceipt() throws {
+        let noteID = UUID(uuidString: "80900000-0000-4000-8000-000000000001")!
+        let reference = HermesCiderReference(
+            kind: "project_artifact",
+            id: noteID.uuidString,
+            title: "Rooms receipt QA",
+            boardID: nil,
+            projectID: "cider",
+            artifactType: "qa",
+            source: "cider",
+            sourceRef: "note:\(noteID.uuidString)"
+        )
+        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference]))
+
+        #expect(receipt.kind == .projectArtifact)
+        #expect(receipt.identifier == "Cider · QA")
+        #expect(receipt.openRoute == .note(noteID: noteID))
+        #expect(receipt.openRoute.userInfo == [
+            CiderExternalOpenBridge.Key.targetType: "note",
+            CiderExternalOpenBridge.Key.targetID: noteID.uuidString,
+        ])
+    }
+
+    @Test("missing malformed ambiguous and non-Cider references fail closed")
+    func malformedReferencesFailClosed() {
+        let valid = HermesCiderReference(
+            kind: "task", id: "8d2bd6", title: "Task", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/8d2bd6"
+        )
+        let malformed = HermesCiderReference(
+            kind: "task", id: "../escape", title: "Task", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/../escape"
+        )
+        let nonCider = HermesCiderReference(
+            kind: "task", id: "8d2bd6", title: "Task", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "hermes-prose",
+            sourceRef: "kanban_card:2afee0/8d2bd6"
+        )
+
+        #expect(AgentRoomsCiderReceiptProjector.project([]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project([valid, valid]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project([malformed]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project([nonCider]) == nil)
+    }
+
+    @Test("projection is bounded and does not parse transcript prose")
+    func receiptProjectionIsBounded() throws {
+        let rawTitle = String(repeating: "Receipt ", count: 100)
+        let reference = HermesCiderReference(
+            kind: "task", id: "8d2bd6", title: rawTitle, boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/8d2bd6"
+        )
+        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference]))
+
+        #expect(receipt.title.count == AgentRoomsCiderReceiptProjector.maximumTitleLength)
+        #expect(AgentRoomsCiderReceiptProjector.maximumReferenceCount == 1)
+        #expect(AgentRoomsCiderReceiptProjector.project([
+            .init(
+                kind: "prose", id: "CID-809", title: "Open card 8d2bd6", boardID: nil,
+                projectID: nil, artifactType: nil, source: "cider", sourceRef: "CID-809"
+            )
+        ]) == nil)
+    }
+
+    @Test("valid terminal reference is attached only after terminal receipt validation")
+    func terminalReferenceProjection() async throws {
+        let reference = HermesCiderReference(
+            kind: "task", id: "8d2bd6", title: "Receipt task", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/8d2bd6"
+        )
+        let transport = RoomsScriptedTransport(
+            availability: .apiRuns,
+            scripts: [.success(
+                events: [.runStarted("run-ref")],
+                envelope: envelope(runID: "run-ref", user: "Open it", assistant: "Done", ciderReferences: [reference])
+            )]
+        )
+        let model = makeModel(transport)
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+
+        await model.send("Open it", selectedRoomID: roomID)
+
+        #expect(model.testRoom?.transcript.receipt?.objectReceipt?.openRoute == .card(boardID: "2afee0", cardID: "8d2bd6"))
+    }
+
+    @Test("current terminal output shape promotes one canonical saved bookmark to a native Open route")
+    func terminalSavedBookmarkURLProjection() async throws {
+        let bookmarkID = UUID(uuidString: "80900000-0000-4000-8000-000000000002")!
+        let backpackURL = URL(string: "https://chromeindustries.com/products/cohesive-35l-backpack")!
+        let assistant = """
+        I found the saved Chrome Industries Cohesive 35L Backpack:
+        https://chromeindustries.com/products/cohesive-35l-backpack
+        """
+        let transport = RoomsScriptedTransport(
+            availability: .apiRuns,
+            scripts: [.success(
+                events: [.runStarted("run-bookmark")],
+                envelope: envelope(runID: "run-bookmark", user: "Find my Chrome backpack", assistant: assistant)
+            )]
+        )
+        let model = makeModel(transport) { url in
+            url == backpackURL
+                ? [.init(id: bookmarkID, title: "Chrome Industries Cohesive 35L Backpack", url: backpackURL)]
+                : []
+        }
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+
+        await model.send("Find my Chrome backpack", selectedRoomID: roomID)
+
+        let receipt = try #require(model.testRoom?.transcript.receipt?.objectReceipt)
+        #expect(receipt.kind == .bookmark)
+        #expect(receipt.title == "Chrome Industries Cohesive 35L Backpack")
+        #expect(receipt.identifier == "Saved bookmark · chromeindustries.com")
+        #expect(receipt.openRoute == .bookmark(bookmarkID: bookmarkID))
+        #expect(receipt.openRoute.userInfo == [
+            CiderExternalOpenBridge.Key.targetType: "bookmark",
+            CiderExternalOpenBridge.Key.targetID: bookmarkID.uuidString,
+        ])
+    }
+
+    @Test("terminal URL fallback fails closed unless exactly one safe standalone URL has one canonical saved match")
+    func terminalSavedBookmarkURLFailClosed() {
+        let bookmarkID = UUID(uuidString: "80900000-0000-4000-8000-000000000003")!
+        let validURL = URL(string: "https://chromeindustries.com/products/cohesive-35l-backpack")!
+        let saved = AgentRoomsSavedBookmarkReference(id: bookmarkID, title: "Cohesive 35L Backpack", url: validURL)
+
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: "No source-backed URL here.",
+            matching: { _ in [saved] }
+        ) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: "https://chromeindustries.com/products/cohesive-35l-backpack extra prose",
+            matching: { _ in [saved] }
+        ) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: "The URL is https://chromeindustries.com/products/cohesive-35l-backpack but this line is prose.",
+            matching: { _ in [saved] }
+        ) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: "ftp://chromeindustries.com/products/cohesive-35l-backpack",
+            matching: { _ in [saved] }
+        ) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: "https://chromeindustries.com/products/cohesive-35l-backpack\nhttps://example.com/other",
+            matching: { _ in [saved] }
+        ) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: validURL.absoluteString,
+            matching: { _ in [] }
+        ) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: validURL.absoluteString,
+            matching: { _ in [saved, saved] }
+        ) == nil)
+    }
+
     @Test("incremental deltas are sanitized, bounded, and reconciled with the final assistant")
     func incrementalStreamingReconcilesFinal() async throws {
         let transport = RoomsGateTransport(
@@ -338,6 +528,7 @@ struct AgentRoomsLiveChatModelTests {
 
         #expect(appDelegate.contains("AgentRoomsSessionModel(transport: HermesRunTransport())"))
         #expect(composition.contains("session: agentRoomsSession"))
+        #expect(composition.contains("handleExternalOpenTarget(route.userInfo)"))
         #expect(!composition.contains("AgentRoomsLiveChatModel(transport:"))
         #expect(!composition.contains("AgentRoomsFixtureProvider"))
         #expect(!liveModel.contains("ConversationRepository"))
@@ -359,16 +550,27 @@ struct AgentRoomsLiveChatModelTests {
             "Retry failed message",
             "DisclosureGroup",
             "Turn activity receipt",
+            "Button(\"Open\")",
+            "Source-backed Cider",
+            "onOpenCiderReference(receipt.openRoute)",
             ".accessibilityElement(children: .contain)",
             "Legacy messaging stays disabled; Cider Test Chat remains separate.",
             "Open Live Chat",
         ] {
             #expect(view.contains(required))
         }
+        #expect(view.components(separatedBy: "Button(\"Open\")").count - 1 == 1)
     }
 
-    private func makeModel(_ transport: some HermesBridgeTransport) -> AgentRoomsLiveChatModel {
-        AgentRoomsLiveChatModel(transport: transport, turnCoordinator: HermesTurnCoordinator())
+    private func makeModel(
+        _ transport: some HermesBridgeTransport,
+        savedBookmarkMatches: @escaping @MainActor (URL) -> [AgentRoomsSavedBookmarkReference] = { _ in [] }
+    ) -> AgentRoomsLiveChatModel {
+        AgentRoomsLiveChatModel(
+            transport: transport,
+            turnCoordinator: HermesTurnCoordinator(),
+            savedBookmarkMatches: savedBookmarkMatches
+        )
     }
 }
 
@@ -468,7 +670,12 @@ private actor RoomsGateTransport: HermesBridgeTransport {
     }
 }
 
-private func envelope(runID: String, user: String, assistant: String) -> HermesRunCompletionEnvelope {
+private func envelope(
+    runID: String,
+    user: String,
+    assistant: String,
+    ciderReferences: [HermesCiderReference] = []
+) -> HermesRunCompletionEnvelope {
     let timestamp = Date(timeIntervalSince1970: 1_805_000_000)
     let sessionID = "session-805"
     let userSource = "hermes-run:\(runID):user"
@@ -502,6 +709,7 @@ private func envelope(runID: String, user: String, assistant: String) -> HermesR
             assistantSourceID: assistantSource,
             userSourceSessionID: sessionID,
             assistantSourceSessionID: sessionID
-        )
+        ),
+        ciderReferences: ciderReferences
     )
 }

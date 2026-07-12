@@ -148,7 +148,8 @@ struct HermesRunTransport: HermesBridgeTransport {
                 terminalSourceEvidence: terminalSourceEvidence(
                     reportedTerminalRunID: status.runID,
                     messages: finalMessages
-                )
+                ),
+                ciderReferences: status.ciderReferences
             ))
         case "cancelled":
             await onEvent?(.cancelled)

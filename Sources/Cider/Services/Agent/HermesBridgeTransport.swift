@@ -121,6 +121,25 @@ struct HermesTerminalSourceIdentityEvidence: Equatable, Sendable {
     let assistantSourceSessionID: String?
 }
 
+struct HermesCiderReference: Codable, Equatable, Sendable {
+    let kind: String
+    let id: String
+    let title: String
+    let boardID: String?
+    let projectID: String?
+    let artifactType: String?
+    let source: String
+    let sourceRef: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind, id, title, source
+        case boardID = "board_id"
+        case projectID = "project_id"
+        case artifactType = "artifact_type"
+        case sourceRef = "source_ref"
+    }
+}
+
 struct HermesRunCompletionEnvelope: Equatable, Sendable {
     let provenance: HermesTransportProvenance
     let runID: String?
@@ -131,6 +150,31 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
     let finalState: HermesConversationState
     let modelIdentity: String?
     let terminalSourceEvidence: HermesTerminalSourceIdentityEvidence
+    let ciderReferences: [HermesCiderReference]
+
+    init(
+        provenance: HermesTransportProvenance,
+        runID: String?,
+        terminalStatus: HermesRunTerminalStatus,
+        observedFacts: HermesRunObservedFacts,
+        finalSessionSynchronizationComplete: Bool,
+        finalMessages: [AIAssistantMessage],
+        finalState: HermesConversationState,
+        modelIdentity: String?,
+        terminalSourceEvidence: HermesTerminalSourceIdentityEvidence,
+        ciderReferences: [HermesCiderReference] = []
+    ) {
+        self.provenance = provenance
+        self.runID = runID
+        self.terminalStatus = terminalStatus
+        self.observedFacts = observedFacts
+        self.finalSessionSynchronizationComplete = finalSessionSynchronizationComplete
+        self.finalMessages = finalMessages
+        self.finalState = finalState
+        self.modelIdentity = modelIdentity
+        self.terminalSourceEvidence = terminalSourceEvidence
+        self.ciderReferences = ciderReferences
+    }
 
     var isEligibleForFutureShadowPersistence: Bool {
         HermesRunCompletionEligibility.isEligible(self)

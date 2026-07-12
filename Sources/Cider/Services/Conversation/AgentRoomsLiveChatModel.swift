@@ -18,6 +18,199 @@ struct AgentRoomsLiveActivity: Identifiable, Equatable, Sendable {
     let detail: String
 }
 
+enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
+    case bookmark(bookmarkID: UUID)
+    case card(boardID: String, cardID: String)
+    case note(noteID: UUID)
+
+    var userInfo: [String: String] {
+        switch self {
+        case .bookmark(let bookmarkID):
+            return [
+                CiderExternalOpenBridge.Key.targetType: "bookmark",
+                CiderExternalOpenBridge.Key.targetID: bookmarkID.uuidString,
+            ]
+        case .card(let boardID, let cardID):
+            return [
+                CiderExternalOpenBridge.Key.targetType: "card",
+                CiderExternalOpenBridge.Key.targetID: cardID,
+                CiderExternalOpenBridge.Key.boardID: boardID,
+            ]
+        case .note(let noteID):
+            return [
+                CiderExternalOpenBridge.Key.targetType: "note",
+                CiderExternalOpenBridge.Key.targetID: noteID.uuidString,
+            ]
+        }
+    }
+}
+
+struct AgentRoomsCiderObjectReceipt: Equatable, Sendable {
+    enum Kind: String, Equatable, Sendable { case bookmark, task, projectArtifact }
+
+    let kind: Kind
+    let title: String
+    let identifier: String
+    let provenance: String
+    let truthBoundary: String
+    let openRoute: AgentRoomsCiderOpenRoute
+}
+
+struct AgentRoomsSavedBookmarkReference: Equatable, Sendable {
+    let id: UUID
+    let title: String
+    let url: URL
+}
+
+@MainActor
+enum AgentRoomsCanonicalSavedBookmarkResolver {
+    static func matches(_ url: URL) -> [AgentRoomsSavedBookmarkReference] {
+        guard let candidate = VaultDuplicateAuditor.canonicalBookmarkURL(url.absoluteString) else { return [] }
+        return VaultBookmarkService.shared.bookmarks.compactMap { bookmark in
+            guard let saved = VaultDuplicateAuditor.canonicalBookmarkURL(bookmark.urlString),
+                  saved == candidate,
+                  let savedURL = bookmark.url
+            else { return nil }
+            return AgentRoomsSavedBookmarkReference(id: bookmark.id, title: bookmark.title, url: savedURL)
+        }
+    }
+}
+
+enum AgentRoomsCiderReceiptProjector {
+    static let maximumReferenceCount = 1
+    static let maximumTitleLength = 160
+    static let maximumIdentifierLength = 120
+    static let maximumURLLength = 2_048
+    static let provenance = "Cider canonical read"
+    static let truthBoundary = "Source-backed object, not transcript truth"
+
+    @MainActor
+    static func projectSavedBookmark(
+        terminalOutput: String,
+        matching: @MainActor (URL) -> [AgentRoomsSavedBookmarkReference]
+    ) -> AgentRoomsCiderObjectReceipt? {
+        guard terminalOutput.count <= AgentRoomsLiveChatModel.maximumStreamingMessageLength,
+              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return nil }
+
+        let fullRange = NSRange(terminalOutput.startIndex..<terminalOutput.endIndex, in: terminalOutput)
+        let detected = detector.matches(in: terminalOutput, options: [], range: fullRange)
+        guard detected.count == 1,
+              let match = detected.first,
+              let matchRange = Range(match.range, in: terminalOutput)
+        else { return nil }
+
+        let rawURL = String(terminalOutput[matchRange])
+        let standaloneLines = terminalOutput
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0 == rawURL }
+        guard standaloneLines.count == 1,
+              rawURL.count <= maximumURLLength,
+              !rawURL.unicodeScalars.contains(where: CharacterSet.whitespacesAndNewlines.contains),
+              var components = URLComponents(string: rawURL),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.user == nil,
+              components.password == nil,
+              let host = components.host?.lowercased(),
+              !host.isEmpty
+        else { return nil }
+
+        components.scheme = scheme
+        components.host = host
+        guard let url = components.url else { return nil }
+        let matches = matching(url)
+        guard matches.count == 1,
+              let bookmark = matches.first,
+              let candidateIdentity = VaultDuplicateAuditor.canonicalBookmarkURL(url.absoluteString),
+              VaultDuplicateAuditor.canonicalBookmarkURL(bookmark.url.absoluteString) == candidateIdentity,
+              let title = boundedTitle(bookmark.title)
+        else { return nil }
+
+        let displayHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return AgentRoomsCiderObjectReceipt(
+            kind: .bookmark,
+            title: title,
+            identifier: "Saved bookmark · \(displayHost)",
+            provenance: provenance,
+            truthBoundary: truthBoundary,
+            openRoute: .bookmark(bookmarkID: bookmark.id)
+        )
+    }
+
+    static func project(_ references: [HermesCiderReference]) -> AgentRoomsCiderObjectReceipt? {
+        guard references.count == maximumReferenceCount,
+              let reference = references.first,
+              reference.source == "cider",
+              let id = identifier(reference.id),
+              let title = boundedTitle(reference.title)
+        else { return nil }
+
+        switch reference.kind {
+        case "task":
+            guard reference.projectID == nil,
+                  reference.artifactType == nil,
+                  let boardID = identifier(reference.boardID),
+                  reference.sourceRef == "kanban_card:\(boardID)/\(id)"
+            else { return nil }
+            return AgentRoomsCiderObjectReceipt(
+                kind: .task,
+                title: title,
+                identifier: "Task · \(id)",
+                provenance: provenance,
+                truthBoundary: truthBoundary,
+                openRoute: .card(boardID: boardID, cardID: id)
+            )
+        case "project_artifact":
+            guard reference.boardID == nil,
+                  let noteID = UUID(uuidString: id),
+                  let projectID = identifier(reference.projectID),
+                  let artifactType = identifier(reference.artifactType),
+                  reference.sourceRef == "note:\(id)"
+            else { return nil }
+            return AgentRoomsCiderObjectReceipt(
+                kind: .projectArtifact,
+                title: title,
+                identifier: "\(displayName(projectID)) · \(displayName(artifactType))",
+                provenance: provenance,
+                truthBoundary: truthBoundary,
+                openRoute: .note(noteID: noteID)
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func identifier(_ raw: String?) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value.count <= maximumIdentifierLength,
+              value.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+              })
+        else { return nil }
+        return value
+    }
+
+    private static func boundedTitle(_ raw: String) -> String? {
+        let scalars = raw.unicodeScalars.filter {
+            $0 == "\n" || $0 == "\t" || !CharacterSet.controlCharacters.contains($0)
+        }
+        let title = String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        return String(title.prefix(maximumTitleLength))
+    }
+
+    private static func displayName(_ identifier: String) -> String {
+        if identifier.count <= 2 { return identifier.uppercased() }
+        return identifier
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+    }
+}
+
 struct AgentRoomsTranscriptFollowPolicy: Equatable, Sendable {
     static let nearBottomDistance: CGFloat = 72
     private(set) var shouldAutoScrollForNewContent = true
@@ -51,6 +244,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     private let transport: any HermesBridgeTransport
     private let turnCoordinator: HermesTurnCoordinator
+    private let savedBookmarkMatches: @MainActor (URL) -> [AgentRoomsSavedBookmarkReference]
     private let makeID: @MainActor () -> UUID
     private let now: @MainActor () -> Date
 
@@ -70,11 +264,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     init(
         transport: any HermesBridgeTransport,
         turnCoordinator: HermesTurnCoordinator = .shared,
+        savedBookmarkMatches: @escaping @MainActor (URL) -> [AgentRoomsSavedBookmarkReference] = {
+            AgentRoomsCanonicalSavedBookmarkResolver.matches($0)
+        },
         makeID: @escaping @MainActor () -> UUID = UUID.init,
         now: @escaping @MainActor () -> Date = Date.init
     ) {
         self.transport = transport
         self.turnCoordinator = turnCoordinator
+        self.savedBookmarkMatches = savedBookmarkMatches
         self.makeID = makeID
         self.now = now
     }
@@ -404,6 +602,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         }
         transportMessages = completion.finalMessages
         conversationState = completion.finalState
+        let objectReceipt = completion.ciderReferences.isEmpty
+            ? AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+                terminalOutput: assistant.content,
+                matching: savedBookmarkMatches
+            )
+            : AgentRoomsCiderReceiptProjector.project(completion.ciderReferences)
         receipt = .init(
             id: "cider-room-receipt:\(runID)",
             title: "Hermes completed a live turn",
@@ -413,7 +617,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             sourceBackedTransport: true,
             sourceIdentity: Self.receiptSourceIdentity,
             runIdentity: sanitized(runID, limit: Self.maximumRunIdentityLength),
-            activity: liveActivity
+            activity: liveActivity,
+            objectReceipt: objectReceipt
         )
     }
 

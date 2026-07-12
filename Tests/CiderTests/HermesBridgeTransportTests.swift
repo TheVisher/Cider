@@ -3,6 +3,47 @@ import Testing
 @testable import Cider
 
 struct HermesBridgeTransportTests {
+    @MainActor
+    @Test("production Runs completion projects the real tracked backpack bookmark into an Open receipt")
+    func productionRunsCompletionProjectsTrackedBackpackBookmark() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HermesRunTransportURLProtocol.self]
+        let transport = HermesRunTransport(
+            apiClient: HermesAPIClient(
+                baseURL: URL(string: "https://backpack.invalid")!,
+                apiKey: nil,
+                session: URLSession(configuration: configuration)
+            ),
+            fallbackService: HermesSessionService()
+        )
+        let saved = AgentRoomsSavedBookmarkReference(
+            id: UUID(uuidString: "7ED86324-2913-4380-935B-39A4B2C0E066")!,
+            title: "Cohesive 2.0 38L Pack",
+            url: URL(string: "https://chromeindustries.com/products/cohesive-2-0-38l-pack?_kx=ysfLHMryHXrUFPlLqSSjJTYoPgmPGthSU2ocd8ZnNi8.SCV5Ym&variant=43962733953084")!
+        )
+        let session = AgentRoomsSessionModel(
+            liveChat: AgentRoomsLiveChatModel(
+                transport: transport,
+                turnCoordinator: HermesTurnCoordinator(),
+                savedBookmarkMatches: { candidate in
+                    guard let candidateIdentity = VaultDuplicateAuditor.canonicalBookmarkURL(candidate.absoluteString),
+                          VaultDuplicateAuditor.canonicalBookmarkURL(saved.url.absoluteString) == candidateIdentity
+                    else { return [] }
+                    return [saved]
+                }
+            )
+        )
+
+        await session.startTestChat()
+        let roomID = try #require(session.selectedRoomID)
+        await session.liveChat.send("what's the backpack bookmark I saved?", selectedRoomID: roomID)
+
+        let receipt = try #require(session.liveChat.testRoom?.transcript.receipt?.objectReceipt)
+        #expect(receipt.kind == .bookmark)
+        #expect(receipt.title == "Cohesive 2.0 38L Pack")
+        #expect(receipt.openRoute == .bookmark(bookmarkID: saved.id))
+    }
+
     @Test("Runs transport returns the exact immutable terminal completion envelope")
     func runsTransportReturnsTerminalEnvelope() async throws {
         let configuration = URLSessionConfiguration.ephemeral
@@ -44,6 +85,18 @@ struct HermesBridgeTransportTests {
         #expect(result.state.runtimeSessionLineage == ["parent-session", "session-780"])
         #expect(result.state.lastSyncedMessageID == "hermes-run:run-780:assistant")
         #expect(result.completion.terminalSourceEvidence.reportedTerminalRunID == "run-780")
+        #expect(result.completion.ciderReferences == [
+            HermesCiderReference(
+                kind: "task",
+                id: "card-780",
+                title: "Transport-backed task",
+                boardID: "board-780",
+                projectID: nil,
+                artifactType: nil,
+                source: "cider",
+                sourceRef: "kanban_card:board-780/card-780"
+            )
+        ])
         #expect(result.completion.isEligibleForFutureShadowPersistence)
         #expect(await recorder.snapshot() == [
             .runStarted("run-780"),
@@ -430,6 +483,11 @@ private final class HermesRunTransportURLProtocol: URLProtocol, @unchecked Senda
                 data: {"event":"run.cancelled","run_id":"run-780"}
 
                 """
+            } else if url.host == "backpack.invalid" {
+                body = """
+                data: {"event":"run.completed","run_id":"run-780","output":"You saved the Chrome Industries “Cohesive 2.0 38L Pack.”\\n\\nIt’s a 38-liter backpack with dual main compartments, a padded laptop sleeve, recycled/PFAS-free materials, and a lifetime warranty.\\n\\nhttps://chromeindustries.com/products/cohesive-2-0-38l-pack?variant=43962733953084"}
+
+                """
             } else {
                 body = """
                 data: {"event":"run.completed","run_id":"run-780","output":"Hi"}
@@ -441,8 +499,10 @@ private final class HermesRunTransportURLProtocol: URLProtocol, @unchecked Senda
             contentType = "application/json"
             if url.host == "cancelled.invalid" {
                 body = #"{"object":"run","run_id":"run-780","status":"cancelled","session_id":"session-780"}"#
+            } else if url.host == "backpack.invalid" {
+                body = #"{"object":"hermes.run","run_id":"run-780","status":"completed","session_id":"session-780","output":"You saved the Chrome Industries “Cohesive 2.0 38L Pack.”\n\nIt’s a 38-liter backpack with dual main compartments, a padded laptop sleeve, recycled/PFAS-free materials, and a lifetime warranty.\n\nhttps://chromeindustries.com/products/cohesive-2-0-38l-pack?variant=43962733953084","usage":{"input_tokens":126640,"output_tokens":383,"total_tokens":127023},"last_event":"run.completed"}"#
             } else {
-                body = #"{"object":"run","run_id":"run-780","status":"completed","session_id":"session-780","output":"Hi"}"#
+                body = #"{"object":"run","run_id":"run-780","status":"completed","session_id":"session-780","output":"Hi","cider_references":[{"kind":"task","id":"card-780","title":"Transport-backed task","board_id":"board-780","source":"cider","source_ref":"kanban_card:board-780/card-780"}]}"#
             }
         default:
             status = 404

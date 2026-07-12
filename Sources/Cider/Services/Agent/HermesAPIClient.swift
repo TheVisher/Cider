@@ -50,6 +50,7 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
     let sessionID: String?
     let output: String?
     let error: String?
+    let ciderReferences: [HermesCiderReference]
 
     enum CodingKeys: String, CodingKey {
         case object
@@ -58,6 +59,18 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
         case sessionID = "session_id"
         case output
         case error
+        case ciderReferences = "cider_references"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        object = try container.decodeIfPresent(String.self, forKey: .object)
+        runID = try container.decode(String.self, forKey: .runID)
+        status = try container.decode(String.self, forKey: .status)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        output = try container.decodeIfPresent(String.self, forKey: .output)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        ciderReferences = (try? container.decodeIfPresent([HermesCiderReference].self, forKey: .ciderReferences)) ?? []
     }
 }
 

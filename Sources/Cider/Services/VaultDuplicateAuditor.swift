@@ -172,7 +172,7 @@ struct VaultDuplicateAuditor {
         components.host = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         components.fragment = nil
         let trackingPrefixes = ["utm_"]
-        let trackingNames: Set<String> = ["fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "ref", "ref_src"]
+        let trackingNames: Set<String> = ["_kx", "fbclid", "gclid", "mc_cid", "mc_eid", "igshid", "ref", "ref_src"]
         components.queryItems = components.queryItems?
             .filter { item in
                 let name = item.name.lowercased()

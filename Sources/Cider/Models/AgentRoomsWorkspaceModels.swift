@@ -47,6 +47,7 @@ struct AgentRoomReceipt: Identifiable, Equatable, Sendable {
     var sourceIdentity: String? = nil
     var runIdentity: String? = nil
     var activity: [AgentRoomsLiveActivity] = []
+    var objectReceipt: AgentRoomsCiderObjectReceipt? = nil
 }
 
 struct AgentRoomFutureArtifact: Identifiable, Equatable, Sendable {

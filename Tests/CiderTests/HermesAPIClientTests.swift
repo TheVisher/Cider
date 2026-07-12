@@ -91,4 +91,67 @@ struct HermesAPIClientTests {
             .approvalRequested("Allow Hermes to edit this file?")
         ])
     }
+
+    @Test("terminal status decodes explicit bounded Cider references")
+    func statusDecodesCiderReferences() throws {
+        let json = """
+        {
+          "run_id": "run-809",
+          "status": "completed",
+          "cider_references": [{
+            "kind": "task",
+            "id": "8d2bd6",
+            "title": "Show source-backed receipts",
+            "board_id": "2afee0",
+            "source": "cider",
+            "source_ref": "kanban_card:2afee0/8d2bd6"
+          }]
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+        #expect(decoded.ciderReferences.count == 1)
+        #expect(decoded.ciderReferences.first?.boardID == "2afee0")
+        #expect(decoded.ciderReferences.first?.sourceRef == "kanban_card:2afee0/8d2bd6")
+    }
+
+    @Test("malformed terminal references fail closed without losing the normal result")
+    func malformedStatusReferenceFailsClosed() throws {
+        let json = """
+        {
+          "run_id": "run-809",
+          "status": "completed",
+          "output": "Normal transcript result",
+          "cider_references": [{
+            "kind": "task",
+            "id": "8d2bd6",
+            "board_id": "2afee0"
+          }]
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+        #expect(decoded.output == "Normal transcript result")
+        #expect(decoded.ciderReferences.isEmpty)
+    }
+
+    @Test("current Hermes terminal envelope preserves plain saved URL output without invented metadata")
+    func currentTerminalEnvelopeShape() throws {
+        let json = #"""
+        {
+          "object": "hermes.run",
+          "run_id": "run-backpack",
+          "status": "completed",
+          "session_id": "session-backpack",
+          "output": "I found the saved backpack:\nhttps://chromeindustries.com/products/cohesive-35l-backpack",
+          "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+          "last_event": "run.completed"
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+
+        #expect(decoded.output?.hasSuffix("https://chromeindustries.com/products/cohesive-35l-backpack") == true)
+        #expect(decoded.ciderReferences.isEmpty)
+    }
 }
