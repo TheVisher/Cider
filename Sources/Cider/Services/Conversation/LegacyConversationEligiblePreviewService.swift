@@ -1,7 +1,115 @@
 import CryptoKit
 import Foundation
 
-/// Dormant CID-796 reader. It never creates storage, writes canonical rows, or authorizes migration.
+struct LegacyCandidateConflictDiagnoser {
+    private struct RuntimeBindingIdentity: Hashable {
+        let sourceNamespace: String
+        let externalSessionID: String
+    }
+
+    private struct SaturatingCount {
+        private(set) var value: LegacyBoundedCount = .exact(0)
+
+        mutating func increment() {
+            switch value {
+            case .exact(let current) where current < 99:
+                value = .exact(current + 1)
+            case .exact, .atLeast100:
+                value = .atLeast100
+            }
+        }
+    }
+
+    private struct IdentityAccumulator<Key: Hashable> {
+        private var firstCandidateByKey: [Key: Int] = [:]
+        private var conflictingKeys = Set<Key>()
+        private(set) var conflictingGroupCount = SaturatingCount()
+
+        mutating func record(
+            _ keys: Set<Key>,
+            candidateIndex: Int,
+            affectedCandidates: inout Set<Int>,
+            affectedCount: inout SaturatingCount
+        ) {
+            for key in keys {
+                guard let firstCandidate = firstCandidateByKey[key] else {
+                    firstCandidateByKey[key] = candidateIndex
+                    continue
+                }
+                guard firstCandidate != candidateIndex else { continue }
+                if conflictingKeys.insert(key).inserted {
+                    conflictingGroupCount.increment()
+                }
+                if affectedCandidates.insert(firstCandidate).inserted { affectedCount.increment() }
+                if affectedCandidates.insert(candidateIndex).inserted { affectedCount.increment() }
+            }
+        }
+    }
+
+    static func diagnose(_ plans: [LegacyConversationImportPlan]) -> LegacyCandidateConflictDiagnosis? {
+        var messageRecords = IdentityAccumulator<UUID>()
+        var messageProvenance = IdentityAccumulator<ConversationSourceIdentity>()
+        var runtimeBindings = IdentityAccumulator<RuntimeBindingIdentity>()
+        var historicalTurns = IdentityAccumulator<ConversationSourceIdentity>()
+        var affectedCandidates = Set<Int>()
+        var affectedCount = SaturatingCount()
+
+        for (candidateIndex, plan) in plans.enumerated() {
+            messageRecords.record(
+                Set(plan.messages.map(\.id)),
+                candidateIndex: candidateIndex,
+                affectedCandidates: &affectedCandidates,
+                affectedCount: &affectedCount
+            )
+            messageProvenance.record(
+                Set(plan.messages.compactMap(\.source)),
+                candidateIndex: candidateIndex,
+                affectedCandidates: &affectedCandidates,
+                affectedCount: &affectedCount
+            )
+            runtimeBindings.record(
+                Set(plan.bindings.map {
+                    RuntimeBindingIdentity(
+                        sourceNamespace: $0.sourceNamespace,
+                        externalSessionID: $0.externalSessionID
+                    )
+                }),
+                candidateIndex: candidateIndex,
+                affectedCandidates: &affectedCandidates,
+                affectedCount: &affectedCount
+            )
+            historicalTurns.record(
+                Set(plan.turns.map(\.source)),
+                candidateIndex: candidateIndex,
+                affectedCandidates: &affectedCandidates,
+                affectedCount: &affectedCount
+            )
+        }
+
+        let counts = [
+            LegacyCandidateConflictCount(
+                kind: .messageRecordIdentity,
+                conflictingIdentityGroups: messageRecords.conflictingGroupCount.value
+            ),
+            LegacyCandidateConflictCount(
+                kind: .messageProvenanceIdentity,
+                conflictingIdentityGroups: messageProvenance.conflictingGroupCount.value
+            ),
+            LegacyCandidateConflictCount(
+                kind: .runtimeBindingIdentity,
+                conflictingIdentityGroups: runtimeBindings.conflictingGroupCount.value
+            ),
+            LegacyCandidateConflictCount(
+                kind: .historicalTurnProvenanceIdentity,
+                conflictingIdentityGroups: historicalTurns.conflictingGroupCount.value
+            ),
+        ]
+        guard counts.contains(where: { !$0.conflictingIdentityGroups.isZero }) else { return nil }
+        return .init(affectedCandidateCount: affectedCount.value, counts: counts)
+    }
+}
+
+/// Read-only legacy Rooms reader. It never creates storage, writes canonical rows, or authorizes migration.
 @MainActor
 final class LegacyConversationEligiblePreviewService {
     struct Limits: Equatable {
@@ -146,7 +254,9 @@ final class LegacyConversationEligiblePreviewService {
 
         omitCandidatesCollidingWithOrphans(&candidates, conversations: conversations, orphanIndices: orphanIndices)
         let locallyEligible = candidates.filter(\.valid)
-        guard crossCandidateIdentitiesAreUnique(locallyEligible) else { return .sanitized(.blocked) }
+        if let diagnosis = LegacyCandidateConflictDiagnoser.diagnose(locallyEligible.map(\.plan)) {
+            return .identityConflict(diagnosis)
+        }
 
         let sortedEligible = locallyEligible.sorted {
             if $0.record.updatedAt != $1.record.updatedAt { return $0.record.updatedAt > $1.record.updatedAt }
@@ -409,13 +519,6 @@ final class LegacyConversationEligiblePreviewService {
                 candidates[index].valid = false
             }
         }
-    }
-
-    private func crossCandidateIdentitiesAreUnique(_ candidates: [Candidate]) -> Bool {
-        unique(candidates.flatMap { $0.plan.messages.map(\.id) }) &&
-            unique(candidates.flatMap { $0.plan.messages.compactMap(\.source) }) &&
-            unique(candidates.flatMap { $0.plan.bindings.map { "\($0.sourceNamespace)\u{1f}\($0.externalSessionID)" } }) &&
-            unique(candidates.flatMap { $0.plan.turns.map(\.source) })
     }
 
     private func unique<T: Hashable>(_ values: [T]) -> Bool { Set(values).count == values.count }

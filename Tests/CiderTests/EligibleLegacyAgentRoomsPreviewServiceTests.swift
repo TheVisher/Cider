@@ -46,7 +46,7 @@ final class EligibleLegacyAgentRoomsPreviewServiceTests: XCTestCase {
         let blocked = EligibleLegacyAgentRoomsPreviewService(loadPreview: { .sanitized(.blocked) }).loadWorkspace()
         XCTAssertEqual(
             blocked,
-            .blocked(authority: .legacyAuthoritativePreview, message: EligibleLegacyAgentRoomsPreviewService.blockedMessage)
+            .eligiblePreviewBlocked(authority: .legacyAuthoritativePreview)
         )
         let failed = EligibleLegacyAgentRoomsPreviewService(loadPreview: {
             _ = privateDiagnostic
@@ -135,6 +135,24 @@ final class EligibleLegacyAgentRoomsPreviewServiceTests: XCTestCase {
             eligible
         )
         XCTAssertEqual(eligibleCalls, 1)
+    }
+
+    func testIdentityConflictRetryRetainsNativeButtonAccessibility() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Sources/Cider/Views/AgentRooms/AgentRoomsWorkspaceView.swift"),
+            encoding: .utf8
+        )
+        let block = try XCTUnwrap(source.range(of: "private func identityConflictState").flatMap { start in
+            source.range(of: "private func failedState", range: start.upperBound..<source.endIndex)
+                .map { String(source[start.lowerBound..<$0.lowerBound]) }
+        })
+        let summaryEnd = try XCTUnwrap(block.range(of: ".accessibilityLabel(\"\\(authorityPresentation(for: authority).badgeAccessibility). \\(notice.accessibilityLabel)\")"))
+        let retry = try XCTUnwrap(block.range(of: "Button(\"Retry\")"))
+        XCTAssertLessThan(summaryEnd.upperBound, retry.lowerBound)
+        XCTAssertTrue(block.contains(".accessibilityLabel(\"Retry read-only legacy Rooms diagnosis\")"))
+        XCTAssertFalse(block.hasSuffix(".accessibilityElement(children: .ignore)"))
     }
 
     func testNewServicesHaveNoLoggingDebugPrintingOrMutationDependencies() throws {

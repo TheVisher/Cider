@@ -125,9 +125,17 @@ struct AgentRoomsWorkspaceView: View {
         case .eligibleEmpty(_, let notice):
             eligibleEmptyState(notice: notice)
         case .blocked(let authority, let message):
-            blockedState(authority: authority, message: message)
-        case .failed(_, let message):
-            failedState(message: message)
+            genericBlockedState(authority: authority, title: "Legacy preview blocked", message: message)
+        case .eligiblePreviewBlocked(let authority):
+            genericBlockedState(
+                authority: authority,
+                title: "Eligible legacy preview unavailable",
+                message: EligibleLegacyAgentRoomsPreviewService.blockedMessage
+            )
+        case .legacyIdentityConflict(let authority, let notice):
+            identityConflictState(authority: authority, notice: notice)
+        case .failed(let authority, let message):
+            failedState(authority: authority, message: message)
         case .loaded(let authority, let rooms, let selectedRoom):
             loadedWorkspace(authority: authority, rooms: rooms, selectedRoom: selectedRoom, notice: nil)
         case .eligibleLoaded(let authority, let rooms, let selectedRoom, let notice):
@@ -224,13 +232,16 @@ struct AgentRoomsWorkspaceView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func blockedState(authority: AgentRoomsWorkspaceAuthority, message: String) -> some View {
-        let eligible = message == EligibleLegacyAgentRoomsPreviewService.blockedMessage
-        return VStack(spacing: Spacing.md) {
+    private func genericBlockedState(
+        authority: AgentRoomsWorkspaceAuthority,
+        title: String,
+        message: String
+    ) -> some View {
+        VStack(spacing: Spacing.md) {
             Image(systemName: "lock.trianglebadge.exclamationmark")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.secondary)
-            Text(eligible ? "Eligible legacy preview unavailable" : "Legacy preview blocked")
+            Text(title)
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.primary)
             Text(message)
@@ -245,16 +256,65 @@ struct AgentRoomsWorkspaceView: View {
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). \(eligible ? "Eligible legacy preview unavailable" : "Legacy preview blocked"). \(message) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled.")
+        .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). \(title). \(message) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled.")
     }
 
-    private func failedState(message: String) -> some View {
-        let eligible = message == EligibleLegacyAgentRoomsPreviewService.failedMessage
+    private func identityConflictState(
+        authority: AgentRoomsWorkspaceAuthority,
+        notice: AgentRoomsIdentityConflictNotice
+    ) -> some View {
+        VStack(spacing: Spacing.md) {
+            VStack(spacing: Spacing.md) {
+                Image(systemName: "lock.trianglebadge.exclamationmark")
+                    .font(CiderFont.emptyStateIcon)
+                    .foregroundColor(CiderColors.secondary)
+                Text(notice.title)
+                    .font(CiderFont.subheadingMedium)
+                    .foregroundColor(CiderColors.primary)
+                Text(notice.detail)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+                    .multilineTextAlignment(.center)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    ForEach(Array(notice.rows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: Spacing.lg) {
+                            Text(row.label)
+                            Spacer(minLength: Spacing.lg)
+                            Text(row.count)
+                        }
+                    }
+                    HStack(spacing: Spacing.lg) {
+                        Text("Affected registered rooms")
+                        Spacer(minLength: Spacing.lg)
+                        Text(notice.affectedCandidateCount)
+                    }
+                }
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(CiderColors.secondary)
+                .frame(maxWidth: 440)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). \(notice.accessibilityLabel)")
+
+            Button("Retry") {
+                Task { await reload() }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Retry read-only legacy Rooms diagnosis")
+        }
+        .padding(Spacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func failedState(authority: AgentRoomsWorkspaceAuthority, message: String) -> some View {
+        let title = authority == .legacyAuthoritativePreview
+            ? "Legacy Rooms preview is temporarily unavailable"
+            : "Rooms unavailable"
         return VStack(spacing: Spacing.md) {
             Image(systemName: "exclamationmark.triangle")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.secondary)
-            Text(eligible ? "Legacy Rooms preview is temporarily unavailable" : "Rooms unavailable")
+            Text(title)
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.primary)
             Text(message)
@@ -269,7 +329,7 @@ struct AgentRoomsWorkspaceView: View {
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(eligible ? "Legacy Rooms preview is temporarily unavailable" : "Rooms unavailable"). \(message) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled.")
+        .accessibilityLabel("\(title). \(message) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled.")
     }
 
     private func roomRail(rooms: [AgentRoom], selectedRoom: AgentRoom) -> some View {

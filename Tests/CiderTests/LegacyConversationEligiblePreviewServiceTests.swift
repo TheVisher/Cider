@@ -39,7 +39,135 @@ struct LegacyConversationEligiblePreviewServiceTests {
             let result = fixture.service.preview()
             #expect(result.state == .blocked)
             #expect(result.rooms.isEmpty)
+            #expect(result.counts == .zero)
+            #expect(result.conflictDiagnosis?.affectedCandidateCount == .exact(2))
+            #expect(result.conflictDiagnosis?.counts == [
+                .init(kind: .messageRecordIdentity, conflictingIdentityGroups: .exact(1)),
+                .init(kind: .messageProvenanceIdentity, conflictingIdentityGroups: .exact(0)),
+                .init(kind: .runtimeBindingIdentity, conflictingIdentityGroups: .exact(0)),
+                .init(kind: .historicalTurnProvenanceIdentity, conflictingIdentityGroups: .exact(0)),
+            ])
             #expect(!String(describing: result).contains("sentinel-private"))
+        }
+    }
+
+    @Test("Exact cross-candidate provenance, runtime, and historical-turn taxonomy")
+    func exactCrossCandidateTaxonomy() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, messageID: UUID(), privateText: "different-one", sourceIDOverride: "hermes:shared-provenance")
+            try fixture.writeRoom(index: 2, messageID: UUID(), privateText: "different-two", sourceIDOverride: "hermes:shared-provenance")
+            assertDiagnosis(fixture.service.preview(), affected: .exact(2), provenance: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, sessionOverride: "shared-session")
+            try fixture.writeRoom(index: 2, sessionOverride: "shared-session")
+            assertDiagnosis(fixture.service.preview(), affected: .exact(2), runtime: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, sourceIDOverride: "hermes-run:shared-run:user", roleOverride: .user)
+            try fixture.writeRoom(index: 2, sourceIDOverride: "hermes-run:shared-run:assistant", roleOverride: .assistant)
+            assertDiagnosis(fixture.service.preview(), affected: .exact(2), turn: .exact(1))
+        }
+    }
+
+    @Test("Equivalent messages still collide on complete provenance identity")
+    func equivalentMessagesStillCollideOnProvenance() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, messageID: UUID(), privateText: "equivalent", sourceIDOverride: "hermes:equivalent-source")
+            try fixture.writeRoom(index: 2, messageID: UUID(), privateText: "equivalent", sourceIDOverride: "hermes:equivalent-source")
+            assertDiagnosis(fixture.service.preview(), affected: .exact(2), provenance: .exact(1))
+        }
+    }
+
+    @Test("Multiple categories and candidates count groups and affected union exactly once")
+    func groupAndAffectedUnionSemantics() throws {
+        try withEligibleFixture { fixture in
+            let shared = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
+            try fixture.writeRoom(
+                index: 1, messageID: shared, sourceIDOverride: "hermes-run:shared:user",
+                sessionOverride: "shared-session", roleOverride: .user
+            )
+            try fixture.writeRoom(
+                index: 2, messageID: shared, sourceIDOverride: "hermes-run:shared:user",
+                sessionOverride: "shared-session", roleOverride: .user
+            )
+            assertDiagnosis(
+                fixture.service.preview(), affected: .exact(2), record: .exact(1),
+                provenance: .exact(1), runtime: .exact(1), turn: .exact(1)
+            )
+        }
+        try withEligibleFixture { fixture in
+            let shared = UUID(uuidString: "dddddddd-dddd-4ddd-8ddd-dddddddddddd")!
+            for index in 1...3 { try fixture.writeRoom(index: index, messageID: shared) }
+            assertDiagnosis(fixture.service.preview(), affected: .exact(3), record: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            let first = UUID(uuidString: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")!
+            let second = UUID(uuidString: "ffffffff-ffff-4fff-8fff-ffffffffffff")!
+            try fixture.writeRoom(index: 1, messageID: first)
+            try fixture.writeRoom(index: 2, messageID: first)
+            try fixture.writeRoom(index: 3, messageID: second)
+            try fixture.writeRoom(index: 4, messageID: second)
+            assertDiagnosis(fixture.service.preview(), affected: .exact(4), record: .exact(2))
+        }
+    }
+
+    @Test("Conflict counting saturates groups and affected candidates without overflow")
+    func conflictCountingSaturates() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1)
+            let baseline = fixture.service.preview()
+            var template = try #require(baseline.rooms.first?.plan)
+            template.bindings = []
+            template.turns = []
+            template.messages[0].source = nil
+            let plans = (0..<200).map { index -> LegacyConversationImportPlan in
+                var plan = template
+                let group = index / 2 + 1
+                plan.messages[0].id = UUID(
+                    uuidString: String(format: "%08d-0000-4000-8000-%012d", group, group)
+                )!
+                return plan
+            }
+            let diagnosis = try #require(LegacyCandidateConflictDiagnoser.diagnose(plans))
+            #expect(diagnosis.affectedCandidateCount == .atLeast100)
+            #expect(diagnosis.counts[0].conflictingIdentityGroups == .atLeast100)
+            #expect(diagnosis.counts.dropFirst().allSatisfy { $0.conflictingIdentityGroups == .exact(0) })
+        }
+    }
+
+    @Test("Binding UUID and turn UUID alone are explicitly outside the taxonomy")
+    func generatedUUIDsAloneAreNotClassified() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, sourceIDOverride: "hermes-run:first:user")
+            try fixture.writeRoom(index: 2, sourceIDOverride: "hermes-run:second:user")
+            let preview = fixture.service.preview()
+            var plans = preview.rooms.map(\.plan)
+            #expect(plans.count == 2)
+            plans[1].bindings[0].id = plans[0].bindings[0].id
+            plans[1].turns[0].id = plans[0].turns[0].id
+            #expect(LegacyCandidateConflictDiagnoser.diagnose(plans) == nil)
+        }
+    }
+
+    @Test("Duplicate within one candidate remains a local omission without diagnosis")
+    func duplicateWithinCandidateIsLocalOmission() throws {
+        try withEligibleFixture { fixture in
+            var messages = fixture.messages(count: 2, roomIndex: 1)
+            messages[1] = AIAssistantMessage(
+                id: messages[0].id,
+                role: messages[1].role,
+                content: messages[1].content,
+                timestamp: messages[1].timestamp,
+                sourceID: messages[1].sourceID,
+                sourceSessionID: messages[1].sourceSessionID,
+                sourceName: messages[1].sourceName
+            )
+            try fixture.writeRoom(index: 1, messages: messages)
+            let result = fixture.service.preview()
+            #expect(result.state == .eligibleEmpty)
+            #expect(result.counts.roomLocalOmitted == 1)
+            #expect(result.conflictDiagnosis == nil)
         }
     }
 
@@ -58,6 +186,7 @@ struct LegacyConversationEligiblePreviewServiceTests {
             #expect(result.counts.eligibleTotal == 1)
             #expect(result.counts.roomLocalOmitted == 1)
             #expect(result.counts.unregisteredFileTotal == 2)
+            #expect(result.conflictDiagnosis == nil)
         }
     }
 
@@ -66,15 +195,40 @@ struct LegacyConversationEligiblePreviewServiceTests {
         try withEligibleFixture { fixture in
             try fixture.writeRoom(index: 1)
             try Data("not-json\nnot-json\n".utf8).write(
-                to: fixture.conversationDirectory.appendingPathComponent("orphan.jsonl")
+                to: fixture.conversationDirectory.appendingPathComponent("11111111-1111-4111-8111-111111111111.jsonl")
             )
             #expect(fixture.service.preview() == .sanitized(.blocked))
         }
         try withEligibleFixture { fixture in
             try Data("sentinel-private-registry".utf8).write(
-                to: fixture.registryDirectory.appendingPathComponent("bad.json")
+                to: fixture.registryDirectory.appendingPathComponent("22222222-2222-4222-8222-222222222222.json")
             )
             #expect(fixture.service.preview() == .sanitized(.blocked))
+        }
+    }
+
+    @Test("Earlier registry, filesystem, and limit blockers remain generic without diagnosis")
+    func earlierGlobalBlockersRemainGeneric() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1)
+            let duplicate = fixture.registryDirectory.appendingPathComponent("66666666-6666-4666-8666-666666666666.json")
+            try Data(contentsOf: fixture.registryURL(index: 1)).write(to: duplicate)
+            #expect(fixture.service.preview() == .sanitized(.blocked))
+        }
+        try withEligibleFixture { fixture in
+            let symlink = fixture.conversationDirectory.appendingPathComponent("77777777-7777-4777-8777-777777777777.jsonl")
+            try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: fixture.registryDirectory)
+            #expect(fixture.service.preview() == .sanitized(.blocked))
+        }
+        try withEligibleFixture { fixture in
+            let nonregular = fixture.conversationDirectory.appendingPathComponent("88888888-8888-4888-8888-888888888888.jsonl")
+            try FileManager.default.createDirectory(at: nonregular, withIntermediateDirectories: false)
+            #expect(fixture.service.preview() == .sanitized(.blocked))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1)
+            let limited = fixture.makeService(limits: .init(maximumFiles: 1))
+            #expect(limited.preview() == .sanitized(.blocked))
         }
     }
 
@@ -118,11 +272,81 @@ struct LegacyConversationEligiblePreviewServiceTests {
                 guard !changed else { return }
                 changed = true
                 try? Data("changed".utf8).write(
-                    to: fixture.registryDirectory.appendingPathComponent("room-1.json"),
+                    to: fixture.registryURL(index: 1),
                     options: .atomic
                 )
             })
-            #expect(service.preview() == .sanitized(.failed))
+            let result = service.preview()
+            #expect(result == .sanitized(.failed))
+            #expect(result.conflictDiagnosis == nil)
+        }
+    }
+
+    @Test("Concurrent change discards a computed conflict diagnosis")
+    func concurrentChangeDiscardsDiagnosis() throws {
+        try withEligibleFixture { fixture in
+            let shared = UUID(uuidString: "abababab-abab-4bab-8bab-abababababab")!
+            try fixture.writeRoom(index: 1, messageID: shared)
+            try fixture.writeRoom(index: 2, messageID: shared)
+            var changed = false
+            let service = fixture.makeService(beforeRevalidation: {
+                guard !changed else { return }
+                changed = true
+                try? Data("changed".utf8).write(to: fixture.registryURL(index: 1), options: .atomic)
+            })
+            let result = service.preview()
+            #expect(result == .sanitized(.failed))
+            #expect(result.conflictDiagnosis == nil)
+        }
+    }
+
+    @Test("Conflict retry is deterministic and leaves every fake input and canonical counter unchanged")
+    func conflictRetryIsImmutable() throws {
+        try withEligibleFixture { fixture in
+            let shared = UUID(uuidString: "acacacac-acac-4cac-8cac-acacacacacac")!
+            try fixture.writeRoom(index: 1, messageID: shared)
+            try fixture.writeRoom(index: 2, messageID: shared)
+            let inputsBefore = try fixture.inputFingerprint()
+            let canonicalBefore = try fixture.databaseSnapshot()
+            let first = fixture.service.preview()
+            let second = fixture.service.preview()
+            #expect(first == second)
+            #expect(first.conflictDiagnosis != nil)
+            #expect(try fixture.inputFingerprint() == inputsBefore)
+            #expect(try fixture.databaseSnapshot() == canonicalBefore)
+        }
+    }
+
+    @Test("Private raw fields never enter diagnosis, workspace, or accessibility description")
+    func privateRawFieldsNeverEnterSafeDiagnosis() throws {
+        try withEligibleFixture { fixture in
+            let sentinel = "PRIVATE_AUTH_SOURCE_SESSION_TITLE_CONTENT_TIMESTAMP"
+            let shared = UUID(uuidString: "adadadad-adad-4dad-8dad-adadadadadad")!
+            try fixture.writeRoom(
+                index: 1,
+                messageID: shared,
+                privateText: sentinel,
+                titleOverride: sentinel,
+                sourceIDOverride: "hermes:\(sentinel)-one",
+                sessionOverride: "\(sentinel)-session-one"
+            )
+            try fixture.writeRoom(
+                index: 2,
+                messageID: shared,
+                privateText: sentinel,
+                titleOverride: sentinel,
+                sourceIDOverride: "hermes:\(sentinel)-two",
+                sessionOverride: "\(sentinel)-session-two"
+            )
+            let preview = fixture.service.preview()
+            let workspace = EligibleLegacyAgentRoomsPreviewService(loadPreview: { preview }).loadWorkspace()
+            #expect(!String(describing: preview.conflictDiagnosis).contains(sentinel))
+            #expect(!String(describing: workspace).contains(sentinel))
+            guard case .legacyIdentityConflict(_, let notice) = workspace else {
+                Issue.record("Expected safe identity conflict")
+                return
+            }
+            #expect(!notice.accessibilityLabel.contains(sentinel))
         }
     }
 
@@ -167,7 +391,7 @@ struct LegacyConversationEligiblePreviewServiceTests {
         try withEligibleFixture { fixture in
             try fixture.writeRoom(index: 1, sessionOverride: "shared-session")
             try fixture.writeRoom(index: 2, sessionOverride: "shared-session")
-            #expect(fixture.service.preview() == .sanitized(.blocked))
+            assertDiagnosis(fixture.service.preview(), affected: .exact(2), runtime: .exact(1))
         }
     }
 
@@ -247,10 +471,7 @@ struct LegacyConversationEligiblePreviewServiceTests {
                 loadLegacy: adapter.loadWorkspace
             ).loadWorkspace()
 
-            #expect(result == .blocked(
-                authority: .legacyAuthoritativePreview,
-                message: EligibleLegacyAgentRoomsPreviewService.blockedMessage
-            ))
+            #expect(result == .eligiblePreviewBlocked(authority: .legacyAuthoritativePreview))
             #expect(canonicalChecks == 1)
             #expect(try fixture.repository.rooms(lifecycle: .active, limit: 1).count == 1)
             #expect(try fixture.inputFingerprint() == inputsBefore)
@@ -258,6 +479,27 @@ struct LegacyConversationEligiblePreviewServiceTests {
             #expect(!String(describing: result).contains("must not publish"))
         }
     }
+}
+
+@MainActor
+private func assertDiagnosis(
+    _ preview: LegacyConversationEligiblePreview,
+    affected: LegacyBoundedCount,
+    record: LegacyBoundedCount = .exact(0),
+    provenance: LegacyBoundedCount = .exact(0),
+    runtime: LegacyBoundedCount = .exact(0),
+    turn: LegacyBoundedCount = .exact(0)
+) {
+    #expect(preview.state == .blocked)
+    #expect(preview.rooms.isEmpty)
+    #expect(preview.counts == .zero)
+    #expect(preview.readOnly && !preview.changed && !preview.safeForBackfill && !preview.safeForShadowWrites)
+    #expect(preview.conflictDiagnosis == .init(affectedCandidateCount: affected, counts: [
+        .init(kind: .messageRecordIdentity, conflictingIdentityGroups: record),
+        .init(kind: .messageProvenanceIdentity, conflictingIdentityGroups: provenance),
+        .init(kind: .runtimeBindingIdentity, conflictingIdentityGroups: runtime),
+        .init(kind: .historicalTurnProvenanceIdentity, conflictingIdentityGroups: turn),
+    ]))
 }
 
 @MainActor
@@ -341,13 +583,13 @@ private final class EligibleFixture {
 
     init() throws {
         root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cid-796-\(UUID().uuidString)", isDirectory: true)
-        registryDirectory = root.appendingPathComponent("registry", isDirectory: true)
-        conversationDirectory = root.appendingPathComponent("conversations", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        registryDirectory = root.appendingPathComponent("33333333-3333-4333-8333-333333333333", isDirectory: true)
+        conversationDirectory = root.appendingPathComponent("44444444-4444-4444-8444-444444444444", isDirectory: true)
         try FileManager.default.createDirectory(at: registryDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: conversationDirectory, withIntermediateDirectories: true)
         database = CiderDatabase()
-        try database.open(at: root.appendingPathComponent("canonical.db"))
+        try database.open(at: root.appendingPathComponent("55555555-5555-4555-8555-555555555555.db"))
         repository = ConversationRepository(database: database)
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -369,11 +611,14 @@ private final class EligibleFixture {
         index: Int,
         messageID: UUID = UUID(),
         privateText: String = "temporary message",
+        titleOverride: String? = nil,
         messages suppliedMessages: [AIAssistantMessage]? = nil,
-        sessionOverride: String? = nil
+        sourceIDOverride: String? = nil,
+        sessionOverride: String? = nil,
+        roleOverride: AIAssistantMessage.Role = .user
     ) throws {
         let roomID = UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", index))!
-        let title = "Temporary \(index)"
+        let title = titleOverride ?? "Temporary \(index)"
         let session = sessionOverride ?? "session-\(index)"
         let record = CiderAgentChatRecord(
             stableID: "temporary.\(index)", title: title, kind: "chat", conversationID: roomID,
@@ -382,13 +627,13 @@ private final class EligibleFixture {
             scope: "temporary-test", archived: false, createdAt: timestamp,
             updatedAt: timestamp.addingTimeInterval(Double(index)), defaultInCider: false
         )
-        try encoder.encode(record).write(to: registryDirectory.appendingPathComponent("room-\(index).json"))
+        try encoder.encode(record).write(to: registryURL(index: index))
 
         var metadata = AIConversationMeta(id: roomID, title: title, model: "hermes")
         metadata.updated = record.updatedAt
         let roomMessages = suppliedMessages ?? [AIAssistantMessage(
-            id: messageID, role: .user, content: privateText, timestamp: timestamp,
-            sourceID: "hermes:room-\(index):message", sourceSessionID: session, sourceName: "Hermes"
+            id: messageID, role: roleOverride, content: privateText, timestamp: timestamp,
+            sourceID: sourceIDOverride ?? "hermes:room-\(index):message", sourceSessionID: session, sourceName: "Hermes"
         )]
         metadata.messageCount = roomMessages.count
         metadata.runtimeID = "hermes"
@@ -397,7 +642,7 @@ private final class EligibleFixture {
         metadata.runtimeLastImportedSessionID = session
         let rows = try [encoder.encode(metadata)] + roomMessages.map(encoder.encode)
         try rows.reduce(into: Data()) { data, row in data.append(row); data.append(0x0a) }
-            .write(to: conversationDirectory.appendingPathComponent("not-authority-\(index).jsonl"))
+            .write(to: conversationDirectory.appendingPathComponent("\(roomID.uuidString).jsonl"))
     }
 
     func writeOrphan(index: Int, messageID: UUID, sourceID: String) throws {
@@ -410,7 +655,15 @@ private final class EligibleFixture {
         )
         let rows = try [encoder.encode(metadata), encoder.encode(message)]
         try rows.reduce(into: Data()) { data, row in data.append(row); data.append(0x0a) }
-            .write(to: conversationDirectory.appendingPathComponent("orphan-\(index).jsonl"))
+            .write(to: conversationDirectory.appendingPathComponent("\(orphanID.uuidString).jsonl"))
+    }
+
+    func registryURL(index: Int) -> URL {
+        registryDirectory.appendingPathComponent("\(roomID(index: index).uuidString).json")
+    }
+
+    private func roomID(index: Int) -> UUID {
+        UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", index))!
     }
 
     func messages(count: Int, roomIndex: Int) -> [AIAssistantMessage] {
@@ -430,6 +683,7 @@ private final class EligibleFixture {
     func makeService(
         parityReader: (any ConversationCoreParityReading)? = nil,
         canonicalIsHonestlyEmpty: @escaping () throws -> Bool = { true },
+        limits: LegacyConversationEligiblePreviewService.Limits = .init(),
         beforeRevalidation: @escaping () -> Void = {}
     ) -> LegacyConversationEligiblePreviewService {
         LegacyConversationEligiblePreviewService(
@@ -437,6 +691,7 @@ private final class EligibleFixture {
             conversationDirectory: conversationDirectory,
             parityReader: parityReader ?? ConversationRepositoryParityReader(repository: repository),
             canonicalIsHonestlyEmpty: canonicalIsHonestlyEmpty,
+            limits: limits,
             beforeRevalidation: beforeRevalidation
         )
     }

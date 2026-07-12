@@ -1,6 +1,6 @@
 import Foundation
 
-/// Presentation-only adapter for CID-796. It is intentionally absent from production composition.
+/// Read-only presentation adapter for independently eligible legacy Rooms previews.
 @MainActor
 final class EligibleLegacyAgentRoomsPreviewService {
     static let blockedMessage = "We couldn’t establish a complete, conflict-free read-only view. No legacy rooms are shown."
@@ -19,19 +19,25 @@ final class EligibleLegacyAgentRoomsPreviewService {
 
     func loadWorkspace() -> AgentRoomsWorkspaceState {
         let preview = loadPreview()
-        guard preview.readOnly, !preview.changed, !preview.safeForBackfill, !preview.safeForShadowWrites,
+        guard preview.formatVersion == LegacyConversationEligiblePreview.currentFormatVersion,
+              preview.readOnly, !preview.changed, !preview.safeForBackfill, !preview.safeForShadowWrites,
               preview.counts.isExact else { return blocked() }
         switch preview.state {
         case .empty:
+            guard preview.conflictDiagnosis == nil else { return blocked() }
             return .empty(authority: .legacyAuthoritativePreview)
         case .blocked:
-            return blocked()
+            guard let diagnosis = preview.conflictDiagnosis else { return blocked() }
+            return identityConflict(preview: preview, diagnosis: diagnosis)
         case .failed:
+            guard preview.conflictDiagnosis == nil else { return blocked() }
             return .failed(authority: .legacyAuthoritativePreview, message: Self.failedMessage)
         case .eligibleEmpty:
+            guard preview.conflictDiagnosis == nil else { return blocked() }
             let notice = makeNotice(preview.counts, kind: .empty)
             return .eligibleEmpty(authority: .legacyAuthoritativePreview, notice: notice)
         case .ready:
+            guard preview.conflictDiagnosis == nil else { return blocked() }
             guard preview.rooms.count == preview.counts.displayedTotal else { return blocked() }
             let rooms = preview.rooms.compactMap(mapRoom)
             guard rooms.count == preview.rooms.count, let first = rooms.first else { return blocked() }
@@ -43,6 +49,32 @@ final class EligibleLegacyAgentRoomsPreviewService {
                 notice: notice
             )
         }
+    }
+
+    private func identityConflict(
+        preview: LegacyConversationEligiblePreview,
+        diagnosis: LegacyCandidateConflictDiagnosis
+    ) -> AgentRoomsWorkspaceState {
+        guard diagnosis.isValid, preview.counts == .zero, preview.rooms.isEmpty else { return blocked() }
+        let rows = diagnosis.counts.compactMap { count -> AgentRoomsIdentityConflictNotice.Row? in
+            guard !count.conflictingIdentityGroups.isZero else { return nil }
+            let label: String
+            switch count.kind {
+            case .messageRecordIdentity: label = "Message record ID conflicts"
+            case .messageProvenanceIdentity: label = "Message provenance conflicts"
+            case .runtimeBindingIdentity: label = "Runtime binding conflicts"
+            case .historicalTurnProvenanceIdentity: label = "Historical turn provenance conflicts"
+            }
+            return .init(label: label, count: count.conflictingIdentityGroups.displayValue)
+        }
+        guard !rows.isEmpty else { return blocked() }
+        return .legacyIdentityConflict(
+            authority: .legacyAuthoritativePreview,
+            notice: .init(
+                rows: rows,
+                affectedCandidateCount: diagnosis.affectedCandidateCount.displayValue
+            )
+        )
     }
 
     private func makeNotice(_ counts: LegacyConversationEligibleCounts, kind: AgentRoomsEligibleNotice.Kind) -> AgentRoomsEligibleNotice {
@@ -85,7 +117,7 @@ final class EligibleLegacyAgentRoomsPreviewService {
     }
 
     private func blocked() -> AgentRoomsWorkspaceState {
-        .blocked(authority: .legacyAuthoritativePreview, message: Self.blockedMessage)
+        .eligiblePreviewBlocked(authority: .legacyAuthoritativePreview)
     }
 
     private func displayRuntime(_ runtimeID: String?) -> String {
