@@ -97,9 +97,19 @@ class ReportParsingTests(unittest.TestCase):
     def test_prolite_plan_is_preserved(self):
         self.assertEqual(self.build()["planType"], "prolite")
 
+    def test_primary_codex_rate_limit_plan_wins_when_account_plan_is_stale(self):
+        stale_account = account("prolite")
+        upgraded_codex = snapshot(plan="pro")
+        report = self.build(account_value=stale_account, limits=rate_limits(upgraded_codex))
+        self.assertEqual(report["planType"], "pro")
+
     def test_unknown_future_plan_is_preserved(self):
-        report = self.build(account_value=account("future ultra-plan 2"))
-        self.assertEqual(report["planType"], "future ultra-plan 2")
+        future = "future ultra-plan 2"
+        report = self.build(
+            account_value=account(future),
+            limits=rate_limits(snapshot(plan=future)),
+        )
+        self.assertEqual(report["planType"], future)
 
     def test_no_secondary_bucket_is_valid(self):
         value = snapshot(secondary=None)

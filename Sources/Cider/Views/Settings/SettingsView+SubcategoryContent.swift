@@ -331,6 +331,8 @@ extension SettingsView {
 
         case .dataDirectories:
             VStack(alignment: .leading, spacing: Spacing.xl) {
+                CodexUsageSettingsView(usageState: codexUsageState)
+
                 SettingsSection(title: "Vault Location") {
                     HStack {
                         VStack(alignment: .leading, spacing: Spacing.xs) {

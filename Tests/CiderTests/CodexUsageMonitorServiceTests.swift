@@ -315,6 +315,17 @@ final class CodexUsageObservableStateTests: XCTestCase {
         model.cancel()
     }
 
+    func testSilentCancellationReturnsLoadingStateToIdleWithoutPersistentFailure() async {
+        let runner = ControlledUsageRunner()
+        let model = CodexUsageObservableState(runner: runner)
+        model.refresh()
+        await runner.waitForInvocationCount(1)
+
+        model.cancel(silently: true)
+
+        XCTAssertEqual(model.state, .idle)
+    }
+
     private func waitUntil(_ predicate: () -> Bool) async {
         for _ in 0..<100 where !predicate() { try? await Task.sleep(for: .milliseconds(5)) }
         XCTAssertTrue(predicate())

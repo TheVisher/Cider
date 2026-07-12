@@ -290,19 +290,26 @@ final class CodexUsageObservableState: ObservableObject {
             do {
                 let snapshot = try await runner.fetch()
                 guard let self, self.generation == requestedGeneration, !Task.isCancelled else { return }
+                self.refreshTask = nil
                 self.state = .loaded(CodexUsagePresentation(snapshot: snapshot))
             } catch {
                 guard let self, self.generation == requestedGeneration, !Task.isCancelled else { return }
+                self.refreshTask = nil
                 self.state = .failed(Self.sanitize(error))
             }
         }
     }
 
-    func cancel() {
+    func cancel(silently: Bool = false) {
+        let wasLoading = state == .loading
         generation &+= 1
         refreshTask?.cancel()
         refreshTask = nil
-        state = .failed(.cancelled)
+        if silently {
+            if wasLoading { state = .idle }
+        } else {
+            state = .failed(.cancelled)
+        }
     }
 
     private static func sanitize(_ error: Error) -> CodexUsageFailure {

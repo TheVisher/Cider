@@ -3,6 +3,7 @@ import AppKit
 
 struct SettingsView: View {
     @StateObject var viewModel = SettingsViewModel()
+    @StateObject var codexUsageState = CodexUsageObservableState()
     @State var selectedCategory: SettingsCategory = .general
     @State var selectedSubcategory: SettingsSubcategory = .startup
     @State var importResult: String?

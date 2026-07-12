@@ -241,7 +241,18 @@ def build_report(account_response, rate_limits_response, now_epoch=None):
     buckets = [_parse_bucket(map_id, raw, now_epoch) for map_id, raw in source]
     buckets.sort(key=lambda item: item["limitId"].lower())
 
-    if plan_type is None:
+    codex_plans = {
+        raw.get("planType")
+        for map_id, raw in source
+        if str(map_id).lower() == "codex"
+        and isinstance(raw, dict)
+        and raw.get("planType") is not None
+    }
+    if len(codex_plans) == 1:
+        # The primary Codex rate-limit record reflects tier provisioning sooner
+        # than account/read after an upgrade, so it is authoritative here.
+        plan_type = _safe_data_label(codex_plans.pop())
+    elif plan_type is None:
         plans = {
             raw.get("planType")
             for _, raw in source
