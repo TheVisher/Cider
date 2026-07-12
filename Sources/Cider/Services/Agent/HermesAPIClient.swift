@@ -146,9 +146,20 @@ struct HermesAPIClient: Sendable {
     var apiKey: String?
     var session: URLSession
 
+    static func resolvedAPIKey(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        let clientKey = environment["HERMES_API_SERVER_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let clientKey, !clientKey.isEmpty {
+            return clientKey
+        }
+        let serverKey = environment["API_SERVER_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return serverKey?.isEmpty == false ? serverKey : nil
+    }
+
     init(
         baseURL: URL = URL(string: "http://127.0.0.1:8642")!,
-        apiKey: String? = ProcessInfo.processInfo.environment["HERMES_API_SERVER_KEY"],
+        apiKey: String? = HermesAPIClient.resolvedAPIKey(),
         session: URLSession = .shared,
         isolationConfiguration: IsolationConfiguration? = nil
     ) {

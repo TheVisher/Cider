@@ -37,6 +37,22 @@ struct HermesAPIClientTests {
         #expect(decoded.features.sessionContinuityHeader == "X-Hermes-Session-Id")
     }
 
+    @Test("client key takes precedence and server key remains a compatible fallback")
+    func resolvesAPIKeyAliases() {
+        #expect(HermesAPIClient.resolvedAPIKey(environment: [
+            "HERMES_API_SERVER_KEY": "client-key",
+            "API_SERVER_KEY": "server-key"
+        ]) == "client-key")
+        #expect(HermesAPIClient.resolvedAPIKey(environment: [
+            "API_SERVER_KEY": "server-key"
+        ]) == "server-key")
+        #expect(HermesAPIClient.resolvedAPIKey(environment: [
+            "HERMES_API_SERVER_KEY": "   ",
+            "API_SERVER_KEY": "server-key"
+        ]) == "server-key")
+        #expect(HermesAPIClient.resolvedAPIKey(environment: [:]) == nil)
+    }
+
     @Test("SSE parser extracts Hermes run events")
     func sseParserExtractsRunEvents() throws {
         let sse = """

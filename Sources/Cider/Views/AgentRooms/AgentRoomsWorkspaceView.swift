@@ -4,29 +4,38 @@ struct AgentRoomsWorkspaceView: View {
     let loadWorkspace: @MainActor () async -> AgentRoomsWorkspaceState
     let onOpenLiveChat: () -> Void
 
+    @StateObject private var liveChat: AgentRoomsLiveChatModel
     @State private var state: AgentRoomsWorkspaceState
     @State private var selectedRoomID: String?
+    @State private var composerText = ""
     @FocusState private var focusedRegion: FocusRegion?
 
     private enum FocusRegion: Hashable {
         case roomList
-        case transcript
+        case composer
     }
 
     init(
         loadWorkspace: @escaping @MainActor () async -> AgentRoomsWorkspaceState,
+        liveChat: AgentRoomsLiveChatModel,
         onOpenLiveChat: @escaping () -> Void
     ) {
         self.loadWorkspace = loadWorkspace
         self.onOpenLiveChat = onOpenLiveChat
+        _liveChat = StateObject(wrappedValue: liveChat)
         _state = State(initialValue: .loading(authority: .canonicalIncomplete))
         _selectedRoomID = State(initialValue: nil)
     }
 
     /// Explicit state injection is reserved for previews and focused view tests.
-    init(state: AgentRoomsWorkspaceState, onOpenLiveChat: @escaping () -> Void) {
+    init(
+        state: AgentRoomsWorkspaceState,
+        liveChat: AgentRoomsLiveChatModel = AgentRoomsLiveChatModel(transport: HermesRunTransport()),
+        onOpenLiveChat: @escaping () -> Void
+    ) {
         self.loadWorkspace = { state }
         self.onOpenLiveChat = onOpenLiveChat
+        _liveChat = StateObject(wrappedValue: liveChat)
         _state = State(initialValue: state)
         if case .loaded(_, _, let selectedRoomID) = state {
             _selectedRoomID = State(initialValue: selectedRoomID)
@@ -49,6 +58,9 @@ struct AgentRoomsWorkspaceView: View {
             await reload()
         }
         .onChange(of: state) { _, newState in
+            if let testRoomID = liveChat.testRoom?.id, selectedRoomID == testRoomID {
+                return
+            }
             if case .loaded(_, let rooms, let storedSelection) = newState {
                 selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
                     ? storedSelection
@@ -68,12 +80,16 @@ struct AgentRoomsWorkspaceView: View {
             HStack(alignment: .center, spacing: Spacing.md) {
                 headerTitle
                 Spacer(minLength: Spacing.md)
+                newTestChatButton
                 openLiveChatButton
             }
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 headerTitle
-                openLiveChatButton
+                HStack(spacing: Spacing.sm) {
+                    newTestChatButton
+                    openLiveChatButton
+                }
             }
         }
         .padding(.horizontal, Spacing.xxl)
@@ -115,8 +131,49 @@ struct AgentRoomsWorkspaceView: View {
         .help("Open current live Hermes chat in a separate panel")
     }
 
+    private var newTestChatButton: some View {
+        Button {
+            liveChat.createTestChat()
+            selectedRoomID = liveChat.testRoom?.id
+            Task {
+                await liveChat.refreshTransportReadiness()
+            }
+        } label: {
+            Label(
+                liveChat.testRoom == nil ? "Start Cider Test Chat" : "Open Cider Test Chat",
+                systemImage: "plus.bubble"
+            )
+            .font(CiderFont.labelMedium)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(liveChat.transportState == .checking)
+        .accessibilityLabel(liveChat.testRoom == nil ? "Start Cider Test Chat" : "Open Cider Test Chat")
+    }
+
     @ViewBuilder
     private var workspaceBody: some View {
+        if let testRoom = liveChat.testRoom {
+            let legacy = legacyRoomsAndNotice
+            let rooms = [testRoom] + legacy.rooms.filter { $0.id != testRoom.id }
+            let selected = rooms.first(where: { $0.id == selectedRoomID }) ?? testRoom
+            VStack(spacing: 0) {
+                if let blocked = legacyBlockedSummary {
+                    legacyBlockedBanner(title: blocked.title, detail: blocked.detail)
+                }
+                loadedWorkspace(
+                    authority: state.authority,
+                    rooms: rooms,
+                    selectedRoom: selected,
+                    notice: legacy.notice
+                )
+            }
+        } else {
+            workspaceBodyWithoutTestRoom
+        }
+    }
+
+    @ViewBuilder
+    private var workspaceBodyWithoutTestRoom: some View {
         switch state.projection(selectedRoomID: selectedRoomID) {
         case .loading:
             loadingState
@@ -143,6 +200,48 @@ struct AgentRoomsWorkspaceView: View {
         case .eligibleLoaded(let authority, let rooms, let selectedRoom, let notice):
             loadedWorkspace(authority: authority, rooms: rooms, selectedRoom: selectedRoom, notice: notice)
         }
+    }
+
+    private var legacyRoomsAndNotice: (rooms: [AgentRoom], notice: AgentRoomsEligibleNotice?) {
+        switch state.projection(selectedRoomID: selectedRoomID) {
+        case .loaded(_, let rooms, _):
+            return (rooms, nil)
+        case .eligibleLoaded(_, let rooms, _, let notice):
+            return (rooms, notice)
+        default:
+            return ([], nil)
+        }
+    }
+
+    private var legacyBlockedSummary: (title: String, detail: String)? {
+        switch state.projection(selectedRoomID: selectedRoomID) {
+        case .blocked(_, let message):
+            return ("Legacy preview remains blocked", message)
+        case .eligiblePreviewBlocked:
+            return ("Eligible legacy preview remains blocked", EligibleLegacyAgentRoomsPreviewService.blockedMessage)
+        case .legacyIdentityConflict(_, let notice):
+            return (notice.title, notice.detail)
+        case .legacyRegistryMappingConflict(_, let notice):
+            return (notice.title, notice.detail)
+        default:
+            return nil
+        }
+    }
+
+    private func legacyBlockedBanner(title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(title)
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.primary)
+            Text("\(detail) Legacy messaging stays disabled; Cider Test Chat remains separate.")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .padding(.horizontal, Spacing.xxl)
+        .padding(.vertical, Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CiderColors.surfaceSubtle)
+        .accessibilityElement(children: .combine)
     }
 
     private func loadedWorkspace(
@@ -417,10 +516,6 @@ struct AgentRoomsWorkspaceView: View {
                     proxy.scrollTo(selectedRoomID, anchor: .center)
                 }
             }
-            .onKeyPress(.return) {
-                focusedRegion = .transcript
-                return .handled
-            }
         }
         .background(CiderColors.surfaceSubtle)
     }
@@ -503,7 +598,7 @@ struct AgentRoomsWorkspaceView: View {
                     }
 
                     ForEach(room.transcript.messages) { message in
-                        messageView(message)
+                        messageView(message, showsDelivery: room.continuity == .liveContinuation)
                     }
 
                     if let link = room.transcript.link {
@@ -524,11 +619,15 @@ struct AgentRoomsWorkspaceView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollIndicators(.hidden)
-            .focusable()
-            .focused($focusedRegion, equals: .transcript)
-            .accessibilityLabel("\(authorityPresentation(for: authority).transcriptAccessibility) for \(room.title)")
+            .accessibilityLabel(room.continuity == .liveContinuation
+                ? "Live continuation transcript for \(room.title)"
+                : "\(authorityPresentation(for: authority).transcriptAccessibility) for \(room.title)")
 
-            disabledComposer
+            if room.continuity == .liveContinuation {
+                liveComposer(roomID: room.id)
+            } else {
+                disabledComposer
+            }
         }
     }
 
@@ -543,12 +642,16 @@ struct AgentRoomsWorkspaceView: View {
                     .fill(CiderColors.secondary)
                     .frame(width: 5, height: 5)
                     .accessibilityHidden(true)
-                Text("\(room.transcript.runtimeLabel) runtime · \(presentation.transcript)")
+                Text(room.continuity == .liveContinuation
+                     ? "\(room.transcript.runtimeLabel) runtime · Live continuation"
+                     : "\(room.transcript.runtimeLabel) runtime · \(presentation.transcript)")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(room.transcript.runtimeLabel) runtime, \(presentation.transcriptAccessibility)")
+            .accessibilityLabel(room.continuity == .liveContinuation
+                ? "\(room.transcript.runtimeLabel) runtime, live continuation"
+                : "\(room.transcript.runtimeLabel) runtime, \(presentation.transcriptAccessibility)")
         }
     }
 
@@ -591,15 +694,34 @@ struct AgentRoomsWorkspaceView: View {
         let emptyDetail: String
     }
 
-    private func messageView(_ message: AgentRoomMessage) -> some View {
+    private func messageView(_ message: AgentRoomMessage, showsDelivery: Bool) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text(message.author)
-                .font(CiderFont.captionSemibold)
-                .foregroundColor(CiderColors.tertiary)
-            Text(message.body)
-                .font(CiderFont.label)
-                .foregroundColor(CiderColors.primary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(message.author)
+                    .font(CiderFont.captionSemibold)
+                    .foregroundColor(CiderColors.tertiary)
+                Text(message.body)
+                    .font(CiderFont.label)
+                    .foregroundColor(CiderColors.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            if showsDelivery, message.role == .human {
+                HStack(spacing: Spacing.sm) {
+                    Text(deliveryLabel(message.deliveryState))
+                        .font(CiderFont.microMedium)
+                        .foregroundColor(message.deliveryState == .failed ? CiderColors.destructive : CiderColors.tertiary)
+                    if message.deliveryState == .failed, message.canRetry {
+                        Button("Retry") {
+                            Task {
+                                await liveChat.retry(clientMessageID: message.id, selectedRoomID: selectedRoomID)
+                            }
+                        }
+                        .buttonStyle(.link)
+                        .accessibilityLabel("Retry failed message")
+                    }
+                }
+            }
         }
         .padding(message.role == .human ? Spacing.md : 0)
         .background(
@@ -607,7 +729,15 @@ struct AgentRoomsWorkspaceView: View {
                 .fill(message.role == .human ? CiderColors.surfaceInput : Color.clear)
         )
         .frame(maxWidth: message.role == .human ? 520 : .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func deliveryLabel(_ state: AgentRoomMessageDeliveryState) -> String {
+        switch state {
+        case .pending: "Sending…"
+        case .sent: "Sent"
+        case .failed: "Failed"
+        }
     }
 
     private func projectLinkChip(_ link: AgentRoomLink) -> some View {
@@ -631,6 +761,12 @@ struct AgentRoomsWorkspaceView: View {
 
     private func receiptRow(_ receipt: AgentRoomReceipt) -> some View {
         let presentation = receiptPresentation(for: receipt.status)
+        let voiceOverWording = receipt.sourceBackedTransport
+            ? presentation.voiceOverWording.replacingOccurrences(
+                of: "canonical",
+                with: "source-backed live continuation"
+            )
+            : presentation.voiceOverWording
         return HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: presentation.symbol)
                 .foregroundColor(presentation.color)
@@ -644,7 +780,7 @@ struct AgentRoomsWorkspaceView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(presentation.voiceOverWording), \(receipt.title), \(receipt.detail)")
+        .accessibilityLabel("\(voiceOverWording), \(receipt.title), \(receipt.detail)")
     }
 
     private func receiptPresentation(
@@ -698,6 +834,57 @@ struct AgentRoomsWorkspaceView: View {
         .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Messaging disabled. Live messaging remains in the Hermes panel.")
+    }
+
+    private func liveComposer(roomID: String) -> some View {
+        let enabled = liveChat.isComposerEnabled(selectedRoomID: selectedRoomID)
+        let validDraft = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && composerText.count <= AgentRoomsLiveChatModel.maximumMessageLength
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
+            if let message = liveChat.composerMessage {
+                Text(message)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .accessibilityLabel(message)
+            }
+            HStack(alignment: .bottom, spacing: Spacing.sm) {
+                TextField("Message Hermes in Cider Test Chat", text: $composerText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...5)
+                    .focused($focusedRegion, equals: .composer)
+                    .disabled(!enabled)
+                    .onSubmit { submitComposer(roomID: roomID) }
+                    .accessibilityLabel("Message Hermes in Cider Test Chat")
+
+                if liveChat.activeRunCanBeCancelled {
+                    Button("Cancel") {
+                        Task { await liveChat.cancelActiveSend() }
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Cancel Hermes response")
+                }
+
+                Button("Send") { submitComposer(roomID: roomID) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!enabled || !validDraft)
+                    .accessibilityLabel("Send message to Hermes")
+            }
+            Text("Return sends · Shift-Return adds a line · \(composerText.count)/\(AgentRoomsLiveChatModel.maximumMessageLength)")
+                .font(CiderFont.micro)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(CiderColors.surfaceSubtle)
+        .background(CiderWindowDragExclusionReporter(id: "agent-rooms-live-composer"))
+        .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
+    }
+
+    private func submitComposer(roomID: String) {
+        let text = composerText
+        guard liveChat.isComposerEnabled(selectedRoomID: selectedRoomID) else { return }
+        composerText = ""
+        Task { await liveChat.send(text, selectedRoomID: roomID) }
     }
 
     @MainActor

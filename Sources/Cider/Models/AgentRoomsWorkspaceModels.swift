@@ -5,11 +5,24 @@ enum AgentRoomMessageRole: String, Equatable, Sendable {
     case agent
 }
 
+enum AgentRoomContinuity: String, Equatable, Sendable {
+    case historicalReplay
+    case liveContinuation
+}
+
+enum AgentRoomMessageDeliveryState: String, Equatable, Sendable {
+    case pending
+    case sent
+    case failed
+}
+
 struct AgentRoomMessage: Identifiable, Equatable, Sendable {
     let id: String
     let role: AgentRoomMessageRole
     let author: String
     let body: String
+    var deliveryState: AgentRoomMessageDeliveryState = .sent
+    var canRetry: Bool = false
 }
 
 struct AgentRoomLink: Identifiable, Equatable, Sendable {
@@ -29,6 +42,8 @@ struct AgentRoomReceipt: Identifiable, Equatable, Sendable {
     let title: String
     let detail: String
     let status: AgentRoomReceiptStatus
+    var continuity: AgentRoomContinuity = .historicalReplay
+    var sourceBackedTransport: Bool = false
 }
 
 struct AgentRoomFutureArtifact: Identifiable, Equatable, Sendable {
@@ -53,6 +68,7 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let relativeTime: String
     let transcript: AgentRoomTranscript
     var messageLimitNotice: String? = nil
+    var continuity: AgentRoomContinuity = .historicalReplay
 }
 
 struct AgentRoomsEligibleNotice: Equatable, Sendable {
