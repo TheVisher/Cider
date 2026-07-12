@@ -430,7 +430,7 @@ extension CiderPanelView {
                             loadLegacy: eligibleAdapter.loadWorkspace
                         ).loadWorkspace()
                     },
-                    liveChat: AgentRoomsLiveChatModel(transport: HermesRunTransport()),
+                    session: agentRoomsSession,
                     onOpenLiveChat: {
                         requestFloat(.aiAssistant)
                     }

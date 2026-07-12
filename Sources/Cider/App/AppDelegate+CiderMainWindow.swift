@@ -25,7 +25,8 @@ extension AppDelegate {
         let windowView = CiderPanelView(
             bookmarksViewModel: bookmarksViewModel,
             notesViewModel: notesViewModel,
-            surface: .mainWindow
+            surface: .mainWindow,
+            agentRoomsSession: agentRoomsSession
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 

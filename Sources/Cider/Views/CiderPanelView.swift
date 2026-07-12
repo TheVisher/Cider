@@ -6,6 +6,7 @@ struct CiderPanelView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
     var surface: CiderWorkspaceSurface = .mainWindow
+    @ObservedObject var agentRoomsSession: AgentRoomsSessionModel
     @ObservedObject var kanbanStorage = KanbanStorage.shared
     @ObservedObject var projectAssociationStore = ProjectWorkspaceAssociationStore.shared
     @ObservedObject var notesStorage = NotesStorage.shared

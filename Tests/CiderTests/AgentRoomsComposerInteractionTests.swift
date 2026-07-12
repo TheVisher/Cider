@@ -5,6 +5,51 @@ import XCTest
 
 final class AgentRoomsComposerInteractionTests: XCTestCase {
     @MainActor
+    func testComposerDraftSurvivesHostedWorkspaceReconstruction() async throws {
+        let model = AgentRoomsLiveChatModel(
+            transport: ComposerReadyTransport(),
+            turnCoordinator: HermesTurnCoordinator()
+        )
+        let session = AgentRoomsSessionModel(liveChat: model)
+        await session.startTestChat()
+        let roomID = try XCTUnwrap(model.testRoom?.id)
+        let state = AgentRoomsWorkspaceState.loaded(
+            authority: .canonicalIncomplete,
+            rooms: [],
+            selectedRoomID: roomID
+        )
+        let route = HostedRoomsRoute()
+
+        let window = CiderMainWindow()
+        window.setFrame(NSRect(x: 100, y: 100, width: 1_000, height: 700), display: false)
+        window.contentView = CiderMainWindowHostingView(rootView:
+            HostedRoomsNavigationHarness(route: route, state: state, session: session)
+                .frame(width: 1_000, height: 700)
+        )
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        await settleUI()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let field = try XCTUnwrap(findComposerField(in: window.contentView))
+        let accessibilityTextField = try XCTUnwrap(field.accessibilityChildren()?.first as? NSObject)
+        accessibilityTextField.perform(NSSelectorFromString("setAccessibilityValue:"), with: "continuity draft")
+        await settleUI()
+
+        XCTAssertEqual(field.stringValue, "continuity draft")
+
+        route.showsRooms = false
+        await settleUI()
+        route.showsRooms = true
+        await settleUI()
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let reconstructedField = try XCTUnwrap(findComposerField(in: window.contentView))
+        XCTAssertEqual(reconstructedField.stringValue, "continuity draft")
+        XCTAssertEqual(session.selectedRoomID, roomID)
+    }
+
+    @MainActor
     func testNativeClickMakesComposerEditableInCiderMainWindow() async throws {
         let transport = ComposerReadyTransport()
         let model = AgentRoomsLiveChatModel(
@@ -100,6 +145,25 @@ final class AgentRoomsComposerInteractionTests: XCTestCase {
         return nil
     }
 
+}
+
+@MainActor
+private final class HostedRoomsRoute: ObservableObject {
+    @Published var showsRooms = true
+}
+
+private struct HostedRoomsNavigationHarness: View {
+    @ObservedObject var route: HostedRoomsRoute
+    let state: AgentRoomsWorkspaceState
+    @ObservedObject var session: AgentRoomsSessionModel
+
+    var body: some View {
+        if route.showsRooms {
+            AgentRoomsWorkspaceView(state: state, session: session, onOpenLiveChat: {})
+        } else {
+            Text("Today")
+        }
+    }
 }
 
 private actor ComposerReadyTransport: HermesBridgeTransport {

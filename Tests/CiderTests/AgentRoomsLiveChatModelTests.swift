@@ -333,9 +333,12 @@ struct AgentRoomsLiveChatModelTests {
     func productionCompositionIsRealAndSessionOnly() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let composition = try String(contentsOf: root.appendingPathComponent("Sources/Cider/Views/CiderPanelView+ContentArea.swift"), encoding: .utf8)
+        let appDelegate = try String(contentsOf: root.appendingPathComponent("Sources/Cider/App/AppDelegate.swift"), encoding: .utf8)
         let liveModel = try String(contentsOf: root.appendingPathComponent("Sources/Cider/Services/Conversation/AgentRoomsLiveChatModel.swift"), encoding: .utf8)
 
-        #expect(composition.contains("HermesRunTransport()"))
+        #expect(appDelegate.contains("AgentRoomsSessionModel(transport: HermesRunTransport())"))
+        #expect(composition.contains("session: agentRoomsSession"))
+        #expect(!composition.contains("AgentRoomsLiveChatModel(transport:"))
         #expect(!composition.contains("AgentRoomsFixtureProvider"))
         #expect(!liveModel.contains("ConversationRepository"))
         #expect(!liveModel.contains("LegacyConversation"))
@@ -434,12 +437,12 @@ private actor RoomsGateTransport: HermesBridgeTransport {
         onEvent: (@Sendable (HermesRunEvent) async -> Void)?
     ) async throws -> HermesBridgeSendResult {
         sendCount += 1
+        eventHandler = onEvent
         started = true
         let waiters = startWaiters
         startWaiters.removeAll()
         waiters.forEach { $0.resume() }
         await onEvent?(.runStarted(resultEnvelope.runID ?? ""))
-        eventHandler = onEvent
         if !released {
             await withCheckedContinuation { releaseWaiters.append($0) }
         }

@@ -1,13 +1,13 @@
+import AppKit
 import SwiftUI
 
 struct AgentRoomsWorkspaceView: View {
     let loadWorkspace: @MainActor () async -> AgentRoomsWorkspaceState
     let onOpenLiveChat: () -> Void
 
-    @StateObject private var liveChat: AgentRoomsLiveChatModel
+    @ObservedObject private var session: AgentRoomsSessionModel
+    @ObservedObject private var liveChat: AgentRoomsLiveChatModel
     @State private var state: AgentRoomsWorkspaceState
-    @State private var selectedRoomID: String?
-    @State private var composerText = ""
     @State private var transcriptFollowPolicy = AgentRoomsTranscriptFollowPolicy()
     @State private var transcriptViewportHeight: CGFloat = 0
     @FocusState private var focusedRegion: FocusRegion?
@@ -19,33 +19,56 @@ struct AgentRoomsWorkspaceView: View {
 
     init(
         loadWorkspace: @escaping @MainActor () async -> AgentRoomsWorkspaceState,
-        liveChat: AgentRoomsLiveChatModel,
+        session: AgentRoomsSessionModel,
         onOpenLiveChat: @escaping () -> Void
     ) {
         self.loadWorkspace = loadWorkspace
         self.onOpenLiveChat = onOpenLiveChat
-        _liveChat = StateObject(wrappedValue: liveChat)
+        _session = ObservedObject(wrappedValue: session)
+        _liveChat = ObservedObject(wrappedValue: session.liveChat)
         _state = State(initialValue: .loading(authority: .canonicalIncomplete))
-        _selectedRoomID = State(initialValue: nil)
     }
 
     /// Explicit state injection is reserved for previews and focused view tests.
     init(
         state: AgentRoomsWorkspaceState,
-        liveChat: AgentRoomsLiveChatModel = AgentRoomsLiveChatModel(transport: HermesRunTransport()),
+        session: AgentRoomsSessionModel,
         onOpenLiveChat: @escaping () -> Void
     ) {
         self.loadWorkspace = { state }
         self.onOpenLiveChat = onOpenLiveChat
-        _liveChat = StateObject(wrappedValue: liveChat)
+        _session = ObservedObject(wrappedValue: session)
+        _liveChat = ObservedObject(wrappedValue: session.liveChat)
         _state = State(initialValue: state)
+    }
+
+    /// Explicit live-model injection is reserved for previews and focused view tests.
+    init(
+        state: AgentRoomsWorkspaceState,
+        liveChat: AgentRoomsLiveChatModel = AgentRoomsLiveChatModel(transport: HermesRunTransport()),
+        onOpenLiveChat: @escaping () -> Void
+    ) {
+        let session = AgentRoomsSessionModel(liveChat: liveChat)
         if case .loaded(_, _, let selectedRoomID) = state {
-            _selectedRoomID = State(initialValue: selectedRoomID)
+            session.selectedRoomID = selectedRoomID
         } else if case .eligibleLoaded(_, _, let selectedRoomID, _) = state {
-            _selectedRoomID = State(initialValue: selectedRoomID)
-        } else {
-            _selectedRoomID = State(initialValue: nil)
+            session.selectedRoomID = selectedRoomID
         }
+        self.init(state: state, session: session, onOpenLiveChat: onOpenLiveChat)
+    }
+
+    private var selectedRoomID: String? {
+        get { session.selectedRoomID }
+        nonmutating set { session.selectedRoomID = newValue }
+    }
+
+    private var composerText: String {
+        get { session.composerText }
+        nonmutating set { session.composerText = newValue }
+    }
+
+    private var composerTextBinding: Binding<String> {
+        Binding(get: { session.composerText }, set: { session.composerText = $0 })
     }
 
     var body: some View {
@@ -58,6 +81,9 @@ struct AgentRoomsWorkspaceView: View {
         .background(CiderColors.surfaceHighlight)
         .task {
             await reload()
+            if session.restoreRecoveredDraftIfNeeded() {
+                focusedRegion = .composer
+            }
         }
         .onChange(of: state) { _, newState in
             if let testRoomID = liveChat.testRoom?.id, selectedRoomID == testRoomID {
@@ -76,10 +102,8 @@ struct AgentRoomsWorkspaceView: View {
             }
         }
         .onChange(of: liveChat.turnState) { _, turnState in
-            guard turnState == .failed, composerText.isEmpty,
-                  let recovered = liveChat.takeRecoveredDraft() else { return }
-            composerText = recovered
-            focusedRegion = .composer
+            guard turnState == .failed else { return }
+            if session.restoreRecoveredDraftIfNeeded() { focusedRegion = .composer }
         }
     }
 
@@ -141,8 +165,7 @@ struct AgentRoomsWorkspaceView: View {
 
     private var newTestChatButton: some View {
         Button {
-            liveChat.createTestChat()
-            selectedRoomID = liveChat.testRoom?.id
+            session.createTestChat()
             Task {
                 await liveChat.refreshTransportReadiness()
             }
@@ -978,13 +1001,14 @@ struct AgentRoomsWorkspaceView: View {
                 .foregroundColor(CiderColors.tertiary)
                 .accessibilityLabel("Hermes turn \(liveTurnStatusLabel)")
             HStack(alignment: .bottom, spacing: Spacing.sm) {
-                TextField("Message Hermes in Cider Test Chat", text: $composerText, axis: .vertical)
+                TextField("Message Hermes in Cider Test Chat", text: composerTextBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .focused($focusedRegion, equals: .composer)
                     .disabled(!enabled)
                     .onSubmit { submitComposer(roomID: roomID) }
                     .accessibilityLabel("Message Hermes in Cider Test Chat")
+                    .background(AgentRoomsComposerDraftBridge { session.composerText = $0 })
 
                 if liveChat.activeRunCanBeCancelled {
                     Button("Cancel") {
@@ -1038,4 +1062,66 @@ struct AgentRoomsWorkspaceView: View {
 private struct AgentRoomsTranscriptBottomPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct AgentRoomsComposerDraftBridge: NSViewRepresentable {
+    let persist: @MainActor (String) -> Void
+
+    func makeNSView(context: Context) -> AgentRoomsComposerDraftBridgeView {
+        AgentRoomsComposerDraftBridgeView(persist: persist)
+    }
+
+    func updateNSView(_ nsView: AgentRoomsComposerDraftBridgeView, context: Context) {
+        nsView.persist = persist
+        nsView.resolveComposerField()
+    }
+
+    static func dismantleNSView(_ nsView: AgentRoomsComposerDraftBridgeView, coordinator: Void) {
+        nsView.persistVisibleDraft()
+    }
+}
+
+private final class AgentRoomsComposerDraftBridgeView: NSView {
+    var persist: @MainActor (String) -> Void
+    private weak var composerField: NSTextField?
+
+    init(persist: @escaping @MainActor (String) -> Void) {
+        self.persist = persist
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            persistVisibleDraft()
+        } else {
+            resolveComposerField()
+            DispatchQueue.main.async { [weak self] in self?.resolveComposerField() }
+        }
+    }
+
+    func resolveComposerField() {
+        guard composerField == nil, let contentView = window?.contentView else { return }
+        composerField = Self.findComposerField(in: contentView)
+    }
+
+    func persistVisibleDraft() {
+        resolveComposerField()
+        guard let composerField else { return }
+        persist(composerField.stringValue)
+    }
+
+    private static func findComposerField(in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField,
+           field.placeholderString == "Message Hermes in Cider Test Chat" {
+            return field
+        }
+        for subview in view.subviews {
+            if let match = findComposerField(in: subview) { return match }
+        }
+        return nil
+    }
 }
