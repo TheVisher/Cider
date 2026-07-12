@@ -35,10 +35,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     static let maximumMessageLength = 4_000
     static let maximumStreamingMessageLength = 32_000
     static let maximumEventDetailLength = 240
+    static let maximumRunIdentityLength = 120
     static let maximumLiveActivityCount = 24
     static let unavailableMessage = "Hermes live transport is not ready. Open Live Chat to check the connection."
     static let failedMessage = "Hermes could not complete this message."
     static let acceptedInterruptionMessage = "Hermes accepted the message, but the response was interrupted. It cannot be retried safely."
+    static let receiptSourceIdentity = "Hermes Runs API"
 
     @Published private(set) var testRoom: AgentRoom?
     @Published private(set) var transportState: AgentRoomsLiveTransportState = .unchecked
@@ -173,13 +175,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         }
         failActiveMessage(message: "Hermes response cancelled.", canRetry: activeRunID == nil)
         turnState = .failed
-        receipt = .init(
-            id: "cider-room-receipt:\(makeID().uuidString)",
+        receipt = makeReceipt(
             title: "Hermes turn cancelled",
             detail: "Runs API · Live continuation",
             status: .cancelled,
-            continuity: .liveContinuation,
-            sourceBackedTransport: activeRunID != nil
+            runID: activeRunID
         )
         clearActiveAttempt()
         rebuildRoom()
@@ -210,13 +210,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             failActiveMessage(message: "Hermes response was interrupted.", canRetry: activeRunID == nil)
             recoveredDraft = activeRunID == nil ? text : nil
             turnState = .failed
-            receipt = .init(
-                id: "cider-room-receipt:\(makeID().uuidString)",
+            receipt = makeReceipt(
                 title: "Hermes turn interrupted",
                 detail: "Runs API · Live continuation",
                 status: .cancelled,
-                continuity: .liveContinuation,
-                sourceBackedTransport: activeRunID != nil
+                runID: activeRunID
             )
             clearActiveAttempt()
             rebuildRoom()
@@ -229,13 +227,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             )
             recoveredDraft = accepted ? nil : text
             turnState = .failed
-            receipt = .init(
-                id: "cider-room-receipt:\(makeID().uuidString)",
+            receipt = makeReceipt(
                 title: accepted ? "Hermes response interrupted" : "Hermes send failed",
                 detail: "Runs API · Live continuation",
                 status: .failed,
-                continuity: .liveContinuation,
-                sourceBackedTransport: accepted
+                runID: activeRunID
             )
             clearActiveAttempt()
             rebuildRoom()
@@ -414,7 +410,30 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             detail: "Runs API · Source-backed terminal · Live continuation",
             status: .completed,
             continuity: .liveContinuation,
-            sourceBackedTransport: true
+            sourceBackedTransport: true,
+            sourceIdentity: Self.receiptSourceIdentity,
+            runIdentity: sanitized(runID, limit: Self.maximumRunIdentityLength),
+            activity: liveActivity
+        )
+    }
+
+    private func makeReceipt(
+        title: String,
+        detail: String,
+        status: AgentRoomReceiptStatus,
+        runID: String?
+    ) -> AgentRoomReceipt {
+        let displayRunID = runID.map { sanitized($0, limit: Self.maximumRunIdentityLength) }
+        return AgentRoomReceipt(
+            id: "cider-room-receipt:\(displayRunID ?? makeID().uuidString)",
+            title: title,
+            detail: detail,
+            status: status,
+            continuity: .liveContinuation,
+            sourceBackedTransport: runID != nil,
+            sourceIdentity: Self.receiptSourceIdentity,
+            runIdentity: displayRunID,
+            activity: liveActivity
         )
     }
 

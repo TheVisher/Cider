@@ -44,6 +44,9 @@ struct AgentRoomReceipt: Identifiable, Equatable, Sendable {
     let status: AgentRoomReceiptStatus
     var continuity: AgentRoomContinuity = .historicalReplay
     var sourceBackedTransport: Bool = false
+    var sourceIdentity: String? = nil
+    var runIdentity: String? = nil
+    var activity: [AgentRoomsLiveActivity] = []
 }
 
 struct AgentRoomFutureArtifact: Identifiable, Equatable, Sendable {

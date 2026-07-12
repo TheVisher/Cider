@@ -610,7 +610,9 @@ struct AgentRoomsWorkspaceView: View {
                         messageView(message, showsDelivery: room.continuity == .liveContinuation)
                     }
 
-                    if room.continuity == .liveContinuation, !liveChat.liveActivity.isEmpty {
+                    if room.continuity == .liveContinuation,
+                       room.transcript.receipt == nil,
+                       !liveChat.liveActivity.isEmpty {
                         liveActivityView
                     }
 
@@ -812,26 +814,99 @@ struct AgentRoomsWorkspaceView: View {
 
     private func receiptRow(_ receipt: AgentRoomReceipt) -> some View {
         let presentation = receiptPresentation(for: receipt.status)
-        let voiceOverWording = receipt.sourceBackedTransport
+        let voiceOverWording = receipt.continuity == .liveContinuation
             ? presentation.voiceOverWording.replacingOccurrences(
                 of: "canonical",
-                with: "source-backed live continuation"
+                with: receipt.sourceBackedTransport ? "source-backed live continuation" : "live continuation"
             )
             : presentation.voiceOverWording
+        return DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if let sourceIdentity = receipt.sourceIdentity {
+                    receiptIdentityRow(label: "Source", value: sourceIdentity)
+                    receiptIdentityRow(label: "Run", value: receipt.runIdentity ?? "Not accepted")
+                    Text(receipt.runIdentity == nil
+                         ? "Session-only activity observed during this attempt."
+                         : "Session-only activity reported by this run.")
+                        .font(CiderFont.microMedium)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+
+                if receipt.activity.isEmpty {
+                    Text("No bounded tool or reasoning activity reported.")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(receipt.activity) { activity in
+                            receiptActivityRow(activity)
+                        }
+                    }
+                }
+            }
+            .padding(.top, Spacing.sm)
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: presentation.symbol)
+                    .foregroundColor(presentation.color)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(receipt.title)
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text(receipt.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Turn activity receipt, \(voiceOverWording), \(receipt.title), \(receipt.detail)")
+        }
+        .tint(CiderColors.secondary)
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
+    }
+
+    private func receiptIdentityRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(label)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 44, alignment: .leading)
+            Text(value)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label), \(value)")
+    }
+
+    private func receiptActivityRow(_ activity: AgentRoomsLiveActivity) -> some View {
+        let presentation: (label: String, symbol: String) = switch activity.kind {
+        case .reasoning: ("Reasoning", "brain.head.profile")
+        case .toolStarted: ("Tool started", "wrench.and.screwdriver")
+        case .toolCompleted: ("Tool completed", "checkmark.circle")
+        }
         return HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: presentation.symbol)
-                .foregroundColor(presentation.color)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 14)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(receipt.title)
-                    .font(CiderFont.bodySemibold)
-                    .foregroundColor(CiderColors.primary)
-                Text(receipt.detail)
-                    .font(CiderFont.caption)
+                Text(presentation.label)
+                    .font(CiderFont.microMedium)
                     .foregroundColor(CiderColors.tertiary)
+                Text(activity.detail)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.secondary)
+                    .lineLimit(2)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(voiceOverWording), \(receipt.title), \(receipt.detail)")
+        .accessibilityLabel("\(presentation.label), \(activity.detail)")
     }
 
     private func receiptPresentation(

@@ -61,6 +61,10 @@ struct AgentRoomsLiveChatModelTests {
         #expect(room.transcript.receipt?.continuity == .liveContinuation)
         #expect(room.transcript.receipt?.sourceBackedTransport == true)
         #expect(room.transcript.receipt?.detail == "Runs API · Source-backed terminal · Live continuation")
+        #expect(room.transcript.receipt?.sourceIdentity == "Hermes Runs API")
+        #expect(room.transcript.receipt?.runIdentity == "run-805")
+        #expect(room.transcript.receipt?.activity.isEmpty == true)
+        #expect(room.transcript.receipt?.id == "cider-room-receipt:run-805")
         #expect(await transport.sentTexts() == ["Tonight?"])
     }
 
@@ -112,6 +116,35 @@ struct AgentRoomsLiveChatModelTests {
 
         await transport.release()
         await send.value
+
+        let receiptActivity = try #require(model.testRoom?.transcript.receipt?.activity)
+        #expect(receiptActivity.map(\.kind) == [.reasoning, .toolStarted, .toolCompleted])
+        #expect(receiptActivity.map(\.detail).first == "Planning")
+        #expect(model.testRoom?.transcript.receipt?.runIdentity == "run-events")
+    }
+
+    @Test("terminal receipt freezes only the newest bounded ordered activity")
+    func terminalReceiptActivityIsBounded() async throws {
+        let transport = RoomsGateTransport(
+            envelope: envelope(runID: "run-bounded", user: "Work", assistant: "Done")
+        )
+        let model = makeModel(transport)
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+        let send = Task { await model.send("Work", selectedRoomID: roomID) }
+        await transport.waitUntilSendStarted()
+
+        for index in 0..<(AgentRoomsLiveChatModel.maximumLiveActivityCount + 3) {
+            await transport.emit(.reasoningAvailable("Step \(index)"))
+        }
+        await transport.emit(.reasoningAvailable(" \u{0000}\n "))
+        await transport.release()
+        await send.value
+
+        let activity = try #require(model.testRoom?.transcript.receipt?.activity)
+        #expect(activity.count == AgentRoomsLiveChatModel.maximumLiveActivityCount)
+        #expect(activity.first?.detail == "Step 3")
+        #expect(activity.last?.detail == "Step 26")
     }
 
     @Test("empty and out-of-order events fail closed without leaking a partial assistant")
@@ -131,6 +164,9 @@ struct AgentRoomsLiveChatModelTests {
         #expect(model.testRoom?.transcript.messages.map(\.role) == [.human])
         #expect(model.testRoom?.transcript.messages.first?.deliveryState == .failed)
         #expect(model.turnState == .failed)
+        #expect(model.testRoom?.transcript.receipt?.sourceIdentity == "Hermes Runs API")
+        #expect(model.testRoom?.transcript.receipt?.runIdentity == nil)
+        #expect(model.testRoom?.transcript.receipt?.activity.isEmpty == true)
     }
 
     @Test("pre-accept failure restores a one-shot draft and retry remains idempotent")
@@ -219,6 +255,9 @@ struct AgentRoomsLiveChatModelTests {
         #expect(model.testRoom?.transcript.messages.first?.deliveryState == .failed)
         #expect(model.testRoom?.transcript.messages.first?.canRetry == true)
         #expect(model.composerMessage == AgentRoomsLiveChatModel.failedMessage)
+        #expect(model.testRoom?.transcript.receipt?.status == .failed)
+        #expect(model.testRoom?.transcript.receipt?.sourceIdentity == "Hermes Runs API")
+        #expect(model.testRoom?.transcript.receipt?.runIdentity == nil)
 
         await model.retry(clientMessageID: clientID, selectedRoomID: roomID)
 
@@ -230,8 +269,9 @@ struct AgentRoomsLiveChatModelTests {
 
     @Test("accepted interruption is sanitized and cannot be retried")
     func acceptedFailureDoesNotRetry() async throws {
+        let rawRunID = "accepted\u{0000}-run" + String(repeating: "x", count: 200)
         let transport = RoomsScriptedTransport(availability: .apiRuns, scripts: [
-            .failure(events: [.runStarted("accepted-run")], error: .privateDetail),
+            .failure(events: [.runStarted(rawRunID)], error: .privateDetail),
         ])
         let model = makeModel(transport)
         await model.startTestChat()
@@ -243,6 +283,10 @@ struct AgentRoomsLiveChatModelTests {
         #expect(!message.canRetry)
         #expect(model.composerMessage == AgentRoomsLiveChatModel.acceptedInterruptionMessage)
         #expect(model.composerMessage?.contains("credential") == false)
+        #expect(model.testRoom?.transcript.receipt?.runIdentity?.hasPrefix("accepted-run") == true)
+        #expect(model.testRoom?.transcript.receipt?.runIdentity?.contains("\u{0000}") == false)
+        #expect(model.testRoom?.transcript.receipt?.runIdentity?.count == AgentRoomsLiveChatModel.maximumRunIdentityLength)
+        #expect(model.testRoom?.transcript.receipt?.id.contains("\u{0000}") == false)
         await model.retry(clientMessageID: message.id, selectedRoomID: roomID)
         #expect(await transport.sentTexts() == ["Sensitive"])
     }
@@ -280,6 +324,8 @@ struct AgentRoomsLiveChatModelTests {
 
         #expect(model.testRoom?.transcript.messages.map(\.role) == [.human])
         #expect(model.testRoom?.transcript.receipt?.status == .cancelled)
+        #expect(model.testRoom?.transcript.receipt?.sourceIdentity == "Hermes Runs API")
+        #expect(model.testRoom?.transcript.receipt?.runIdentity == "run-late")
         #expect(await transport.stoppedRunIDs == ["run-late"])
     }
 
@@ -308,6 +354,8 @@ struct AgentRoomsLiveChatModelTests {
             ".onSubmit",
             "Shift-Return adds a line",
             "Retry failed message",
+            "DisclosureGroup",
+            "Turn activity receipt",
             ".accessibilityElement(children: .contain)",
             "Legacy messaging stays disabled; Cider Test Chat remains separate.",
             "Open Live Chat",
