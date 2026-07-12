@@ -136,6 +136,31 @@ struct ConversationRepositoryTests {
         }
     }
 
+    @Test("Bounded recent turns require a positive limit, clamp, and return newest first")
+    func boundedRecentTurns() throws {
+        try withRepository { _, repository in
+            let room = try repository.createRoom(roomDraft())
+            for _ in 1...501 {
+                _ = try repository.beginTurn(.init(roomID: room.id))
+            }
+
+            let recent = try repository.recentTurns(roomID: room.id, limit: 3)
+            #expect(recent.map(\.sequence) == [501, 500, 499])
+
+            let clamped = try repository.recentTurns(roomID: room.id, limit: 999)
+            #expect(clamped.count == 500)
+            #expect(clamped.first?.sequence == 501)
+            #expect(clamped.last?.sequence == 2)
+
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.recentTurns(roomID: room.id, limit: 0)
+            }
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.recentTurns(roomID: room.id, limit: -1)
+            }
+        }
+    }
+
     @Test("Source replay is idempotent and does not consume a sequence")
     func sourceReplayDoesNotConsumeSequence() throws {
         try withRepository { _, repository in

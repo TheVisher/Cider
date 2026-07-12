@@ -157,6 +157,7 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             },
             loadRecentMessages: { _, _ in [] },
             loadRuntimeBindings: { _, _ in [] },
+            loadRecentTurns: { _, _ in [] },
             now: { Date(timeIntervalSince1970: 10_000) }
         )
 
@@ -168,6 +169,30 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
         XCTAssertFalse(AgentRoomsReadService.unavailableMessage.contains("/private"))
         XCTAssertEqual(service.loadWorkspace(), .empty)
         XCTAssertEqual(attempts, 2)
+    }
+
+    func testRecentTurnReadFailureUsesExistingSanitizedUnavailableState() {
+        let room = makeRoom()
+        let service = AgentRoomsReadService(
+            loadRooms: { _, _ in [room] },
+            loadRecentMessages: { _, _ in [] },
+            loadRuntimeBindings: { _, _ in [] },
+            loadRecentTurns: { _, _ in
+                throw NSError(
+                    domain: "SQL /private/vault.db Authorization: Bearer private-message",
+                    code: 1
+                )
+            }
+        )
+
+        XCTAssertEqual(
+            service.loadWorkspace(),
+            .failed(message: AgentRoomsReadService.unavailableMessage)
+        )
+        XCTAssertEqual(
+            AgentRoomsReadService.unavailableMessage,
+            "Canonical Rooms data is temporarily unavailable. Try again."
+        )
     }
 
     func testReadServiceAppliesHardRoomMessageAndRuntimeBounds() {
@@ -188,6 +213,8 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
         var observedRoomLimit: Int?
         var observedMessageLimit: Int?
         var observedBindingLimit: Int?
+        var observedTurnLimit: Int?
+        var requestedTurnRoomIDs: [UUID] = []
         let service = AgentRoomsReadService(
             loadRooms: { lifecycle, limit in
                 XCTAssertEqual(lifecycle, .active)
@@ -203,6 +230,11 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
                 XCTAssertEqual(roomID, room.id)
                 observedBindingLimit = limit
                 return []
+            },
+            loadRecentTurns: { roomID, limit in
+                requestedTurnRoomIDs.append(roomID)
+                observedTurnLimit = limit
+                return []
             }
         )
 
@@ -210,6 +242,206 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
         XCTAssertEqual(observedRoomLimit, 20)
         XCTAssertEqual(observedMessageLimit, 100)
         XCTAssertEqual(observedBindingLimit, 20)
+        XCTAssertEqual(observedTurnLimit, 1)
+        XCTAssertEqual(requestedTurnRoomIDs, [room.id])
+    }
+
+    func testReadServiceRequestsExactlyOneNewestTurnForEveryLoadedRoom() {
+        let rooms = [makeRoom(title: "First"), makeRoom(title: "Second")]
+        var requests: [(UUID, Int)] = []
+        let service = AgentRoomsReadService(
+            loadRooms: { _, limit in
+                XCTAssertEqual(limit, 20)
+                return rooms
+            },
+            loadRecentMessages: { _, limit in
+                XCTAssertEqual(limit, 100)
+                return []
+            },
+            loadRuntimeBindings: { _, limit in
+                XCTAssertEqual(limit, 20)
+                return []
+            },
+            loadRecentTurns: { roomID, limit in
+                requests.append((roomID, limit))
+                return []
+            }
+        )
+
+        guard case .loaded = service.loadWorkspace() else { return XCTFail("Expected loaded projection") }
+        XCTAssertEqual(requests.map(\.0), rooms.map(\.id))
+        XCTAssertEqual(requests.map(\.1), [1, 1])
+    }
+
+    func testReadServiceMapsEligibleTerminalTurnsToGenericReceipts() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let room = makeRoom()
+        let binding = makeBinding(roomID: room.id, runtimeID: "hermes")
+        let cases: [(ConversationTurnStatus, AgentRoomReceiptStatus, String)] = [
+            (.completed, .completed, "Hermes completed a turn"),
+            (.failed, .failed, "Hermes turn failed"),
+            (.cancelled, .cancelled, "Hermes turn cancelled"),
+        ]
+
+        for (turnStatus, receiptStatus, title) in cases {
+            let turn = makeTurn(
+                roomID: room.id,
+                bindingID: binding.id,
+                status: turnStatus,
+                completedAt: now.addingTimeInterval(-60)
+            )
+            let mapped = try loadedRoom(
+                room: room,
+                bindings: [binding],
+                turns: [turn],
+                now: now
+            )
+
+            XCTAssertEqual(mapped.transcript.receipt, AgentRoomReceipt(
+                id: turn.id.uuidString,
+                title: title,
+                detail: "Source-backed canonical turn · 1m",
+                status: receiptStatus
+            ))
+        }
+    }
+
+    func testReceiptRuntimeComesFromTheTurnsExactRoomBinding() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let room = makeRoom()
+        let activeHermes = makeBinding(roomID: room.id, runtimeID: "hermes")
+        var turnCodex = makeBinding(roomID: room.id, runtimeID: "codex")
+        turnCodex.state = .inactive
+        let turn = makeTurn(
+            roomID: room.id,
+            bindingID: turnCodex.id,
+            completedAt: now
+        )
+
+        let mapped = try loadedRoom(
+            room: room,
+            bindings: [activeHermes, turnCodex],
+            turns: [turn],
+            now: now
+        )
+        XCTAssertEqual(mapped.transcript.runtimeLabel, "Hermes")
+        XCTAssertEqual(mapped.transcript.receipt?.title, "Codex completed a turn")
+    }
+
+    func testReadServiceOmitsMalformedUnboundAndNonterminalNewestTurns() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let room = makeRoom()
+        let binding = makeBinding(roomID: room.id)
+        let otherRoomBinding = makeBinding(roomID: UUID())
+        let base = makeTurn(roomID: room.id, bindingID: binding.id, completedAt: now)
+        var missingSource = base
+        missingSource.source = nil
+        var missingBinding = base
+        missingBinding.runtimeBindingID = nil
+        var unknownBinding = base
+        unknownBinding.runtimeBindingID = UUID()
+        var crossRoomBinding = base
+        crossRoomBinding.runtimeBindingID = otherRoomBinding.id
+        var missingCompletedAt = base
+        missingCompletedAt.completedAt = nil
+        let ineligible: [ConversationTurn] = [
+            missingSource,
+            replacingSource(base, with: .init(namespace: "   ", id: "turn")),
+            replacingSource(base, with: .init(namespace: "source", id: "\n\t")),
+            missingBinding,
+            unknownBinding,
+            crossRoomBinding,
+            missingCompletedAt,
+        ] + [ConversationTurnStatus.unknown, .pending, .running, .waiting].map {
+            var copy = base
+            copy.status = $0
+            return copy
+        }
+
+        for turn in ineligible {
+            let mapped = try loadedRoom(
+                room: room,
+                bindings: [binding, otherRoomBinding],
+                turns: [turn],
+                now: now
+            )
+            XCTAssertNil(mapped.transcript.receipt, "Expected no receipt for \(turn)")
+        }
+    }
+
+    func testNewestIneligibleTurnHidesOlderEligibleReceipt() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let room = makeRoom()
+        let binding = makeBinding(roomID: room.id)
+        let newest = makeTurn(
+            roomID: room.id,
+            sequence: 2,
+            bindingID: binding.id,
+            status: .running,
+            completedAt: nil
+        )
+        let older = makeTurn(
+            roomID: room.id,
+            sequence: 1,
+            bindingID: binding.id,
+            status: .completed,
+            completedAt: now.addingTimeInterval(-60)
+        )
+
+        let mapped = try loadedRoom(
+            room: room,
+            bindings: [binding],
+            turns: [newest, older],
+            now: now
+        )
+        XCTAssertNil(mapped.transcript.receipt)
+    }
+
+    func testReceiptMappingNeverExposesRawSourceErrorOrPrivateEvidence() throws {
+        let privateEvidence = "SQL /private/vault.db Authorization: Bearer secret private-message"
+        let now = Date(timeIntervalSince1970: 10_000)
+        let room = makeRoom()
+        let binding = makeBinding(roomID: room.id, runtimeID: "codex")
+        let turn = makeTurn(
+            roomID: room.id,
+            bindingID: binding.id,
+            source: .init(namespace: privateEvidence, id: privateEvidence),
+            status: .failed,
+            error: .init(code: privateEvidence, detail: privateEvidence),
+            completedAt: now
+        )
+
+        let mapped = try loadedRoom(room: room, bindings: [binding], turns: [turn], now: now)
+        let receipt = try XCTUnwrap(mapped.transcript.receipt)
+        XCTAssertEqual(receipt.title, "Codex turn failed")
+        XCTAssertEqual(receipt.detail, "Source-backed canonical turn · Now")
+        XCTAssertFalse(String(describing: receipt).contains(privateEvidence))
+
+        let viewSource = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent(
+                "Sources/Cider/Views/AgentRooms/AgentRoomsWorkspaceView.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertFalse(viewSource.contains(privateEvidence))
+    }
+
+    func testReceiptOutcomesHaveDistinctIconsSemanticColorsAndVoiceOverWording() throws {
+        let source = try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent(
+                "Sources/Cider/Views/AgentRooms/AgentRoomsWorkspaceView.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("checkmark.circle.fill"))
+        XCTAssertTrue(source.contains("xmark.octagon.fill"))
+        XCTAssertTrue(source.contains("slash.circle.fill"))
+        XCTAssertTrue(source.contains("CiderColors.success"))
+        XCTAssertTrue(source.contains("CiderColors.destructive"))
+        XCTAssertTrue(source.contains("CiderColors.warning"))
+        XCTAssertTrue(source.contains("Completed canonical turn receipt"))
+        XCTAssertTrue(source.contains("Failed canonical turn receipt"))
+        XCTAssertTrue(source.contains("Cancelled canonical turn receipt"))
     }
 
     func testReadServiceDoesNotMutateCanonicalRowsOrSequences() throws {
@@ -231,10 +463,18 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
                 contentText: "Read only",
                 createdAt: now
             ), intent: .historicalReplay)
+            let turn = try repository.beginTurn(.init(
+                roomID: room.id,
+                runtimeBindingID: binding.id,
+                source: .init(namespace: "codex.process.v1", id: "turn-1")
+            ))
+            _ = try repository.transitionTurn(id: turn.id, to: .running, at: now)
+            _ = try repository.transitionTurn(id: turn.id, to: .completed, at: now)
 
             let roomBefore = try XCTUnwrap(repository.room(id: room.id))
             let messagesBefore = try repository.messages(roomID: room.id)
             let bindingsBefore = try repository.bindings(roomID: room.id)
+            let turnsBefore = try repository.turns(roomID: room.id)
             let countsBefore = try conversationRowCounts(database)
 
             let state = AgentRoomsReadService(repository: repository, now: { now }).loadWorkspace()
@@ -243,6 +483,7 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             XCTAssertEqual(try repository.room(id: room.id), roomBefore)
             XCTAssertEqual(try repository.messages(roomID: room.id), messagesBefore)
             XCTAssertEqual(try repository.bindings(roomID: room.id), bindingsBefore)
+            XCTAssertEqual(try repository.turns(roomID: room.id), turnsBefore)
             XCTAssertEqual(try conversationRowCounts(database), countsBefore)
         }
     }
@@ -265,6 +506,9 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             "shadow activation",
             "registry write",
             "HermesBridgeTransport",
+            "AIAssistantViewModel",
+            "AgentOrchestrator",
+            "LegacyConversationSnapshotMapper",
         ]
 
         for relativePath in relativePaths {
@@ -323,5 +567,100 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             XCTAssertTrue(try statement.step())
             return statement.int64(at: 0)
         }
+    }
+
+    private func makeRoom(title: String = "Room") -> ConversationRoom {
+        ConversationRoom(
+            id: UUID(),
+            stableKey: nil,
+            title: title,
+            kind: "chat",
+            lifecycleState: .active,
+            nextTurnSequence: 1,
+            nextMessageSequence: 1,
+            metadata: [:],
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            archivedAt: nil,
+            trashedAt: nil
+        )
+    }
+
+    private func makeBinding(
+        roomID: UUID,
+        runtimeID: String = "hermes"
+    ) -> ConversationRuntimeBinding {
+        ConversationRuntimeBinding(
+            id: UUID(),
+            roomID: roomID,
+            parentBindingID: nil,
+            runtimeID: runtimeID,
+            transportID: "bounded-read-test",
+            sourceNamespace: "test.runtime.v1",
+            externalSessionID: nil,
+            state: .active,
+            cursorMessageID: nil,
+            cursorTimestamp: nil,
+            metadata: [:],
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+    }
+
+    private func makeTurn(
+        roomID: UUID,
+        sequence: Int64 = 1,
+        bindingID: UUID?,
+        source: ConversationSourceIdentity? = .init(namespace: "test.turn.v1", id: "turn-1"),
+        status: ConversationTurnStatus = .completed,
+        error: ConversationTurnError? = nil,
+        completedAt: Date?
+    ) -> ConversationTurn {
+        ConversationTurn(
+            id: UUID(),
+            roomID: roomID,
+            sequence: sequence,
+            runtimeBindingID: bindingID,
+            source: source,
+            status: status,
+            error: error,
+            metadata: [:],
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            startedAt: Date(timeIntervalSince1970: 1_001),
+            completedAt: completedAt,
+            updatedAt: completedAt ?? Date(timeIntervalSince1970: 1_001)
+        )
+    }
+
+    private func replacingSource(
+        _ turn: ConversationTurn,
+        with source: ConversationSourceIdentity
+    ) -> ConversationTurn {
+        var copy = turn
+        copy.source = source
+        return copy
+    }
+
+    private func loadedRoom(
+        room: ConversationRoom,
+        bindings: [ConversationRuntimeBinding],
+        turns: [ConversationTurn],
+        now: Date
+    ) throws -> AgentRoom {
+        let service = AgentRoomsReadService(
+            loadRooms: { _, _ in [room] },
+            loadRecentMessages: { _, _ in [] },
+            loadRuntimeBindings: { _, _ in bindings },
+            loadRecentTurns: { roomID, limit in
+                XCTAssertEqual(roomID, room.id)
+                XCTAssertEqual(limit, 1)
+                return turns
+            },
+            now: { now }
+        )
+        guard case .loaded(let rooms, _) = service.loadWorkspace() else {
+            throw NSError(domain: "Expected loaded Rooms state", code: 1)
+        }
+        return try XCTUnwrap(rooms.first)
     }
 }

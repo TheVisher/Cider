@@ -20,6 +20,8 @@ struct AgentRoomLink: Identifiable, Equatable, Sendable {
 
 enum AgentRoomReceiptStatus: String, Equatable, Sendable {
     case completed
+    case failed
+    case cancelled
 }
 
 struct AgentRoomReceipt: Identifiable, Equatable, Sendable {

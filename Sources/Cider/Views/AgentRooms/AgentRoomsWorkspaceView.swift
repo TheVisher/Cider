@@ -393,9 +393,10 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private func receiptRow(_ receipt: AgentRoomReceipt) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(CiderColors.success)
+        let presentation = receiptPresentation(for: receipt.status)
+        return HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: presentation.symbol)
+                .foregroundColor(presentation.color)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(receipt.title)
                     .font(CiderFont.bodySemibold)
@@ -406,7 +407,20 @@ struct AgentRoomsWorkspaceView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Completed activity receipt, \(receipt.title), \(receipt.detail)")
+        .accessibilityLabel("\(presentation.voiceOverWording), \(receipt.title), \(receipt.detail)")
+    }
+
+    private func receiptPresentation(
+        for status: AgentRoomReceiptStatus
+    ) -> (symbol: String, color: Color, voiceOverWording: String) {
+        switch status {
+        case .completed:
+            ("checkmark.circle.fill", CiderColors.success, "Completed canonical turn receipt")
+        case .failed:
+            ("xmark.octagon.fill", CiderColors.destructive, "Failed canonical turn receipt")
+        case .cancelled:
+            ("slash.circle.fill", CiderColors.warning, "Cancelled canonical turn receipt")
+        }
     }
 
     private func futureArtifactPlaceholder(_ artifact: AgentRoomFutureArtifact) -> some View {

@@ -327,6 +327,25 @@ final class ConversationRepository {
         return results
     }
 
+    /// Returns a bounded turn projection in newest-first canonical sequence order.
+    func recentTurns(roomID: UUID, limit: Int) throws -> [ConversationTurn] {
+        let boundedLimit = try validatedReadLimit(limit)
+        let statement = try database.prepare("""
+            SELECT id, room_id, sequence, runtime_binding_id,
+                   source_namespace, source_turn_id, status,
+                   error_code, error_detail, metadata_json,
+                   created_at, started_at, completed_at, updated_at
+            FROM conversation_turns
+            WHERE room_id = ?
+            ORDER BY sequence DESC
+            LIMIT ?;
+            """)
+        statement.bind(roomID.uuidString, at: 1).bind(boundedLimit, at: 2)
+        var results: [ConversationTurn] = []
+        while try statement.step() { results.append(try decodeTurn(statement)) }
+        return results
+    }
+
     func transitionTurn(
         id: UUID,
         to status: ConversationTurnStatus,
