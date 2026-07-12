@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct AgentRoomsWorkspaceView: View {
-    let state: AgentRoomsWorkspaceState
+    let loadWorkspace: @MainActor () async -> AgentRoomsWorkspaceState
     let onOpenLiveChat: () -> Void
-    var onRetry: (() -> Void)?
 
+    @State private var state: AgentRoomsWorkspaceState
     @State private var selectedRoomID: String?
     @FocusState private var focusedRegion: FocusRegion?
 
@@ -14,13 +14,20 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     init(
-        state: AgentRoomsWorkspaceState = AgentRoomsFixtureProvider.workspaceState,
-        onOpenLiveChat: @escaping () -> Void,
-        onRetry: (() -> Void)? = nil
+        loadWorkspace: @escaping @MainActor () async -> AgentRoomsWorkspaceState,
+        onOpenLiveChat: @escaping () -> Void
     ) {
-        self.state = state
+        self.loadWorkspace = loadWorkspace
         self.onOpenLiveChat = onOpenLiveChat
-        self.onRetry = onRetry
+        _state = State(initialValue: .loading)
+        _selectedRoomID = State(initialValue: nil)
+    }
+
+    /// Explicit state injection is reserved for previews and focused view tests.
+    init(state: AgentRoomsWorkspaceState, onOpenLiveChat: @escaping () -> Void) {
+        self.loadWorkspace = { state }
+        self.onOpenLiveChat = onOpenLiveChat
+        _state = State(initialValue: state)
         if case .loaded(_, let selectedRoomID) = state {
             _selectedRoomID = State(initialValue: selectedRoomID)
         } else {
@@ -36,6 +43,9 @@ struct AgentRoomsWorkspaceView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(CiderColors.surfaceHighlight)
+        .task {
+            await reload()
+        }
         .onChange(of: state) { _, newState in
             if case .loaded(let rooms, let storedSelection) = newState {
                 selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
@@ -72,17 +82,17 @@ struct AgentRoomsWorkspaceView: View {
                     .font(CiderFont.displaySemibold)
                     .foregroundColor(CiderColors.primary)
 
-                Text("Preview data")
+                Text("Read-only · Canonical incomplete")
                     .font(CiderFont.microMedium)
                     .foregroundColor(CiderColors.secondary)
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, Spacing.xs)
                     .background(Capsule().fill(CiderColors.surfaceInput))
                     .overlay(Capsule().stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
-                    .accessibilityLabel("Preview data, not live")
+                    .accessibilityLabel("Read-only, incomplete canonical data")
             }
 
-            Text("Durable threads for work with Cider agents.")
+            Text("A secondary, incomplete view of durable agent threads.")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .lineLimit(1)
@@ -133,13 +143,13 @@ struct AgentRoomsWorkspaceView: View {
         VStack(spacing: Spacing.md) {
             ProgressView()
                 .controlSize(.small)
-            Text("Loading Rooms preview")
+            Text("Loading read-only Rooms")
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading Rooms preview")
+        .accessibilityLabel("Loading read-only Rooms")
     }
 
     private var emptyState: some View {
@@ -147,10 +157,10 @@ struct AgentRoomsWorkspaceView: View {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.tertiary)
-            Text("No rooms to show yet")
+            Text("No canonical rooms available yet")
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.secondary)
-            Text("Live chat is still available in the Hermes panel.")
+            Text("Existing live legacy chats remain in the Hermes panel.")
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)
@@ -165,17 +175,17 @@ struct AgentRoomsWorkspaceView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.secondary)
-            Text("Rooms preview unavailable")
+            Text("Rooms unavailable")
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.primary)
             Text(message)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)
-            if let onRetry {
-                Button("Retry", action: onRetry)
-                    .buttonStyle(.bordered)
+            Button("Retry") {
+                Task { await reload() }
             }
+            .buttonStyle(.bordered)
         }
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -335,12 +345,12 @@ struct AgentRoomsWorkspaceView: View {
                     .fill(CiderColors.secondary)
                     .frame(width: 5, height: 5)
                     .accessibilityHidden(true)
-                Text("\(room.transcript.runtimeLabel) runtime · Preview transcript")
+                Text("\(room.transcript.runtimeLabel) runtime · Read-only transcript")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(room.transcript.runtimeLabel) runtime, preview transcript")
+            .accessibilityLabel("\(room.transcript.runtimeLabel) runtime, read-only transcript")
         }
     }
 
@@ -437,5 +447,11 @@ struct AgentRoomsWorkspaceView: View {
         .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Messaging disabled. Live messaging remains in the Hermes panel.")
+    }
+
+    @MainActor
+    private func reload() async {
+        state = .loading
+        state = await loadWorkspace()
     }
 }

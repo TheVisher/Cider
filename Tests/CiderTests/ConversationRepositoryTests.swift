@@ -80,6 +80,62 @@ struct ConversationRepositoryTests {
         }
     }
 
+    @Test("Bounded room reads filter lifecycle and deterministically order equal timestamps")
+    func boundedRoomReads() throws {
+        try withRepository { _, repository in
+            let timestamp = Date(timeIntervalSince1970: 1_000)
+            let older = try repository.createRoom(.init(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+                title: "Older",
+                createdAt: timestamp.addingTimeInterval(-1),
+                updatedAt: timestamp.addingTimeInterval(-1)
+            ))
+            let second = try repository.createRoom(.init(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                title: "Second",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            ))
+            let first = try repository.createRoom(.init(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                title: "First",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            ))
+            let archived = try repository.createRoom(.init(title: "Archived", createdAt: timestamp.addingTimeInterval(1)))
+            try repository.setLifecycle(roomID: archived.id, state: .archived, at: timestamp.addingTimeInterval(2))
+
+            let rooms = try repository.rooms(lifecycle: .active, limit: 2)
+            #expect(rooms.map(\.id) == [first.id, second.id])
+            #expect(!rooms.contains(where: { $0.id == older.id }))
+            #expect(!rooms.contains(where: { $0.id == archived.id }))
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.rooms(lifecycle: .active, limit: 0)
+            }
+        }
+    }
+
+    @Test("Bounded recent messages select newest and return ascending sequence")
+    func boundedRecentMessages() throws {
+        try withRepository { _, repository in
+            let room = try repository.createRoom(roomDraft())
+            for index in 1...5 {
+                _ = try repository.upsertMessage(.init(
+                    roomID: room.id,
+                    role: index.isMultiple(of: 2) ? "assistant" : "user",
+                    contentText: "message-\(index)"
+                ), intent: .historicalReplay)
+            }
+
+            let recent = try repository.recentMessages(roomID: room.id, limit: 3)
+            #expect(recent.map(\.sequence) == [3, 4, 5])
+            #expect(recent.map(\.contentText) == ["message-3", "message-4", "message-5"])
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.recentMessages(roomID: room.id, limit: -1)
+            }
+        }
+    }
+
     @Test("Source replay is idempotent and does not consume a sequence")
     func sourceReplayDoesNotConsumeSequence() throws {
         try withRepository { _, repository in

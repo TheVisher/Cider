@@ -47,6 +47,7 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let preview: String
+    let updatedAt: Date
     let relativeTime: String
     let transcript: AgentRoomTranscript
 }
@@ -91,6 +92,7 @@ enum AgentRoomsFixtureProvider {
         id: "cider-product",
         title: "Cider Product",
         preview: "The first native Rooms slice is ready to inspect.",
+        updatedAt: Date(timeIntervalSince1970: 1_750_000_000),
         relativeTime: "Now",
         transcript: AgentRoomTranscript(
             runtimeLabel: "Hermes",
@@ -143,6 +145,7 @@ enum AgentRoomsFixtureProvider {
         id: "weekly-review",
         title: "Weekly Review",
         preview: "A durable thread for decisions that should survive the week.",
+        updatedAt: Date(timeIntervalSince1970: 1_749_992_800),
         relativeTime: "2h",
         transcript: AgentRoomTranscript(
             runtimeLabel: "Hermes",
@@ -170,6 +173,7 @@ enum AgentRoomsFixtureProvider {
         id: "capture-quality",
         title: "Capture Quality",
         preview: "Checking whether saves keep their useful provenance.",
+        updatedAt: Date(timeIntervalSince1970: 1_749_913_600),
         relativeTime: "Yesterday",
         transcript: AgentRoomTranscript(
             runtimeLabel: "Hermes",

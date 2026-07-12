@@ -411,7 +411,11 @@ extension CiderPanelView {
                 )
             case .agentRooms:
                 AgentRoomsWorkspaceView(
-                    state: AgentRoomsFixtureProvider.workspaceState,
+                    loadWorkspace: {
+                        AgentRoomsReadService(
+                            repository: ConversationRepository(database: CiderDatabase.shared)
+                        ).loadWorkspace()
+                    },
                     onOpenLiveChat: {
                         requestFloat(.aiAssistant)
                     }

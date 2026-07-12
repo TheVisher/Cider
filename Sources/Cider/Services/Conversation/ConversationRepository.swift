@@ -18,6 +18,7 @@ enum ConversationRepositoryError: Error, Equatable, LocalizedError {
 
 @MainActor
 final class ConversationRepository {
+    private static let maximumBoundedReadLimit = 500
     private let database: CiderDatabase
 
     init(database: CiderDatabase = .shared) {
@@ -71,6 +72,24 @@ final class ConversationRepository {
             """)
         statement.bind(stableKey, at: 1)
         return try statement.step() ? try decodeRoom(statement) : nil
+    }
+
+    /// Returns a bounded lifecycle projection ordered newest first with stable UUID ties.
+    func rooms(lifecycle: ConversationRoomLifecycle, limit: Int) throws -> [ConversationRoom] {
+        let boundedLimit = try validatedReadLimit(limit)
+        let statement = try database.prepare("""
+            SELECT id, stable_key, title, kind, lifecycle_state,
+                   next_turn_sequence, next_message_sequence, metadata_json,
+                   created_at, updated_at, archived_at, trashed_at
+            FROM conversation_rooms
+            WHERE lifecycle_state = ?
+            ORDER BY updated_at DESC, id ASC
+            LIMIT ?;
+            """)
+        statement.bind(lifecycle.rawValue, at: 1).bind(boundedLimit, at: 2)
+        var results: [ConversationRoom] = []
+        while try statement.step() { results.append(try decodeRoom(statement)) }
+        return results
     }
 
     func setLifecycle(roomID: UUID, state: ConversationRoomLifecycle, at date: Date) throws {
@@ -204,6 +223,25 @@ final class ConversationRepository {
             ORDER BY created_at, id;
             """)
         statement.bind(roomID.uuidString, at: 1)
+        var results: [ConversationRuntimeBinding] = []
+        while try statement.step() { results.append(try decodeBinding(statement)) }
+        return results
+    }
+
+    /// Returns a bounded runtime-binding projection, newest first, for read-only labels.
+    func runtimeBindings(roomID: UUID, limit: Int) throws -> [ConversationRuntimeBinding] {
+        let boundedLimit = try validatedReadLimit(limit)
+        let statement = try database.prepare("""
+            SELECT id, room_id, parent_binding_id, runtime_id, transport_id,
+                   source_namespace, external_session_id, binding_state,
+                   cursor_message_id, cursor_timestamp, metadata_json,
+                   created_at, updated_at
+            FROM conversation_runtime_bindings
+            WHERE room_id = ?
+            ORDER BY updated_at DESC, id ASC
+            LIMIT ?;
+            """)
+        statement.bind(roomID.uuidString, at: 1).bind(boundedLimit, at: 2)
         var results: [ConversationRuntimeBinding] = []
         while try statement.step() { results.append(try decodeBinding(statement)) }
         return results
@@ -445,6 +483,25 @@ final class ConversationRepository {
         return ancestry.reversed()
     }
 
+    /// Selects the newest bounded messages, then returns them in transcript sequence order.
+    func recentMessages(roomID: UUID, limit: Int) throws -> [ConversationMessage] {
+        let boundedLimit = try validatedReadLimit(limit)
+        let statement = try database.prepare("""
+            SELECT id, room_id, turn_id, runtime_binding_id, parent_message_id,
+                   sequence, role, content_text, status, finish_reason,
+                   source_namespace, source_message_id, source_created_at,
+                   metadata_json, created_at, updated_at
+            FROM conversation_messages
+            WHERE room_id = ?
+            ORDER BY sequence DESC
+            LIMIT ?;
+            """)
+        statement.bind(roomID.uuidString, at: 1).bind(boundedLimit, at: 2)
+        var newestFirst: [ConversationMessage] = []
+        while try statement.step() { newestFirst.append(try decodeMessage(statement)) }
+        return newestFirst.reversed()
+    }
+
     private func allMessages(roomID: UUID) throws -> [ConversationMessage] {
         let statement = try database.prepare("""
             SELECT id, room_id, turn_id, runtime_binding_id, parent_message_id,
@@ -459,6 +516,13 @@ final class ConversationRepository {
         var results: [ConversationMessage] = []
         while try statement.step() { results.append(try decodeMessage(statement)) }
         return results
+    }
+
+    private func validatedReadLimit(_ requestedLimit: Int) throws -> Int {
+        guard requestedLimit > 0 else {
+            throw ConversationRepositoryError.invalidDraft("Read limit must be positive.")
+        }
+        return min(requestedLimit, Self.maximumBoundedReadLimit)
     }
 
     private func allocateSequence(roomID: UUID, column: String) throws -> Int64 {
