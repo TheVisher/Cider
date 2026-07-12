@@ -20,7 +20,7 @@ struct AgentRoomMessage: Identifiable, Equatable, Sendable {
     let id: String
     let role: AgentRoomMessageRole
     let author: String
-    let body: String
+    var body: String
     var deliveryState: AgentRoomMessageDeliveryState = .sent
     var canRetry: Bool = false
 }

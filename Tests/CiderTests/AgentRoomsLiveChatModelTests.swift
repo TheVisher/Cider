@@ -64,6 +64,110 @@ struct AgentRoomsLiveChatModelTests {
         #expect(await transport.sentTexts() == ["Tonight?"])
     }
 
+    @Test("incremental deltas are sanitized, bounded, and reconciled with the final assistant")
+    func incrementalStreamingReconcilesFinal() async throws {
+        let transport = RoomsGateTransport(
+            envelope: envelope(runID: "run-stream", user: "Stream", assistant: "Hello world")
+        )
+        let model = makeModel(transport)
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+        let send = Task { await model.send("Stream", selectedRoomID: roomID) }
+        await transport.waitUntilSendStarted()
+
+        await transport.emit(.messageDelta("Hello\u{0000}"))
+        await transport.emit(.messageDelta(" world"))
+        await transport.emit(.messageDelta(""))
+
+        let streaming = try #require(model.testRoom?.transcript.messages.last)
+        #expect(streaming.role == .agent)
+        #expect(streaming.body == "Hello world")
+        #expect(model.turnState == .streaming)
+
+        await transport.release()
+        await send.value
+        let completed = try #require(model.testRoom?.transcript.messages)
+        #expect(completed.map(\.body) == ["Stream", "Hello world"])
+        #expect(model.turnState == .completed)
+    }
+
+    @Test("tool and reasoning events preserve ordering without exposing malformed or unbounded text")
+    func eventProjectionIsOrderedAndBounded() async throws {
+        let transport = RoomsGateTransport(
+            envelope: envelope(runID: "run-events", user: "Work", assistant: "Done")
+        )
+        let model = makeModel(transport)
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+        let send = Task { await model.send("Work", selectedRoomID: roomID) }
+        await transport.waitUntilSendStarted()
+
+        await transport.emit(.reasoningAvailable("  Planning\u{0007}  "))
+        await transport.emit(.toolStarted(name: " Search ", preview: String(repeating: "x", count: 2_000)))
+        await transport.emit(.toolCompleted(name: "Search", isError: false))
+
+        #expect(model.liveActivity.map(\.kind) == [.reasoning, .toolStarted, .toolCompleted])
+        #expect(model.liveActivity.first?.detail == "Planning")
+        #expect(model.liveActivity.allSatisfy { $0.detail.count <= AgentRoomsLiveChatModel.maximumEventDetailLength })
+
+        await transport.release()
+        await send.value
+    }
+
+    @Test("empty and out-of-order events fail closed without leaking a partial assistant")
+    func malformedEventsFailClosed() async throws {
+        let transport = RoomsScriptedTransport(availability: .apiRuns, scripts: [
+            .success(
+                events: [.messageDelta("too early"), .runStarted(""), .messageDelta("")],
+                envelope: envelope(runID: "run-malformed", user: "Check", assistant: "Do not show")
+            ),
+        ])
+        let model = makeModel(transport)
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+
+        await model.send("Check", selectedRoomID: roomID)
+
+        #expect(model.testRoom?.transcript.messages.map(\.role) == [.human])
+        #expect(model.testRoom?.transcript.messages.first?.deliveryState == .failed)
+        #expect(model.turnState == .failed)
+    }
+
+    @Test("pre-accept failure restores a one-shot draft and retry remains idempotent")
+    func failedDraftRecovery() async throws {
+        let transport = RoomsScriptedTransport(availability: .apiRuns, scripts: [
+            .failure(events: [], error: .disconnected),
+            .success(events: [.runStarted("run-restored")], envelope: envelope(runID: "run-restored", user: "Keep this", assistant: "Kept")),
+        ])
+        let model = makeModel(transport)
+        await model.startTestChat()
+        let roomID = try #require(model.testRoom?.id)
+
+        await model.send("Keep this", selectedRoomID: roomID)
+        #expect(model.turnState == .failed)
+        #expect(model.takeRecoveredDraft() == "Keep this")
+        #expect(model.takeRecoveredDraft() == nil)
+
+        let clientID = try #require(model.testRoom?.transcript.messages.first?.id)
+        let first = Task { await model.retry(clientMessageID: clientID, selectedRoomID: roomID) }
+        await model.retry(clientMessageID: clientID, selectedRoomID: roomID)
+        await first.value
+        #expect(await transport.sentTexts() == ["Keep this", "Keep this"])
+    }
+
+    @Test("follow policy follows only near the bottom and resumes after returning")
+    func transcriptFollowPolicy() {
+        var policy = AgentRoomsTranscriptFollowPolicy()
+        let initiallyFollows = policy.shouldFollow(distanceFromBottom: 12)
+        #expect(initiallyFollows)
+        let followsAfterScrollingUp = policy.shouldFollow(distanceFromBottom: 240)
+        #expect(!followsAfterScrollingUp)
+        #expect(!policy.shouldAutoScrollForNewContent)
+        let followsAfterReturning = policy.shouldFollow(distanceFromBottom: 20)
+        #expect(followsAfterReturning)
+        #expect(policy.shouldAutoScrollForNewContent)
+    }
+
     @Test("whitespace and over-limit messages never reach transport")
     func validation() async throws {
         let transport = RoomsScriptedTransport(availability: .apiRuns, scripts: [])
@@ -269,6 +373,7 @@ private actor RoomsGateTransport: HermesBridgeTransport {
     private var released = false
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var eventHandler: (@Sendable (HermesRunEvent) async -> Void)?
 
     init(envelope: HermesRunCompletionEnvelope) { self.resultEnvelope = envelope }
 
@@ -286,6 +391,7 @@ private actor RoomsGateTransport: HermesBridgeTransport {
         startWaiters.removeAll()
         waiters.forEach { $0.resume() }
         await onEvent?(.runStarted(resultEnvelope.runID ?? ""))
+        eventHandler = onEvent
         if !released {
             await withCheckedContinuation { releaseWaiters.append($0) }
         }
@@ -304,6 +410,10 @@ private actor RoomsGateTransport: HermesBridgeTransport {
         let waiters = releaseWaiters
         releaseWaiters.removeAll()
         waiters.forEach { $0.resume() }
+    }
+
+    func emit(_ event: HermesRunEvent) async {
+        await eventHandler?(event)
     }
 }
 

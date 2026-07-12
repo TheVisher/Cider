@@ -7,10 +7,35 @@ enum AgentRoomsLiveTransportState: Equatable, Sendable {
     case blocked
 }
 
+enum AgentRoomsLiveTurnState: String, Equatable, Sendable {
+    case idle, sending, streaming, cancelling, failed, completed
+}
+
+struct AgentRoomsLiveActivity: Identifiable, Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case reasoning, toolStarted, toolCompleted }
+    let id: UUID
+    let kind: Kind
+    let detail: String
+}
+
+struct AgentRoomsTranscriptFollowPolicy: Equatable, Sendable {
+    static let nearBottomDistance: CGFloat = 72
+    private(set) var shouldAutoScrollForNewContent = true
+
+    @discardableResult
+    mutating func shouldFollow(distanceFromBottom: CGFloat) -> Bool {
+        shouldAutoScrollForNewContent = distanceFromBottom <= Self.nearBottomDistance
+        return shouldAutoScrollForNewContent
+    }
+}
+
 @MainActor
 final class AgentRoomsLiveChatModel: ObservableObject {
     static let roomTitle = "Cider Test Chat"
     static let maximumMessageLength = 4_000
+    static let maximumStreamingMessageLength = 32_000
+    static let maximumEventDetailLength = 240
+    static let maximumLiveActivityCount = 24
     static let unavailableMessage = "Hermes live transport is not ready. Open Live Chat to check the connection."
     static let failedMessage = "Hermes could not complete this message."
     static let acceptedInterruptionMessage = "Hermes accepted the message, but the response was interrupted. It cannot be retried safely."
@@ -19,6 +44,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     @Published private(set) var transportState: AgentRoomsLiveTransportState = .unchecked
     @Published private(set) var composerMessage: String?
     @Published private(set) var activeRunCanBeCancelled = false
+    @Published private(set) var turnState: AgentRoomsLiveTurnState = .idle
+    @Published private(set) var liveActivity: [AgentRoomsLiveActivity] = []
 
     private let transport: any HermesBridgeTransport
     private let turnCoordinator: HermesTurnCoordinator
@@ -35,6 +62,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var activeRunID: String?
     private var eventIntegrityFailed = false
     private var completedAssistantSourceIDs = Set<String>()
+    private var streamingAssistantID: String?
+    private var recoveredDraft: String?
 
     init(
         transport: any HermesBridgeTransport,
@@ -110,6 +139,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         await performSend(text: trimmed, clientID: clientID)
     }
 
+    func takeRecoveredDraft() -> String? {
+        defer { recoveredDraft = nil }
+        return recoveredDraft
+    }
+
     func retry(clientMessageID: String, selectedRoomID: String?) async {
         guard isComposerEnabled(selectedRoomID: selectedRoomID),
               let index = roomMessages.firstIndex(where: {
@@ -117,6 +151,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
               })
         else { return }
         let text = roomMessages[index].body
+        recoveredDraft = nil
         roomMessages[index].deliveryState = .pending
         roomMessages[index].canRetry = false
         composerMessage = nil
@@ -126,11 +161,18 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     func cancelActiveSend() async {
         guard let attemptID = activeAttemptID else { return }
+        turnState = .cancelling
         if let runID = activeRunID {
             try? await transport.stop(runID: runID)
         }
         guard activeAttemptID == attemptID else { return }
+        if activeRunID == nil,
+           let activeClientMessageID,
+           let message = roomMessages.first(where: { $0.id == activeClientMessageID }) {
+            recoveredDraft = message.body
+        }
         failActiveMessage(message: "Hermes response cancelled.", canRetry: activeRunID == nil)
+        turnState = .failed
         receipt = .init(
             id: "cider-room-receipt:\(makeID().uuidString)",
             title: "Hermes turn cancelled",
@@ -152,16 +194,22 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         eventIntegrityFailed = false
         composerMessage = nil
         receipt = nil
+        turnState = .sending
+        liveActivity = []
+        streamingAssistantID = nil
 
         do {
             let result = try await coordinatedSend(text: text, state: state, attemptID: attemptID)
             guard activeAttemptID == attemptID else { return }
             try applyCompletion(result.completion, expectedText: text, clientID: clientID)
+            turnState = .completed
             clearActiveAttempt()
             rebuildRoom()
         } catch is CancellationError {
             guard activeAttemptID == attemptID else { return }
             failActiveMessage(message: "Hermes response was interrupted.", canRetry: activeRunID == nil)
+            recoveredDraft = activeRunID == nil ? text : nil
+            turnState = .failed
             receipt = .init(
                 id: "cider-room-receipt:\(makeID().uuidString)",
                 title: "Hermes turn interrupted",
@@ -179,6 +227,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 message: accepted ? Self.acceptedInterruptionMessage : Self.failedMessage,
                 canRetry: !accepted
             )
+            recoveredDraft = accepted ? nil : text
+            turnState = .failed
             receipt = .init(
                 id: "cider-room-receipt:\(makeID().uuidString)",
                 title: accepted ? "Hermes response interrupted" : "Hermes send failed",
@@ -219,18 +269,86 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         guard activeAttemptID == attemptID else { return }
         switch event {
         case .runStarted(let runID):
+            guard nonempty(runID) != nil else {
+                eventIntegrityFailed = true
+                return
+            }
             if let activeRunID, activeRunID != runID {
                 eventIntegrityFailed = true
             } else {
                 activeRunID = runID
                 activeRunCanBeCancelled = true
             }
+        case .messageDelta(let delta):
+            guard activeRunID != nil else { eventIntegrityFailed = true; return }
+            appendStreamingDelta(delta)
+        case .toolStarted(let name, let preview):
+            guard activeRunID != nil else { eventIntegrityFailed = true; return }
+            appendActivity(.toolStarted, detail: preview ?? name)
+        case .toolCompleted(let name, let isError):
+            guard activeRunID != nil else { eventIntegrityFailed = true; return }
+            appendActivity(.toolCompleted, detail: "\(name ?? "Tool") \(isError ? "failed" : "completed")")
+        case .reasoningAvailable(let detail):
+            guard activeRunID != nil else { eventIntegrityFailed = true; return }
+            appendActivity(.reasoning, detail: detail)
         case .failed, .cancelled:
             eventIntegrityFailed = true
-        case .messageDelta, .toolStarted, .toolCompleted, .reasoningAvailable,
-             .approvalRequested, .completed:
+        case .completed(let output):
+            guard activeRunID != nil else { eventIntegrityFailed = true; return }
+            reconcileStreamingOutput(output)
+        case .approvalRequested:
             break
         }
+    }
+
+    private func appendStreamingDelta(_ raw: String) {
+        let delta = sanitized(raw, limit: Self.maximumStreamingMessageLength, trimmingWhitespace: false)
+        guard !delta.isEmpty else { return }
+        turnState = .streaming
+        let id = streamingAssistantID ?? "cider-room-stream:\(activeAttemptID?.uuidString ?? makeID().uuidString)"
+        streamingAssistantID = id
+        if let index = roomMessages.firstIndex(where: { $0.id == id }) {
+            let remaining = max(0, Self.maximumStreamingMessageLength - roomMessages[index].body.count)
+            guard remaining > 0 else { return }
+            roomMessages[index].body += String(delta.prefix(remaining))
+        } else {
+            roomMessages.append(.init(id: id, role: .agent, author: "Hermes", body: String(delta.prefix(Self.maximumStreamingMessageLength))))
+        }
+        rebuildRoom()
+    }
+
+    private func reconcileStreamingOutput(_ raw: String) {
+        let output = sanitized(raw, limit: Self.maximumStreamingMessageLength)
+        guard !output.isEmpty else { return }
+        turnState = .streaming
+        let id = streamingAssistantID ?? "cider-room-stream:\(activeAttemptID?.uuidString ?? makeID().uuidString)"
+        streamingAssistantID = id
+        if let index = roomMessages.firstIndex(where: { $0.id == id }) {
+            if output.hasPrefix(roomMessages[index].body) { roomMessages[index].body = output }
+        } else {
+            roomMessages.append(.init(id: id, role: .agent, author: "Hermes", body: output))
+        }
+        rebuildRoom()
+    }
+
+    private func appendActivity(_ kind: AgentRoomsLiveActivity.Kind, detail raw: String?) {
+        let detail = sanitized(raw ?? "", limit: Self.maximumEventDetailLength)
+        guard !detail.isEmpty else { return }
+        turnState = .streaming
+        liveActivity.append(.init(id: makeID(), kind: kind, detail: detail))
+        if liveActivity.count > Self.maximumLiveActivityCount {
+            liveActivity.removeFirst(liveActivity.count - Self.maximumLiveActivityCount)
+        }
+        rebuildRoom()
+    }
+
+    private func sanitized(_ raw: String, limit: Int, trimmingWhitespace: Bool = true) -> String {
+        let scalars = raw.unicodeScalars.filter { scalar in
+            scalar == "\n" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar)
+        }
+        let clean = String(String.UnicodeScalarView(scalars))
+        let normalized = trimmingWhitespace ? clean.trimmingCharacters(in: .whitespacesAndNewlines) : clean
+        return normalized.prefix(limit).description
     }
 
     private func applyCompletion(
@@ -281,13 +399,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             roomMessages[index].canRetry = false
         }
         if completedAssistantSourceIDs.insert(expectedAssistantSourceID).inserted {
-            roomMessages.append(.init(
-                id: expectedAssistantSourceID,
-                role: .agent,
-                author: "Hermes",
-                body: assistant.content,
-                deliveryState: .sent
-            ))
+            if let streamingAssistantID,
+               let index = roomMessages.firstIndex(where: { $0.id == streamingAssistantID }) {
+                roomMessages[index] = .init(id: expectedAssistantSourceID, role: .agent, author: "Hermes", body: assistant.content)
+            } else {
+                roomMessages.append(.init(id: expectedAssistantSourceID, role: .agent, author: "Hermes", body: assistant.content))
+            }
         }
         transportMessages = completion.finalMessages
         conversationState = completion.finalState
@@ -308,6 +425,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             roomMessages[index].canRetry = canRetry
         }
         composerMessage = message
+        if let streamingAssistantID {
+            roomMessages.removeAll { $0.id == streamingAssistantID }
+        }
     }
 
     private func clearActiveAttempt() {
@@ -316,6 +436,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         activeRunID = nil
         activeRunCanBeCancelled = false
         eventIntegrityFailed = false
+        streamingAssistantID = nil
     }
 
     private func rebuildRoom() {

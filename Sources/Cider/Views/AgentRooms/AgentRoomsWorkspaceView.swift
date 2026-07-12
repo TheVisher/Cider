@@ -8,6 +8,8 @@ struct AgentRoomsWorkspaceView: View {
     @State private var state: AgentRoomsWorkspaceState
     @State private var selectedRoomID: String?
     @State private var composerText = ""
+    @State private var transcriptFollowPolicy = AgentRoomsTranscriptFollowPolicy()
+    @State private var transcriptViewportHeight: CGFloat = 0
     @FocusState private var focusedRegion: FocusRegion?
 
     private enum FocusRegion: Hashable {
@@ -72,6 +74,12 @@ struct AgentRoomsWorkspaceView: View {
             } else {
                 selectedRoomID = nil
             }
+        }
+        .onChange(of: liveChat.turnState) { _, turnState in
+            guard turnState == .failed, composerText.isEmpty,
+                  let recovered = liveChat.takeRecoveredDraft() else { return }
+            composerText = recovered
+            focusedRegion = .composer
         }
     }
 
@@ -586,8 +594,9 @@ struct AgentRoomsWorkspaceView: View {
 
     private func transcriptPane(room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
         VStack(spacing: 0) {
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: Spacing.lg) {
                     transcriptHeading(room, authority: authority)
 
                     if let notice = room.messageLimitNotice {
@@ -601,6 +610,10 @@ struct AgentRoomsWorkspaceView: View {
                         messageView(message, showsDelivery: room.continuity == .liveContinuation)
                     }
 
+                    if room.continuity == .liveContinuation, !liveChat.liveActivity.isEmpty {
+                        liveActivityView
+                    }
+
                     if let link = room.transcript.link {
                         projectLinkChip(link)
                     }
@@ -612,16 +625,40 @@ struct AgentRoomsWorkspaceView: View {
                     if let artifact = room.transcript.futureArtifact {
                         futureArtifactPlaceholder(artifact)
                     }
+
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: AgentRoomsTranscriptBottomPreferenceKey.self,
+                            value: geometry.frame(in: .named("agent-rooms-transcript")).maxY
+                        )
+                    }
+                    .frame(height: 1)
+                    .id("agent-rooms-transcript-bottom")
+                    }
+                    .padding(.horizontal, Spacing.xxl)
+                    .padding(.vertical, Spacing.xl)
+                    .frame(maxWidth: 680)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, Spacing.xxl)
-                .padding(.vertical, Spacing.xl)
-                .frame(maxWidth: 680)
-                .frame(maxWidth: .infinity)
+                .coordinateSpace(name: "agent-rooms-transcript")
+                .background(GeometryReader { geometry in
+                    Color.clear.onAppear { transcriptViewportHeight = geometry.size.height }
+                        .onChange(of: geometry.size.height) { _, height in transcriptViewportHeight = height }
+                })
+                .scrollIndicators(.hidden)
+                .onPreferenceChange(AgentRoomsTranscriptBottomPreferenceKey.self) { bottom in
+                    _ = transcriptFollowPolicy.shouldFollow(
+                        distanceFromBottom: max(0, bottom - transcriptViewportHeight)
+                    )
+                }
+                .onChange(of: room.transcript.messages.last?.body) { _, _ in
+                    guard transcriptFollowPolicy.shouldAutoScrollForNewContent else { return }
+                    proxy.scrollTo("agent-rooms-transcript-bottom", anchor: .bottom)
+                }
+                .accessibilityLabel(room.continuity == .liveContinuation
+                    ? "Live continuation transcript for \(room.title)"
+                    : "\(authorityPresentation(for: authority).transcriptAccessibility) for \(room.title)")
             }
-            .scrollIndicators(.hidden)
-            .accessibilityLabel(room.continuity == .liveContinuation
-                ? "Live continuation transcript for \(room.title)"
-                : "\(authorityPresentation(for: authority).transcriptAccessibility) for \(room.title)")
 
             if room.continuity == .liveContinuation {
                 liveComposer(roomID: room.id)
@@ -629,6 +666,19 @@ struct AgentRoomsWorkspaceView: View {
                 disabledComposer
             }
         }
+    }
+
+    private var liveActivityView: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(liveChat.liveActivity) { activity in
+                Text(activity.detail)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(2)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Hermes live activity")
     }
 
     private func transcriptHeading(_ room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
@@ -713,6 +763,7 @@ struct AgentRoomsWorkspaceView: View {
                         .foregroundColor(message.deliveryState == .failed ? CiderColors.destructive : CiderColors.tertiary)
                     if message.deliveryState == .failed, message.canRetry {
                         Button("Retry") {
+                            if composerText == message.body { composerText = "" }
                             Task {
                                 await liveChat.retry(clientMessageID: message.id, selectedRoomID: selectedRoomID)
                             }
@@ -847,6 +898,10 @@ struct AgentRoomsWorkspaceView: View {
                     .foregroundColor(CiderColors.secondary)
                     .accessibilityLabel(message)
             }
+            Text(liveTurnStatusLabel)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .accessibilityLabel("Hermes turn \(liveTurnStatusLabel)")
             HStack(alignment: .bottom, spacing: Spacing.sm) {
                 TextField("Message Hermes in Cider Test Chat", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
@@ -880,6 +935,17 @@ struct AgentRoomsWorkspaceView: View {
         .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
     }
 
+    private var liveTurnStatusLabel: String {
+        switch liveChat.turnState {
+        case .idle: "Ready"
+        case .sending: "Sending…"
+        case .streaming: "Streaming…"
+        case .cancelling: "Cancelling…"
+        case .failed: "Failed"
+        case .completed: "Completed"
+        }
+    }
+
     private func submitComposer(roomID: String) {
         let text = composerText
         guard liveChat.isComposerEnabled(selectedRoomID: selectedRoomID) else { return }
@@ -892,4 +958,9 @@ struct AgentRoomsWorkspaceView: View {
         state = .loading(authority: state.authority)
         state = await loadWorkspace()
     }
+}
+
+private struct AgentRoomsTranscriptBottomPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
