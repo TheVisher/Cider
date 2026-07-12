@@ -247,6 +247,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private let savedBookmarkMatches: @MainActor (URL) -> [AgentRoomsSavedBookmarkReference]
     private let makeID: @MainActor () -> UUID
     private let now: @MainActor () -> Date
+    private let persistence: AgentRoomsTestChatPersistence?
 
     private var roomID: UUID?
     private var conversationState: HermesConversationState?
@@ -268,13 +269,64 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             AgentRoomsCanonicalSavedBookmarkResolver.matches($0)
         },
         makeID: @escaping @MainActor () -> UUID = UUID.init,
-        now: @escaping @MainActor () -> Date = Date.init
+        now: @escaping @MainActor () -> Date = Date.init,
+        persistence: AgentRoomsTestChatPersistence? = nil
     ) {
         self.transport = transport
         self.turnCoordinator = turnCoordinator
         self.savedBookmarkMatches = savedBookmarkMatches
         self.makeID = makeID
         self.now = now
+        self.persistence = persistence
+    }
+
+    @discardableResult
+    func restoreDurableTestChat() -> Bool {
+        guard roomID == nil, let persistence else { return roomID != nil }
+        do {
+            guard let snapshot = try persistence.restore() else { return false }
+            roomID = snapshot.roomID
+            conversationState = snapshot.conversationState
+            transportMessages = snapshot.messages
+            roomMessages = snapshot.messages.map { message in
+                AgentRoomMessage(
+                    id: message.sourceID ?? makeID().uuidString,
+                    role: message.role == .user ? .human : .agent,
+                    author: message.role == .user ? "You" : "Hermes",
+                    body: message.content,
+                    deliveryState: .sent
+                )
+            }
+            completedAssistantSourceIDs = Set(
+                snapshot.messages.filter { $0.role == .assistant }.compactMap(\.sourceID)
+            )
+            let lastAssistant = snapshot.messages.last(where: { $0.role == .assistant })
+            let objectReceipt = snapshot.latestCiderReferences.isEmpty
+                ? lastAssistant.flatMap {
+                    AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+                        terminalOutput: $0.content,
+                        matching: savedBookmarkMatches
+                    )
+                }
+                : AgentRoomsCiderReceiptProjector.project(snapshot.latestCiderReferences)
+            receipt = .init(
+                id: "cider-room-receipt:\(snapshot.latestRunID)",
+                title: "Hermes completed a live turn",
+                detail: "Runs API · Source-backed terminal · Live continuation",
+                status: .completed,
+                continuity: .liveContinuation,
+                sourceBackedTransport: true,
+                sourceIdentity: Self.receiptSourceIdentity,
+                runIdentity: sanitized(snapshot.latestRunID, limit: Self.maximumRunIdentityLength),
+                activity: [],
+                objectReceipt: objectReceipt
+            )
+            turnState = .completed
+            rebuildRoom()
+            return true
+        } catch {
+            return false
+        }
     }
 
     func startTestChat() async {
@@ -399,6 +451,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         do {
             let result = try await coordinatedSend(text: text, state: state, attemptID: attemptID)
             guard activeAttemptID == attemptID else { return }
+            try persistence?.persist(
+                result.completion,
+                expectedText: text,
+                expectedConversationID: state.conversationID
+            )
             try applyCompletion(result.completion, expectedText: text, clientID: clientID)
             turnState = .completed
             clearActiveAttempt()

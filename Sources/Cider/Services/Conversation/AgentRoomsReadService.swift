@@ -42,7 +42,9 @@ final class AgentRoomsReadService {
 
     func loadWorkspace() -> AgentRoomsWorkspaceState {
         do {
-            let canonicalRooms = try loadRooms(.active, Self.roomLimit)
+            let canonicalRooms = try loadRooms(.active, Self.roomLimit).filter {
+                $0.stableKey != AgentRoomsTestChatPersistence.stableRoomKey
+            }
             guard !canonicalRooms.isEmpty else { return .empty(authority: .canonicalIncomplete) }
 
             let rooms = try canonicalRooms.map { room in

@@ -111,6 +111,20 @@ final class ConversationRepository {
         }
     }
 
+    func advanceRoomActivity(roomID: UUID, at date: Date) throws {
+        try database.withTransaction {
+            _ = try requiredRoom(id: roomID)
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET updated_at = MAX(updated_at, ?)
+                WHERE id = ?;
+                """)
+            statement.bind(DatabaseHelpers.encode(date), at: 1)
+                .bind(roomID.uuidString, at: 2)
+            try statement.step()
+        }
+    }
+
     func finalizeHistoricalRoomImport(
         roomID: UUID,
         nextTurnSequence: Int64,

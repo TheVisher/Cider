@@ -136,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here; falling back to JSON can re-adopt the same filesystem as fresh
         // folders/items and recreate duplicate suffix trees.
         guard openSQLiteForStartupOrTerminate() else { return }
+        _ = agentRoomsSession.restoreDurableTestChat()
         composeDormantConversationShadowRuntime(
             database: CiderDatabase.shared,
             vaultRootURL: StoragePaths.cachedVaultDirectoryURL,

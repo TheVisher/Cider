@@ -1,7 +1,6 @@
 import Foundation
 
-/// Owns the explicit Test Chat for one Cider app-process lifetime.
-/// This model is intentionally never encoded or written to the vault.
+/// Owns the explicit Test Chat UI state and delegates durable completed turns to Conversation Core.
 @MainActor
 final class AgentRoomsSessionModel: ObservableObject {
     let liveChat: AgentRoomsLiveChatModel
@@ -14,7 +13,15 @@ final class AgentRoomsSessionModel: ObservableObject {
     }
 
     convenience init(transport: any HermesBridgeTransport) {
-        self.init(liveChat: AgentRoomsLiveChatModel(transport: transport))
+        self.init(liveChat: AgentRoomsLiveChatModel(
+            transport: transport,
+            persistence: AgentRoomsTestChatPersistence()
+        ))
+    }
+
+    @discardableResult
+    func restoreDurableTestChat() -> Bool {
+        liveChat.restoreDurableTestChat()
     }
 
     func startTestChat() async {

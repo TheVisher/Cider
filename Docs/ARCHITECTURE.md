@@ -56,6 +56,8 @@ Normal Main Brain UI exposes only simple connection and active-model status. Pro
 
 Raw runtime session IDs are rotating pointers, not product identity. Direct assumptions about one runtime should stay isolated in agent transport/client files. Prefer Runs/SSE-style APIs when available, with CLI/export fallback as a compatibility path.
 
+Rooms Test Chat uses the canonical Conversation Core room, runtime-binding, turn, and message tables for durable continuity. Only fully synchronized, source-backed completed Hermes Runs API turns may advance that room; startup reload must reject partial, failed, cancelled, corrupt, mismatched-authority, and legacy-authoritative shapes rather than falling back to a private transcript store.
+
 Future Agent Host work should coordinate multi-client rooms, ordering, approvals, event fanout, and relay behavior without letting clients write directly to Hermes internals.
 
 ## CLI Boundary

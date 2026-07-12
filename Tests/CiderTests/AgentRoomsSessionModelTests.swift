@@ -51,8 +51,8 @@ struct AgentRoomsSessionModelTests {
         #expect(legacyRoom.continuity == .historicalReplay)
     }
 
-    @Test("a new app-process session starts clean")
-    func newProcessStartsClean() async throws {
+    @Test("an explicitly nonpersistent test session starts clean")
+    func explicitlyNonpersistentSessionStartsClean() async throws {
         let first = AgentRoomsSessionModel(
             liveChat: AgentRoomsLiveChatModel(
                 transport: SessionContinuityTransport(),
@@ -77,8 +77,8 @@ struct AgentRoomsSessionModelTests {
         #expect(next.liveChat.liveActivity.isEmpty)
     }
 
-    @Test("production composition owns one session at the app-process boundary without persistence")
-    func productionCompositionIsProcessLifetimeOnly() throws {
+    @Test("production composition restores through canonical conversation persistence only")
+    func productionCompositionUsesCanonicalPersistence() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -104,7 +104,9 @@ struct AgentRoomsSessionModelTests {
         #expect(mainWindow.contains("agentRoomsSession: agentRoomsSession"))
         #expect(contentArea.contains("session: agentRoomsSession"))
         #expect(!contentArea.contains("AgentRoomsLiveChatModel(transport:"))
-        for forbidden in ["ConversationRepository", "CiderDatabase", "CiderVault", "UserDefaults", "FileManager"] {
+        #expect(sessionModel.contains("AgentRoomsTestChatPersistence"))
+        #expect(appDelegate.contains("restoreDurableTestChat"))
+        for forbidden in ["CiderVault", "UserDefaults", "FileManager", "JSONL"] {
             #expect(!sessionModel.contains(forbidden))
         }
     }
