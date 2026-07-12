@@ -54,38 +54,57 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let transcript: AgentRoomTranscript
 }
 
+enum AgentRoomsWorkspaceAuthority: String, Equatable, Sendable {
+    case canonicalIncomplete
+    case legacyAuthoritativePreview
+}
+
 enum AgentRoomsWorkspaceState: Equatable, Sendable {
-    case loading
-    case empty
-    case failed(message: String)
-    case loaded(rooms: [AgentRoom], selectedRoomID: String)
+    case loading(authority: AgentRoomsWorkspaceAuthority)
+    case empty(authority: AgentRoomsWorkspaceAuthority)
+    case blocked(authority: AgentRoomsWorkspaceAuthority, message: String)
+    case failed(authority: AgentRoomsWorkspaceAuthority, message: String)
+    case loaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoomID: String)
+
+    var authority: AgentRoomsWorkspaceAuthority {
+        switch self {
+        case .loading(let authority), .empty(let authority):
+            return authority
+        case .blocked(let authority, _), .failed(let authority, _), .loaded(let authority, _, _):
+            return authority
+        }
+    }
 
     func projection(selectedRoomID localSelection: String? = nil) -> AgentRoomsWorkspaceProjection {
         switch self {
-        case .loading:
-            return .loading
-        case .empty:
-            return .empty
-        case .failed(let message):
-            return .failed(message: message)
-        case .loaded(let rooms, let storedSelection):
-            guard let firstRoom = rooms.first else { return .empty }
+        case .loading(let authority):
+            return .loading(authority: authority)
+        case .empty(let authority):
+            return .empty(authority: authority)
+        case .blocked(let authority, let message):
+            return .blocked(authority: authority, message: message)
+        case .failed(let authority, let message):
+            return .failed(authority: authority, message: message)
+        case .loaded(let authority, let rooms, let storedSelection):
+            guard let firstRoom = rooms.first else { return .empty(authority: authority) }
             let requestedSelection = localSelection ?? storedSelection
             let selectedRoom = rooms.first(where: { $0.id == requestedSelection }) ?? firstRoom
-            return .loaded(rooms: rooms, selectedRoom: selectedRoom)
+            return .loaded(authority: authority, rooms: rooms, selectedRoom: selectedRoom)
         }
     }
 }
 
 enum AgentRoomsWorkspaceProjection: Equatable, Sendable {
-    case loading
-    case empty
-    case failed(message: String)
-    case loaded(rooms: [AgentRoom], selectedRoom: AgentRoom)
+    case loading(authority: AgentRoomsWorkspaceAuthority)
+    case empty(authority: AgentRoomsWorkspaceAuthority)
+    case blocked(authority: AgentRoomsWorkspaceAuthority, message: String)
+    case failed(authority: AgentRoomsWorkspaceAuthority, message: String)
+    case loaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoom: AgentRoom)
 }
 
 enum AgentRoomsFixtureProvider {
     static let workspaceState = AgentRoomsWorkspaceState.loaded(
+        authority: .canonicalIncomplete,
         rooms: [ciderProduct, weeklyReview, captureQuality],
         selectedRoomID: ciderProduct.id
     )

@@ -11,10 +11,11 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
     }
 
     func testFixtureIsDeterministicAndDemonstratesRoomsThreadReceiptAndLink() throws {
-        guard case .loaded(let rooms, let selectedRoomID) = AgentRoomsFixtureProvider.workspaceState else {
+        guard case .loaded(let authority, let rooms, let selectedRoomID) = AgentRoomsFixtureProvider.workspaceState else {
             return XCTFail("Expected loaded fixture state")
         }
 
+        XCTAssertEqual(authority, .canonicalIncomplete)
         XCTAssertEqual(rooms.map(\.id), ["cider-product", "weekly-review", "capture-quality"])
         XCTAssertEqual(rooms.map(\.title), ["Cider Product", "Weekly Review", "Capture Quality"])
         XCTAssertEqual(selectedRoomID, "cider-product")
@@ -30,44 +31,59 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
     }
 
     func testWorkspaceStateProjectsLoadingEmptyFailureAndLoadedStates() {
-        XCTAssertEqual(AgentRoomsWorkspaceState.loading.projection(), .loading)
-        XCTAssertEqual(AgentRoomsWorkspaceState.empty.projection(), .empty)
         XCTAssertEqual(
-            AgentRoomsWorkspaceState.failed(message: "Fixture unavailable").projection(),
-            .failed(message: "Fixture unavailable")
+            AgentRoomsWorkspaceState.loading(authority: .canonicalIncomplete).projection(),
+            .loading(authority: .canonicalIncomplete)
+        )
+        XCTAssertEqual(
+            AgentRoomsWorkspaceState.empty(authority: .legacyAuthoritativePreview).projection(),
+            .empty(authority: .legacyAuthoritativePreview)
+        )
+        XCTAssertEqual(
+            AgentRoomsWorkspaceState.failed(
+                authority: .canonicalIncomplete,
+                message: "Fixture unavailable"
+            ).projection(),
+            .failed(authority: .canonicalIncomplete, message: "Fixture unavailable")
         )
 
-        guard case .loaded(let rooms, _) = AgentRoomsFixtureProvider.workspaceState,
-              case .loaded(let projectedRooms, let selectedRoom) = AgentRoomsFixtureProvider.workspaceState.projection() else {
+        guard case .loaded(_, let rooms, _) = AgentRoomsFixtureProvider.workspaceState,
+              case .loaded(let authority, let projectedRooms, let selectedRoom) = AgentRoomsFixtureProvider.workspaceState.projection() else {
             return XCTFail("Expected loaded fixture projection")
         }
+        XCTAssertEqual(authority, .canonicalIncomplete)
         XCTAssertEqual(projectedRooms, rooms)
         XCTAssertEqual(selectedRoom.id, "cider-product")
     }
 
     func testLoadedProjectionFallsBackToFirstRoomForInvalidSelection() {
-        guard case .loaded(let rooms, _) = AgentRoomsFixtureProvider.workspaceState else {
+        guard case .loaded(_, let rooms, _) = AgentRoomsFixtureProvider.workspaceState else {
             return XCTFail("Expected loaded fixture state")
         }
 
         let invalidStoredSelection = AgentRoomsWorkspaceState.loaded(
+            authority: .canonicalIncomplete,
             rooms: rooms,
             selectedRoomID: "missing-room"
         )
-        guard case .loaded(_, let storedFallback) = invalidStoredSelection.projection() else {
+        guard case .loaded(_, _, let storedFallback) = invalidStoredSelection.projection() else {
             return XCTFail("Expected loaded fallback projection")
         }
         XCTAssertEqual(storedFallback.id, rooms[0].id)
 
-        guard case .loaded(_, let localFallback) = AgentRoomsFixtureProvider.workspaceState.projection(
+        guard case .loaded(_, _, let localFallback) = AgentRoomsFixtureProvider.workspaceState.projection(
             selectedRoomID: "missing-local-room"
         ) else {
             return XCTFail("Expected loaded local fallback projection")
         }
         XCTAssertEqual(localFallback.id, rooms[0].id)
         XCTAssertEqual(
-            AgentRoomsWorkspaceState.loaded(rooms: [], selectedRoomID: "missing").projection(),
-            .empty
+            AgentRoomsWorkspaceState.loaded(
+                authority: .legacyAuthoritativePreview,
+                rooms: [],
+                selectedRoomID: "missing"
+            ).projection(),
+            .empty(authority: .legacyAuthoritativePreview)
         )
     }
 
@@ -124,10 +140,11 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             )
 
             let state = AgentRoomsReadService(repository: repository, now: { now }).loadWorkspace()
-            guard case .loaded(let rooms, let selectedRoomID) = state else {
+            guard case .loaded(let authority, let rooms, let selectedRoomID) = state else {
                 return XCTFail("Expected loaded canonical projection")
             }
 
+            XCTAssertEqual(authority, .canonicalIncomplete)
             XCTAssertEqual(rooms.map(\.id), [newestRoom.id.uuidString, olderRoom.id.uuidString])
             XCTAssertEqual(selectedRoomID, newestRoom.id.uuidString)
             let mapped = try XCTUnwrap(rooms.first)
@@ -163,11 +180,11 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
 
         XCTAssertEqual(
             service.loadWorkspace(),
-            .failed(message: AgentRoomsReadService.unavailableMessage)
+            .failed(authority: .canonicalIncomplete, message: AgentRoomsReadService.unavailableMessage)
         )
         XCTAssertFalse(AgentRoomsReadService.unavailableMessage.contains("SQL"))
         XCTAssertFalse(AgentRoomsReadService.unavailableMessage.contains("/private"))
-        XCTAssertEqual(service.loadWorkspace(), .empty)
+        XCTAssertEqual(service.loadWorkspace(), .empty(authority: .canonicalIncomplete))
         XCTAssertEqual(attempts, 2)
     }
 
@@ -187,7 +204,7 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
 
         XCTAssertEqual(
             service.loadWorkspace(),
-            .failed(message: AgentRoomsReadService.unavailableMessage)
+            .failed(authority: .canonicalIncomplete, message: AgentRoomsReadService.unavailableMessage)
         )
         XCTAssertEqual(
             AgentRoomsReadService.unavailableMessage,
@@ -658,7 +675,7 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             },
             now: { now }
         )
-        guard case .loaded(let rooms, _) = service.loadWorkspace() else {
+        guard case .loaded(_, let rooms, _) = service.loadWorkspace() else {
             throw NSError(domain: "Expected loaded Rooms state", code: 1)
         }
         return try XCTUnwrap(rooms.first)

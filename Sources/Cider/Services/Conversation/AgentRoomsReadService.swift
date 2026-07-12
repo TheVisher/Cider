@@ -43,7 +43,7 @@ final class AgentRoomsReadService {
     func loadWorkspace() -> AgentRoomsWorkspaceState {
         do {
             let canonicalRooms = try loadRooms(.active, Self.roomLimit)
-            guard !canonicalRooms.isEmpty else { return .empty }
+            guard !canonicalRooms.isEmpty else { return .empty(authority: .canonicalIncomplete) }
 
             let rooms = try canonicalRooms.map { room in
                 let messages = try loadRecentMessages(room.id, Self.messageLimit)
@@ -51,10 +51,14 @@ final class AgentRoomsReadService {
                 let newestTurn = try loadRecentTurns(room.id, Self.turnLimit).first
                 return mapRoom(room, messages: messages, bindings: bindings, newestTurn: newestTurn)
             }
-            guard let selectedRoomID = rooms.first?.id else { return .empty }
-            return .loaded(rooms: rooms, selectedRoomID: selectedRoomID)
+            guard let selectedRoomID = rooms.first?.id else { return .empty(authority: .canonicalIncomplete) }
+            return .loaded(
+                authority: .canonicalIncomplete,
+                rooms: rooms,
+                selectedRoomID: selectedRoomID
+            )
         } catch {
-            return .failed(message: Self.unavailableMessage)
+            return .failed(authority: .canonicalIncomplete, message: Self.unavailableMessage)
         }
     }
 

@@ -19,7 +19,7 @@ struct AgentRoomsWorkspaceView: View {
     ) {
         self.loadWorkspace = loadWorkspace
         self.onOpenLiveChat = onOpenLiveChat
-        _state = State(initialValue: .loading)
+        _state = State(initialValue: .loading(authority: .canonicalIncomplete))
         _selectedRoomID = State(initialValue: nil)
     }
 
@@ -28,7 +28,7 @@ struct AgentRoomsWorkspaceView: View {
         self.loadWorkspace = { state }
         self.onOpenLiveChat = onOpenLiveChat
         _state = State(initialValue: state)
-        if case .loaded(_, let selectedRoomID) = state {
+        if case .loaded(_, _, let selectedRoomID) = state {
             _selectedRoomID = State(initialValue: selectedRoomID)
         } else {
             _selectedRoomID = State(initialValue: nil)
@@ -47,7 +47,7 @@ struct AgentRoomsWorkspaceView: View {
             await reload()
         }
         .onChange(of: state) { _, newState in
-            if case .loaded(let rooms, let storedSelection) = newState {
+            if case .loaded(_, let rooms, let storedSelection) = newState {
                 selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
                     ? storedSelection
                     : rooms.first?.id
@@ -82,17 +82,17 @@ struct AgentRoomsWorkspaceView: View {
                     .font(CiderFont.displaySemibold)
                     .foregroundColor(CiderColors.primary)
 
-                Text("Read-only · Canonical incomplete")
+                Text(authorityPresentation.badge)
                     .font(CiderFont.microMedium)
                     .foregroundColor(CiderColors.secondary)
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, Spacing.xs)
                     .background(Capsule().fill(CiderColors.surfaceInput))
                     .overlay(Capsule().stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
-                    .accessibilityLabel("Read-only, incomplete canonical data")
+                    .accessibilityLabel(authorityPresentation.badgeAccessibility)
             }
 
-            Text("A secondary, incomplete view of durable agent threads.")
+            Text(authorityPresentation.subtitle)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .lineLimit(1)
@@ -114,25 +114,27 @@ struct AgentRoomsWorkspaceView: View {
         switch state.projection(selectedRoomID: selectedRoomID) {
         case .loading:
             loadingState
-        case .empty:
-            emptyState
-        case .failed(let message):
+        case .empty(let authority):
+            emptyState(authority: authority)
+        case .blocked(let authority, let message):
+            blockedState(authority: authority, message: message)
+        case .failed(_, let message):
             failedState(message: message)
-        case .loaded(let rooms, let selectedRoom):
+        case .loaded(let authority, let rooms, let selectedRoom):
             GeometryReader { proxy in
                 if proxy.size.width >= 660 {
                     HStack(spacing: 0) {
                         roomRail(rooms: rooms, selectedRoom: selectedRoom)
                             .frame(width: 252)
                         Divider().overlay(CiderColors.borderSubtle)
-                        transcriptPane(room: selectedRoom)
+                        transcriptPane(room: selectedRoom, authority: authority)
                     }
                 } else {
                     VStack(spacing: 0) {
                         roomRail(rooms: rooms, selectedRoom: selectedRoom)
                             .frame(maxHeight: 216)
                         Divider().overlay(CiderColors.borderSubtle)
-                        transcriptPane(room: selectedRoom)
+                        transcriptPane(room: selectedRoom, authority: authority)
                     }
                 }
             }
@@ -152,15 +154,16 @@ struct AgentRoomsWorkspaceView: View {
         .accessibilityLabel("Loading read-only Rooms")
     }
 
-    private var emptyState: some View {
-        VStack(spacing: Spacing.md) {
+    private func emptyState(authority: AgentRoomsWorkspaceAuthority) -> some View {
+        let presentation = authorityPresentation(for: authority)
+        return VStack(spacing: Spacing.md) {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.tertiary)
-            Text("No canonical rooms available yet")
+            Text(presentation.emptyTitle)
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.secondary)
-            Text("Existing live legacy chats remain in the Hermes panel.")
+            Text(presentation.emptyDetail)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)
@@ -168,6 +171,29 @@ struct AgentRoomsWorkspaceView: View {
         }
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func blockedState(authority: AgentRoomsWorkspaceAuthority, message: String) -> some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "lock.trianglebadge.exclamationmark")
+                .font(CiderFont.emptyStateIcon)
+                .foregroundColor(CiderColors.secondary)
+            Text("Legacy preview blocked")
+                .font(CiderFont.subheadingMedium)
+                .foregroundColor(CiderColors.primary)
+            Text(message)
+                .font(CiderFont.body)
+                .foregroundColor(CiderColors.tertiary)
+                .multilineTextAlignment(.center)
+            Button("Retry") {
+                Task { await reload() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(Spacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). Legacy preview blocked. \(message)")
     }
 
     private func failedState(message: String) -> some View {
@@ -299,11 +325,11 @@ struct AgentRoomsWorkspaceView: View {
         selectedRoomID = rooms[nextIndex].id
     }
 
-    private func transcriptPane(room: AgentRoom) -> some View {
+    private func transcriptPane(room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                    transcriptHeading(room)
+                    transcriptHeading(room, authority: authority)
 
                     ForEach(room.transcript.messages) { message in
                         messageView(message)
@@ -329,14 +355,15 @@ struct AgentRoomsWorkspaceView: View {
             .scrollIndicators(.hidden)
             .focusable()
             .focused($focusedRegion, equals: .transcript)
-            .accessibilityLabel("Transcript for \(room.title)")
+            .accessibilityLabel("\(authorityPresentation(for: authority).transcriptAccessibility) for \(room.title)")
 
             disabledComposer
         }
     }
 
-    private func transcriptHeading(_ room: AgentRoom) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+    private func transcriptHeading(_ room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
+        let presentation = authorityPresentation(for: authority)
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(room.title)
                 .font(CiderFont.titleMedium)
                 .foregroundColor(CiderColors.primary)
@@ -345,13 +372,52 @@ struct AgentRoomsWorkspaceView: View {
                     .fill(CiderColors.secondary)
                     .frame(width: 5, height: 5)
                     .accessibilityHidden(true)
-                Text("\(room.transcript.runtimeLabel) runtime · Read-only transcript")
+                Text("\(room.transcript.runtimeLabel) runtime · \(presentation.transcript)")
                     .font(CiderFont.captionMedium)
                     .foregroundColor(CiderColors.tertiary)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(room.transcript.runtimeLabel) runtime, read-only transcript")
+            .accessibilityLabel("\(room.transcript.runtimeLabel) runtime, \(presentation.transcriptAccessibility)")
         }
+    }
+
+    private var authorityPresentation: AuthorityPresentation {
+        authorityPresentation(for: state.authority)
+    }
+
+    private func authorityPresentation(for authority: AgentRoomsWorkspaceAuthority) -> AuthorityPresentation {
+        switch authority {
+        case .canonicalIncomplete:
+            AuthorityPresentation(
+                badge: "Read-only · Canonical incomplete",
+                badgeAccessibility: "Read-only, incomplete canonical data",
+                subtitle: "A secondary, incomplete view of durable agent threads.",
+                transcript: "Read-only transcript",
+                transcriptAccessibility: "read-only incomplete canonical transcript",
+                emptyTitle: "No canonical rooms available yet",
+                emptyDetail: "Existing live legacy chats remain in the Hermes panel."
+            )
+        case .legacyAuthoritativePreview:
+            AuthorityPresentation(
+                badge: "Read-only · Legacy authoritative",
+                badgeAccessibility: "Read-only, legacy authoritative, noncanonical preview",
+                subtitle: "Noncanonical preview of current legacy conversation history",
+                transcript: "Legacy-authoritative preview · Not imported",
+                transcriptAccessibility: "legacy-authoritative noncanonical preview, not imported",
+                emptyTitle: "No legacy conversations available",
+                emptyDetail: "No supported legacy conversation history was found for this read-only preview."
+            )
+        }
+    }
+
+    private struct AuthorityPresentation {
+        let badge: String
+        let badgeAccessibility: String
+        let subtitle: String
+        let transcript: String
+        let transcriptAccessibility: String
+        let emptyTitle: String
+        let emptyDetail: String
     }
 
     private func messageView(_ message: AgentRoomMessage) -> some View {
@@ -465,7 +531,7 @@ struct AgentRoomsWorkspaceView: View {
 
     @MainActor
     private func reload() async {
-        state = .loading
+        state = .loading(authority: state.authority)
         state = await loadWorkspace()
     }
 }
