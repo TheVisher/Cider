@@ -924,19 +924,34 @@ struct AgentRoomsWorkspaceView: View {
     private func ciderObjectReceiptRow(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: Spacing.md) {
+                ciderObjectReceiptThumbnail(receipt)
                 ciderObjectReceiptIdentity(receipt)
                 Spacer(minLength: Spacing.sm)
                 ciderObjectOpenButton(receipt)
             }
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                ciderObjectReceiptIdentity(receipt)
-                ciderObjectOpenButton(receipt)
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                ciderObjectReceiptThumbnail(receipt)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    ciderObjectReceiptIdentity(receipt)
+                    ciderObjectOpenButton(receipt)
+                }
             }
         }
         .padding(Spacing.md)
         .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceSubtle))
         .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline))
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func ciderObjectReceiptThumbnail(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
+        if case .bookmark(let bookmarkID) = receipt.openRoute,
+           let reference = receipt.bookmarkThumbnail {
+            AgentRoomsBookmarkReceiptThumbnailView(
+                reference: reference,
+                expectedBookmarkID: bookmarkID
+            )
+        }
     }
 
     private func ciderObjectReceiptIdentity(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
@@ -1136,6 +1151,45 @@ struct AgentRoomsWorkspaceView: View {
     private func reload() async {
         state = .loading(authority: state.authority)
         state = await loadWorkspace()
+    }
+}
+
+private struct AgentRoomsBookmarkReceiptThumbnailView: View {
+    let reference: AgentRoomsBookmarkThumbnailReference
+    let expectedBookmarkID: UUID
+
+    @StateObject private var loader = AgentRoomsBookmarkReceiptThumbnailLoader()
+
+    var body: some View {
+        Group {
+            if let image = loader.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(
+                        width: BookmarksDesign.thumbnailWidthList,
+                        height: BookmarksDesign.thumbnailHeightList
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline)
+                    )
+                    .accessibilityHidden(true)
+            } else {
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+        }
+        .task(id: reference) {
+            await loader.load(
+                reference,
+                expectedBookmarkID: expectedBookmarkID
+            )
+        }
     }
 }
 

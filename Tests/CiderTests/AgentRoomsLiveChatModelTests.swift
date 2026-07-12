@@ -190,6 +190,11 @@ struct AgentRoomsLiveChatModelTests {
     func terminalSavedBookmarkURLProjection() async throws {
         let bookmarkID = UUID(uuidString: "80900000-0000-4000-8000-000000000002")!
         let backpackURL = URL(string: "https://chromeindustries.com/products/cohesive-35l-backpack")!
+        let thumbnail = AgentRoomsBookmarkThumbnailReference(
+            bookmarkID: bookmarkID,
+            relativePath: ".thumbnails/\(bookmarkID.uuidString).png",
+            modifiedAt: 1_805_000_000
+        )
         let assistant = """
         I found the saved Chrome Industries Cohesive 35L Backpack:
         https://chromeindustries.com/products/cohesive-35l-backpack
@@ -203,7 +208,12 @@ struct AgentRoomsLiveChatModelTests {
         )
         let model = makeModel(transport) { url in
             url == backpackURL
-                ? [.init(id: bookmarkID, title: "Chrome Industries Cohesive 35L Backpack", url: backpackURL)]
+                ? [.init(
+                    id: bookmarkID,
+                    title: "Chrome Industries Cohesive 35L Backpack",
+                    url: backpackURL,
+                    thumbnail: thumbnail
+                )]
                 : []
         }
         await model.startTestChat()
@@ -215,6 +225,7 @@ struct AgentRoomsLiveChatModelTests {
         #expect(receipt.kind == .bookmark)
         #expect(receipt.title == "Chrome Industries Cohesive 35L Backpack")
         #expect(receipt.identifier == "Saved bookmark · chromeindustries.com")
+        #expect(receipt.bookmarkThumbnail == thumbnail)
         #expect(receipt.openRoute == .bookmark(bookmarkID: bookmarkID))
         #expect(receipt.openRoute.userInfo == [
             CiderExternalOpenBridge.Key.targetType: "bookmark",
@@ -256,6 +267,23 @@ struct AgentRoomsLiveChatModelTests {
             terminalOutput: validURL.absoluteString,
             matching: { _ in [saved, saved] }
         ) == nil)
+
+        let mismatchedThumbnail = AgentRoomsBookmarkThumbnailReference(
+            bookmarkID: UUID(),
+            relativePath: ".thumbnails/mismatch.png",
+            modifiedAt: 1
+        )
+        let receipt = AgentRoomsCiderReceiptProjector.projectSavedBookmark(
+            terminalOutput: validURL.absoluteString,
+            matching: { _ in [.init(
+                id: bookmarkID,
+                title: saved.title,
+                url: validURL,
+                thumbnail: mismatchedThumbnail
+            )] }
+        )
+        #expect(receipt?.bookmarkThumbnail == nil)
+        #expect(receipt?.openRoute == .bookmark(bookmarkID: bookmarkID))
     }
 
     @Test("incremental deltas are sanitized, bounded, and reconciled with the final assistant")
@@ -553,6 +581,10 @@ struct AgentRoomsLiveChatModelTests {
             "Button(\"Open\")",
             "Source-backed Cider",
             "onOpenCiderReference(receipt.openRoute)",
+            "AgentRoomsBookmarkReceiptThumbnailView(",
+            "AgentRoomsBookmarkReceiptThumbnailLoader()",
+            "await loader.load(",
+            "Color.clear",
             ".accessibilityElement(children: .contain)",
             "Legacy messaging stays disabled; Cider Test Chat remains separate.",
             "Open Live Chat",

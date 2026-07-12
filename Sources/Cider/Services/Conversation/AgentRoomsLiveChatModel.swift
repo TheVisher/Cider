@@ -54,12 +54,14 @@ struct AgentRoomsCiderObjectReceipt: Equatable, Sendable {
     let provenance: String
     let truthBoundary: String
     let openRoute: AgentRoomsCiderOpenRoute
+    var bookmarkThumbnail: AgentRoomsBookmarkThumbnailReference? = nil
 }
 
 struct AgentRoomsSavedBookmarkReference: Equatable, Sendable {
     let id: UUID
     let title: String
     let url: URL
+    var thumbnail: AgentRoomsBookmarkThumbnailReference? = nil
 }
 
 @MainActor
@@ -71,7 +73,12 @@ enum AgentRoomsCanonicalSavedBookmarkResolver {
                   saved == candidate,
                   let savedURL = bookmark.url
             else { return nil }
-            return AgentRoomsSavedBookmarkReference(id: bookmark.id, title: bookmark.title, url: savedURL)
+            return AgentRoomsSavedBookmarkReference(
+                id: bookmark.id,
+                title: bookmark.title,
+                url: savedURL,
+                thumbnail: AgentRoomsBookmarkReceiptThumbnail.reference(for: bookmark)
+            )
         }
     }
 }
@@ -135,7 +142,8 @@ enum AgentRoomsCiderReceiptProjector {
             identifier: "Saved bookmark · \(displayHost)",
             provenance: provenance,
             truthBoundary: truthBoundary,
-            openRoute: .bookmark(bookmarkID: bookmark.id)
+            openRoute: .bookmark(bookmarkID: bookmark.id),
+            bookmarkThumbnail: bookmark.thumbnail?.bookmarkID == bookmark.id ? bookmark.thumbnail : nil
         )
     }
 

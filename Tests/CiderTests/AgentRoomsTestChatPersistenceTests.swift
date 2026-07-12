@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Cider
@@ -174,6 +175,107 @@ struct AgentRoomsTestChatPersistenceTests {
         }
     }
 
+    @Test("canonical saved-bookmark receipt restores its verified local thumbnail after repository reopen")
+    func canonicalSavedBookmarkThumbnailSurvivesRepositoryReopen() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-test-chat-bookmark-\(UUID().uuidString).db")
+        let cacheRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-test-chat-bookmark-cache-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: databaseURL)
+            try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+            try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+            try? FileManager.default.removeItem(at: cacheRoot)
+        }
+
+        let bookmarkID = UUID(uuidString: "81000000-0000-4000-8000-000000000001")!
+        let bookmarkURL = URL(string: "https://chromeindustries.com/products/cohesive-2-0-38l-pack?variant=43962733953084")!
+        let relativePath = ".thumbnails/\(bookmarkID.uuidString).png"
+        let thumbnailURL = cacheRoot.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: thumbnailURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try thumbnailPNGData().write(to: thumbnailURL)
+        let modifiedAt = Date(timeIntervalSince1970: 1_805_000_000)
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: thumbnailURL.path)
+        let bookmark = Bookmark(
+            id: bookmarkID,
+            title: "Cohesive 2.0 38L Pack",
+            urlString: bookmarkURL.absoluteString,
+            thumbnailRemoteURLString: "https://cdn.example.com/remote-only-must-not-render.png",
+            thumbnailRelativePath: relativePath,
+            metadataUpdatedAt: modifiedAt
+        )
+
+        let firstDatabase = CiderDatabase()
+        try firstDatabase.open(at: databaseURL)
+        try AgentRoomsTestChatPersistence(
+            database: firstDatabase,
+            repository: ConversationRepository(database: firstDatabase)
+        ).persist(
+            completion(
+                roomID: UUID(uuidString: "81000000-0000-4000-8000-000000000002")!,
+                assistantText: "Cohesive 2.0 38L Pack:\n\n\(bookmarkURL.absoluteString)"
+            ),
+            expectedText: "hello",
+            expectedConversationID: UUID(uuidString: "81000000-0000-4000-8000-000000000002")!
+        )
+        firstDatabase.close()
+
+        let reopenedDatabase = CiderDatabase()
+        try reopenedDatabase.open(at: databaseURL)
+        defer { reopenedDatabase.close() }
+        let restored = AgentRoomsLiveChatModel(
+            transport: DurableSessionTransport(),
+            turnCoordinator: HermesTurnCoordinator(),
+            savedBookmarkMatches: { candidate in
+                guard VaultDuplicateAuditor.canonicalBookmarkURL(candidate.absoluteString)
+                        == VaultDuplicateAuditor.canonicalBookmarkURL(bookmark.urlString),
+                      let reference = AgentRoomsBookmarkReceiptThumbnail.reference(
+                        for: bookmark,
+                        cacheRoot: cacheRoot
+                      )
+                else { return [] }
+                return [.init(id: bookmark.id, title: bookmark.title, url: bookmarkURL, thumbnail: reference)]
+            },
+            persistence: AgentRoomsTestChatPersistence(
+                database: reopenedDatabase,
+                repository: ConversationRepository(database: reopenedDatabase)
+            )
+        )
+
+        #expect(restored.restoreDurableTestChat())
+        let receipt = try #require(restored.testRoom?.transcript.receipt?.objectReceipt)
+        let reference = try #require(receipt.bookmarkThumbnail)
+        #expect(receipt.openRoute == .bookmark(bookmarkID: bookmarkID))
+        #expect(reference.bookmarkID == bookmarkID)
+        let loader = AgentRoomsBookmarkReceiptThumbnailLoader(cacheRoot: cacheRoot)
+        await loader.load(
+            reference,
+            expectedBookmarkID: bookmarkID
+        )
+        #expect(loader.image != nil)
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: reference.modifiedAt + 60)],
+            ofItemAtPath: thumbnailURL.path
+        )
+        await loader.load(reference, expectedBookmarkID: bookmarkID)
+        #expect(loader.image == nil)
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: reference.modifiedAt)],
+            ofItemAtPath: thumbnailURL.path
+        )
+        await loader.load(reference, expectedBookmarkID: UUID())
+        #expect(loader.image == nil)
+
+        try FileManager.default.removeItem(at: thumbnailURL)
+        await loader.load(reference, expectedBookmarkID: bookmarkID)
+        #expect(loader.image == nil)
+    }
+
     private func withPersistence<T>(
         _ body: (CiderDatabase, ConversationRepository, AgentRoomsTestChatPersistence) throws -> T
     ) throws -> T {
@@ -209,7 +311,8 @@ struct AgentRoomsTestChatPersistenceTests {
         roomID: UUID,
         status: HermesRunTerminalStatus = .completed,
         synchronized: Bool = true,
-        references: [HermesCiderReference] = []
+        references: [HermesCiderReference] = [],
+        assistantText: String = "world"
     ) -> HermesRunCompletionEnvelope {
         let runID = "run-safety"
         let sessionID = "session-safety"
@@ -224,7 +327,7 @@ struct AgentRoomsTestChatPersistenceTests {
             finalSessionSynchronizationComplete: synchronized,
             finalMessages: [
                 .init(role: .user, content: "hello", timestamp: timestamp, sourceID: userSourceID, sourceSessionID: sessionID),
-                .init(role: .assistant, content: "world", timestamp: timestamp, sourceID: assistantSourceID, sourceSessionID: sessionID),
+                .init(role: .assistant, content: assistantText, timestamp: timestamp, sourceID: assistantSourceID, sourceSessionID: sessionID),
             ],
             finalState: .init(
                 conversationID: roomID,
@@ -247,6 +350,22 @@ struct AgentRoomsTestChatPersistenceTests {
             ),
             ciderReferences: references
         )
+    }
+
+    private func thumbnailPNGData() throws -> Data {
+        let bitmap = try #require(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 12,
+            pixelsHigh: 8,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        return try #require(bitmap.representation(using: .png, properties: [:]))
     }
 }
 
