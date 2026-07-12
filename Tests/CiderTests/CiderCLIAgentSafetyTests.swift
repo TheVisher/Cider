@@ -23,6 +23,28 @@ private final class CLIOutputBuffer: @unchecked Sendable {
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("capture provenance diagnostic help is read only and machine actionable")
+    func captureProvenanceDiagnosticHelpIsReadOnly() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-provenance-help-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: ["capture", "provenance-gaps", "--help", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["command"] as? String == "capture.provenance-gaps.help")
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        #expect(payload["truthBoundary"] as? String == "help_contract_only_not_vault_truth")
+        #expect((payload["safeVerificationCommands"] as? [String]) == ["cider-cli capture provenance-gaps --help --json"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: vault.path).isEmpty)
+    }
+
     @Test("item early and full plain help use the same canonical text")
     func itemEarlyAndFullPlainHelpUseSameCanonicalText() throws {
         let earlyHelp = try captureStandardOutput {
@@ -6050,6 +6072,7 @@ struct CiderCLIAgentSafetyTests {
             "TEST RUN",
             "ITEM",
             "EXPORT",
+            "PROJECT ARTIFACT",
             "REVIEW",
             "ROUTE",
             "STORAGE",
