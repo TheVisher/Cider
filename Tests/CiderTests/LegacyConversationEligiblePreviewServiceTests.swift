@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import Cider
@@ -113,14 +114,14 @@ struct LegacyConversationEligiblePreviewServiceTests {
         try withEligibleFixture { fixture in
             try fixture.writeRoom(index: 1)
             var changed = false
-            let service = fixture.makeService {
+            let service = fixture.makeService(beforeRevalidation: {
                 guard !changed else { return }
                 changed = true
                 try? Data("changed".utf8).write(
                     to: fixture.registryDirectory.appendingPathComponent("room-1.json"),
                     options: .atomic
                 )
-            }
+            })
             #expect(service.preview() == .sanitized(.failed))
         }
     }
@@ -167,6 +168,94 @@ struct LegacyConversationEligiblePreviewServiceTests {
             try fixture.writeRoom(index: 1, sessionOverride: "shared-session")
             try fixture.writeRoom(index: 2, sessionOverride: "shared-session")
             #expect(fixture.service.preview() == .sanitized(.blocked))
+        }
+    }
+
+    @Test("Production-style arbitration reads eligible fake history once without merging or mutation")
+    func productionStyleArbitrationIsImmutable() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, privateText: "temporary eligible transcript")
+            let inputsBefore = try fixture.inputFingerprint()
+            let canonicalBefore = try fixture.databaseSnapshot()
+            var legacyCalls = 0
+            var canonicalChecks = 0
+            let eligible = fixture.makeService(canonicalIsHonestlyEmpty: {
+                canonicalChecks += 1
+                return try fixture.repository.rooms(lifecycle: .active, limit: 1).isEmpty
+            })
+            let adapter = EligibleLegacyAgentRoomsPreviewService(loadPreview: eligible.preview, now: { fixture.timestamp })
+            let loadLegacy = {
+                legacyCalls += 1
+                return adapter.loadWorkspace()
+            }
+            let canonicalRoom = AgentRoom(
+                id: "canonical", title: "Canonical", preview: "Canonical", updatedAt: fixture.timestamp,
+                relativeTime: "Now", transcript: .init(runtimeLabel: "Hermes", messages: [], link: nil, receipt: nil, futureArtifact: nil)
+            )
+
+            for canonical in [
+                AgentRoomsWorkspaceState.loaded(authority: .canonicalIncomplete, rooms: [canonicalRoom], selectedRoomID: canonicalRoom.id),
+                .failed(authority: .canonicalIncomplete, message: "sanitized"),
+                .loading(authority: .canonicalIncomplete),
+                .blocked(authority: .canonicalIncomplete, message: "sanitized"),
+            ] {
+                #expect(AgentRoomsWorkspaceLoader(loadCanonical: { canonical }, loadLegacy: loadLegacy).loadWorkspace() == canonical)
+            }
+            #expect(legacyCalls == 0)
+            #expect(canonicalChecks == 0)
+
+            for expectedCalls in 1...2 {
+                let result = AgentRoomsWorkspaceLoader(
+                    loadCanonical: { .empty(authority: .canonicalIncomplete) },
+                    loadLegacy: loadLegacy
+                ).loadWorkspace()
+                guard case .eligibleLoaded(let authority, let rooms, _, let notice) = result else {
+                    Issue.record("Expected eligible legacy workspace")
+                    return
+                }
+                #expect(authority == .legacyAuthoritativePreview)
+                #expect(rooms.map(\.title) == ["Temporary 1"])
+                #expect(rooms.flatMap(\.transcript.messages).map(\.body) == ["temporary eligible transcript"])
+                #expect(notice == .init(kind: .loaded, displayed: 1, omitted: 0, capOmitted: 0, unregistered: 0))
+                #expect(legacyCalls == expectedCalls)
+                #expect(canonicalChecks == expectedCalls)
+                #expect(try fixture.inputFingerprint() == inputsBefore)
+                #expect(try fixture.databaseSnapshot() == canonicalBefore)
+            }
+        }
+    }
+
+    @Test("Bounded canonical defense blocks publication when a room appears after arbitration")
+    func boundedCanonicalDefenseBlocksPublication() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, privateText: "must not publish")
+            let inputsBefore = try fixture.inputFingerprint()
+            var canonicalChecks = 0
+            let eligible = fixture.makeService(canonicalIsHonestlyEmpty: {
+                canonicalChecks += 1
+                return try fixture.repository.rooms(lifecycle: .active, limit: 1).isEmpty
+            })
+            let adapter = EligibleLegacyAgentRoomsPreviewService(loadPreview: eligible.preview)
+            var canonicalAfterInsertion: [Int64]?
+
+            let result = AgentRoomsWorkspaceLoader(
+                loadCanonical: {
+                    _ = try? fixture.repository.createRoom(.init(stableKey: "temporary.canonical", title: "Canonical appeared"))
+                    canonicalAfterInsertion = try? fixture.databaseSnapshot()
+                    return .empty(authority: .canonicalIncomplete)
+                },
+                loadLegacy: adapter.loadWorkspace
+            ).loadWorkspace()
+
+            #expect(result == .blocked(
+                authority: .legacyAuthoritativePreview,
+                message: EligibleLegacyAgentRoomsPreviewService.blockedMessage
+            ))
+            #expect(canonicalChecks == 1)
+            #expect(try fixture.repository.rooms(lifecycle: .active, limit: 1).count == 1)
+            #expect(try fixture.inputFingerprint() == inputsBefore)
+            #expect(try fixture.databaseSnapshot() == canonicalAfterInsertion)
+            #expect(!String(describing: result).contains("must not publish"))
         }
     }
 }
@@ -233,6 +322,14 @@ private func withEligibleFixture(_ body: (EligibleFixture) throws -> Void) throw
 
 @MainActor
 private final class EligibleFixture {
+    struct InputFingerprint: Equatable {
+        let bytes: Data
+        let sha256: String
+        let inode: UInt64
+        let size: UInt64
+        let modifiedAt: TimeInterval
+    }
+
     let root: URL
     let registryDirectory: URL
     let conversationDirectory: URL
@@ -240,7 +337,7 @@ private final class EligibleFixture {
     let repository: ConversationRepository
     let service: LegacyConversationEligiblePreviewService
     private let encoder: JSONEncoder
-    private let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+    let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
 
     init() throws {
         root = FileManager.default.temporaryDirectory
@@ -332,13 +429,14 @@ private final class EligibleFixture {
 
     func makeService(
         parityReader: (any ConversationCoreParityReading)? = nil,
+        canonicalIsHonestlyEmpty: @escaping () throws -> Bool = { true },
         beforeRevalidation: @escaping () -> Void = {}
     ) -> LegacyConversationEligiblePreviewService {
         LegacyConversationEligiblePreviewService(
             registryDirectory: registryDirectory,
             conversationDirectory: conversationDirectory,
             parityReader: parityReader ?? ConversationRepositoryParityReader(repository: repository),
-            canonicalIsHonestlyEmpty: { true },
+            canonicalIsHonestlyEmpty: canonicalIsHonestlyEmpty,
             beforeRevalidation: beforeRevalidation
         )
     }
@@ -351,5 +449,38 @@ private final class EligibleFixture {
             }
         }
         return snapshot
+    }
+
+    func inputFingerprint() throws -> [String: InputFingerprint] {
+        var snapshot: [String: InputFingerprint] = [:]
+        for directory in [registryDirectory, conversationDirectory] {
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() {
+                let url = directory.appendingPathComponent(name)
+                let bytes = try Data(contentsOf: url)
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                snapshot["\(directory.lastPathComponent)/\(name)"] = .init(
+                    bytes: bytes,
+                    sha256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(),
+                    inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0,
+                    size: (attributes[.size] as? NSNumber)?.uint64Value ?? 0,
+                    modifiedAt: (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                )
+            }
+        }
+        return snapshot
+    }
+
+    func databaseSnapshot() throws -> [Int64] {
+        let statement = try database.prepare("""
+            SELECT
+              (SELECT COUNT(*) FROM conversation_rooms),
+              (SELECT COUNT(*) FROM conversation_runtime_bindings),
+              (SELECT COUNT(*) FROM conversation_turns),
+              (SELECT COUNT(*) FROM conversation_messages),
+              COALESCE((SELECT SUM(next_turn_sequence) FROM conversation_rooms), 0),
+              COALESCE((SELECT SUM(next_message_sequence) FROM conversation_rooms), 0);
+            """)
+        guard try statement.step() else { return [] }
+        return (0..<6).map { statement.int64(at: Int32($0)) }
     }
 }

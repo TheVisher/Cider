@@ -147,12 +147,14 @@ final class LegacyAgentRoomsPreviewServiceTests: XCTestCase {
                 .map { composition[start.lowerBound..<$0.lowerBound] }
         })
         for required in [
-            "AgentRoomsReadService", "LegacyAgentRoomsPreviewService",
+            "AgentRoomsReadService", "LegacyConversationEligiblePreviewService",
+            "EligibleLegacyAgentRoomsPreviewService",
             "AgentRoomsWorkspaceLoader", "StoragePaths.legacyConversationPreviewDirectories",
             "ConversationRepositoryParityReader",
         ] {
             XCTAssertTrue(roomsBlock.contains(required), "Missing production composition: \(required)")
         }
+        XCTAssertNil(roomsBlock.range(of: #"\bLegacyAgentRoomsPreviewService\("#, options: .regularExpression))
         for prohibited in ["AIConversationStorage", "CiderAgentChatRegistry", "Fixture", "tolerant", "createDirectory"] {
             XCTAssertFalse(roomsBlock.contains(prohibited))
         }

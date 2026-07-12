@@ -37,16 +37,104 @@ final class EligibleLegacyAgentRoomsPreviewServiceTests: XCTestCase {
         )
     }
 
-    func testProductionCompositionRemainsCID794StrictGlobalLoader() throws {
+    func testEmptyBlockedAndFailedStatesProjectWithoutRoomsOrRawDiagnostics() {
+        let privateDiagnostic = "/private/live-vault bearer-secret"
+        XCTAssertEqual(
+            EligibleLegacyAgentRoomsPreviewService(loadPreview: { .sanitized(.empty) }).loadWorkspace(),
+            .empty(authority: .legacyAuthoritativePreview)
+        )
+        let blocked = EligibleLegacyAgentRoomsPreviewService(loadPreview: { .sanitized(.blocked) }).loadWorkspace()
+        XCTAssertEqual(
+            blocked,
+            .blocked(authority: .legacyAuthoritativePreview, message: EligibleLegacyAgentRoomsPreviewService.blockedMessage)
+        )
+        let failed = EligibleLegacyAgentRoomsPreviewService(loadPreview: {
+            _ = privateDiagnostic
+            return .sanitized(.failed)
+        }).loadWorkspace()
+        XCTAssertEqual(
+            failed,
+            .failed(authority: .legacyAuthoritativePreview, message: EligibleLegacyAgentRoomsPreviewService.failedMessage)
+        )
+        XCTAssertFalse(String(describing: blocked).contains(privateDiagnostic))
+        XCTAssertFalse(String(describing: failed).contains(privateDiagnostic))
+    }
+
+    func testProductionCompositionUsesExactEligibleStackAndExcludesOldGlobalAdapter() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let composition = try String(contentsOf: root.appendingPathComponent("Sources/Cider/Views/CiderPanelView+ContentArea.swift"), encoding: .utf8)
         let block = try XCTUnwrap(composition.range(of: "case .agentRooms:").flatMap { start in
             composition.range(of: "case .aiAssistant:", range: start.upperBound..<composition.endIndex)
                 .map { String(composition[start.lowerBound..<$0.lowerBound]) }
         })
-        XCTAssertTrue(block.contains("LegacyAgentRoomsPreviewService"))
-        XCTAssertFalse(block.contains("EligibleLegacyAgentRoomsPreviewService"))
-        XCTAssertFalse(block.contains("LegacyConversationEligiblePreviewService"))
+        for required in [
+            "let repository = ConversationRepository(database: CiderDatabase.shared)",
+            "let canonical = AgentRoomsReadService(repository: repository)",
+            "let paths = StoragePaths.legacyConversationPreviewDirectories()",
+            "let parityReader = ConversationRepositoryParityReader(repository: repository)",
+            "let eligible = LegacyConversationEligiblePreviewService(",
+            "parityReader: parityReader",
+            "try repository.rooms(lifecycle: .active, limit: 1).isEmpty",
+            "let eligibleAdapter = EligibleLegacyAgentRoomsPreviewService(loadPreview: eligible.preview)",
+            "loadCanonical: canonical.loadWorkspace",
+            "loadLegacy: eligibleAdapter.loadWorkspace",
+        ] {
+            XCTAssertTrue(block.contains(required), "Missing eligible production composition: \(required)")
+        }
+        XCTAssertEqual(block.components(separatedBy: "ConversationRepository(database:").count - 1, 1)
+        XCTAssertEqual(block.components(separatedBy: "ConversationRepositoryParityReader(repository:").count - 1, 1)
+        XCTAssertNil(block.range(of: #"\bLegacyAgentRoomsPreviewService\("#, options: .regularExpression))
+        for prohibited in [
+            "LegacyConversationImportPreviewService", "AIConversationStorage", "CiderAgentChatRegistry",
+            "createRoom(", "upsert", "import", "Shadow", "HealthStore", "Reconciler", "BridgeTransport",
+            "Fixture", "debug", "tolerant", "createDirectory",
+        ] {
+            XCTAssertFalse(block.localizedCaseInsensitiveContains(prohibited), "Production block contains \(prohibited)")
+        }
+    }
+
+    func testArbiterInvokesEligibleExactlyOnceOnlyForExplicitCanonicalIncompleteEmpty() {
+        let canonicalRoom = AgentRoom(
+            id: "canonical", title: "Canonical", preview: "Canonical", updatedAt: .distantPast,
+            relativeTime: "Now", transcript: .init(runtimeLabel: "Hermes", messages: [], link: nil, receipt: nil, futureArtifact: nil)
+        )
+        let terminalStates: [AgentRoomsWorkspaceState] = [
+            .loaded(authority: .canonicalIncomplete, rooms: [canonicalRoom], selectedRoomID: canonicalRoom.id),
+            .failed(authority: .canonicalIncomplete, message: "sanitized"),
+            .loading(authority: .canonicalIncomplete),
+            .blocked(authority: .canonicalIncomplete, message: "sanitized"),
+            .empty(authority: .legacyAuthoritativePreview),
+        ]
+
+        for canonical in terminalStates {
+            var pathResolutions = 0
+            var eligibleCalls = 0
+            let result = AgentRoomsWorkspaceLoader(
+                loadCanonical: { canonical },
+                loadLegacy: {
+                    pathResolutions += 1
+                    eligibleCalls += 1
+                    return .empty(authority: .legacyAuthoritativePreview)
+                }
+            ).loadWorkspace()
+            XCTAssertEqual(result, canonical)
+            XCTAssertEqual(pathResolutions, 0)
+            XCTAssertEqual(eligibleCalls, 0)
+        }
+
+        var eligibleCalls = 0
+        let eligible = AgentRoomsWorkspaceState.eligibleEmpty(
+            authority: .legacyAuthoritativePreview,
+            notice: .init(kind: .empty, displayed: 0, omitted: 2, capOmitted: 0, unregistered: 1)
+        )
+        XCTAssertEqual(
+            AgentRoomsWorkspaceLoader(
+                loadCanonical: { .empty(authority: .canonicalIncomplete) },
+                loadLegacy: { eligibleCalls += 1; return eligible }
+            ).loadWorkspace(),
+            eligible
+        )
+        XCTAssertEqual(eligibleCalls, 1)
     }
 
     func testNewServicesHaveNoLoggingDebugPrintingOrMutationDependencies() throws {

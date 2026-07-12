@@ -556,16 +556,20 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             "let repository = ConversationRepository(database: CiderDatabase.shared)",
             "AgentRoomsReadService(repository: repository)",
             "StoragePaths.legacyConversationPreviewDirectories()",
-            "LegacyAgentRoomsPreviewService(",
-            "ConversationRepositoryParityReader(repository: repository)",
+            "let parityReader = ConversationRepositoryParityReader(repository: repository)",
+            "LegacyConversationEligiblePreviewService(",
+            "canonicalIsHonestlyEmpty:",
+            "repository.rooms(lifecycle: .active, limit: 1).isEmpty",
+            "EligibleLegacyAgentRoomsPreviewService(loadPreview: eligible.preview)",
             "AgentRoomsWorkspaceLoader(",
             "loadCanonical: canonical.loadWorkspace",
-            "loadLegacy: legacy.loadWorkspace",
+            "loadLegacy: eligibleAdapter.loadWorkspace",
             ").loadWorkspace()",
         ] {
             XCTAssertTrue(roomsComposition.contains(required), "Missing strict production composition: \(required)")
         }
         XCTAssertEqual(roomsComposition.components(separatedBy: "ConversationRepository(database:").count - 1, 1)
+        XCTAssertNil(roomsComposition.range(of: #"\bLegacyAgentRoomsPreviewService\("#, options: .regularExpression))
         for prohibited in [
             "AgentRoomsFixtureProvider", "AIConversationStorage", "CiderAgentChatRegistry",
             "PrimarySaveCoordinator", "ShadowWriter", "Reconciler", "HealthStore", "backfill",
