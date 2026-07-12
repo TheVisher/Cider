@@ -100,6 +100,23 @@ struct AgentRoomsIdentityConflictNotice: Equatable, Sendable {
     }
 }
 
+struct AgentRoomsRegistryMappingNotice: Equatable, Sendable {
+    struct Row: Equatable, Sendable {
+        let label: String
+        let count: String
+    }
+
+    let rows: [Row]
+    let affectedRegistryRecordCount: String
+    let title = "Legacy Rooms have duplicate registry mappings"
+    let detail = "Multiple saved room registrations point to the same conversation identity. To avoid showing history under the wrong room, Cider is showing no rooms. Nothing was imported or changed."
+
+    var accessibilityLabel: String {
+        let categorySummary = rows.map { "\($0.label): \($0.count)." }.joined(separator: " ")
+        return "\(title). \(detail) \(categorySummary) Affected registered rooms: \(affectedRegistryRecordCount). Read-only, legacy authoritative, noncanonical preview. No rooms shown. Nothing imported or changed. Messaging disabled."
+    }
+}
+
 enum AgentRoomsWorkspaceAuthority: String, Equatable, Sendable {
     case canonicalIncomplete
     case legacyAuthoritativePreview
@@ -111,6 +128,7 @@ enum AgentRoomsWorkspaceState: Equatable, Sendable {
     case blocked(authority: AgentRoomsWorkspaceAuthority, message: String)
     case eligiblePreviewBlocked(authority: AgentRoomsWorkspaceAuthority)
     case legacyIdentityConflict(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsIdentityConflictNotice)
+    case legacyRegistryMappingConflict(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsRegistryMappingNotice)
     case failed(authority: AgentRoomsWorkspaceAuthority, message: String)
     case loaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoomID: String)
     case eligibleEmpty(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsEligibleNotice)
@@ -123,7 +141,8 @@ enum AgentRoomsWorkspaceState: Equatable, Sendable {
         case .blocked(let authority, _), .failed(let authority, _), .loaded(let authority, _, _),
              .eligibleEmpty(let authority, _), .eligibleLoaded(let authority, _, _, _):
             return authority
-        case .eligiblePreviewBlocked(let authority), .legacyIdentityConflict(let authority, _):
+        case .eligiblePreviewBlocked(let authority), .legacyIdentityConflict(let authority, _),
+             .legacyRegistryMappingConflict(let authority, _):
             return authority
         }
     }
@@ -140,6 +159,8 @@ enum AgentRoomsWorkspaceState: Equatable, Sendable {
             return .eligiblePreviewBlocked(authority: authority)
         case .legacyIdentityConflict(let authority, let notice):
             return .legacyIdentityConflict(authority: authority, notice: notice)
+        case .legacyRegistryMappingConflict(let authority, let notice):
+            return .legacyRegistryMappingConflict(authority: authority, notice: notice)
         case .failed(let authority, let message):
             return .failed(authority: authority, message: message)
         case .loaded(let authority, let rooms, let storedSelection):
@@ -164,6 +185,7 @@ enum AgentRoomsWorkspaceProjection: Equatable, Sendable {
     case blocked(authority: AgentRoomsWorkspaceAuthority, message: String)
     case eligiblePreviewBlocked(authority: AgentRoomsWorkspaceAuthority)
     case legacyIdentityConflict(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsIdentityConflictNotice)
+    case legacyRegistryMappingConflict(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsRegistryMappingNotice)
     case failed(authority: AgentRoomsWorkspaceAuthority, message: String)
     case loaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoom: AgentRoom)
     case eligibleEmpty(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsEligibleNotice)

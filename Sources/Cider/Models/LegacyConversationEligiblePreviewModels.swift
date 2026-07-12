@@ -121,6 +121,60 @@ enum LegacyBoundedCount: Codable, Equatable, Sendable {
     }
 }
 
+enum LegacyRegistryMappingKind: Codable, CaseIterable, Equatable, Sendable {
+    case conversationIdentityMapping
+    case stableRoomMapping
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        switch try container.decode(String.self) {
+        case "conversationIdentityMapping": self = .conversationIdentityMapping
+        case "stableRoomMapping": self = .stableRoomMapping
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported legacy registry mapping category."
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .conversationIdentityMapping: try container.encode("conversationIdentityMapping")
+        case .stableRoomMapping: try container.encode("stableRoomMapping")
+        }
+    }
+}
+
+struct LegacyRegistryMappingCount: Codable, Equatable, Sendable {
+    let kind: LegacyRegistryMappingKind
+    let conflictingMappingGroups: LegacyBoundedCount
+}
+
+struct LegacyRegistryMappingDiagnosis: Codable, Equatable, Sendable {
+    static let currentFormatVersion = "cider.legacy-registry-mapping-diagnosis.v1"
+
+    let formatVersion: String
+    let affectedRegistryRecordCount: LegacyBoundedCount
+    let counts: [LegacyRegistryMappingCount]
+
+    init(affectedRegistryRecordCount: LegacyBoundedCount, counts: [LegacyRegistryMappingCount]) {
+        formatVersion = Self.currentFormatVersion
+        self.affectedRegistryRecordCount = affectedRegistryRecordCount
+        self.counts = counts
+    }
+
+    var isValid: Bool {
+        formatVersion == Self.currentFormatVersion &&
+            affectedRegistryRecordCount.isAtLeastTwo &&
+            counts.count == LegacyRegistryMappingKind.allCases.count &&
+            counts.map(\.kind) == LegacyRegistryMappingKind.allCases &&
+            counts.allSatisfy(\.conflictingMappingGroups.isValid) &&
+            counts.contains { !$0.conflictingMappingGroups.isZero }
+    }
+}
+
 struct LegacyCandidateConflictCount: Codable, Equatable, Sendable {
     let kind: LegacyCandidateConflictKind
     let conflictingIdentityGroups: LegacyBoundedCount
@@ -194,12 +248,14 @@ struct LegacyConversationEligiblePreview: Codable, Equatable, Sendable {
     var counts: LegacyConversationEligibleCounts
     var rooms: [LegacyConversationEligibleRoom]
     var conflictDiagnosis: LegacyCandidateConflictDiagnosis?
+    var registryMappingDiagnosis: LegacyRegistryMappingDiagnosis?
 
     init(
         state: LegacyConversationEligiblePreviewState,
         counts: LegacyConversationEligibleCounts,
         rooms: [LegacyConversationEligibleRoom],
-        conflictDiagnosis: LegacyCandidateConflictDiagnosis? = nil
+        conflictDiagnosis: LegacyCandidateConflictDiagnosis? = nil,
+        registryMappingDiagnosis: LegacyRegistryMappingDiagnosis? = nil
     ) {
         formatVersion = Self.currentFormatVersion
         readOnly = true
@@ -210,6 +266,7 @@ struct LegacyConversationEligiblePreview: Codable, Equatable, Sendable {
         self.counts = counts
         self.rooms = rooms
         self.conflictDiagnosis = conflictDiagnosis
+        self.registryMappingDiagnosis = registryMappingDiagnosis
     }
 
     static func sanitized(_ state: LegacyConversationEligiblePreviewState) -> Self {
@@ -218,5 +275,9 @@ struct LegacyConversationEligiblePreview: Codable, Equatable, Sendable {
 
     static func identityConflict(_ diagnosis: LegacyCandidateConflictDiagnosis) -> Self {
         .init(state: .blocked, counts: .zero, rooms: [], conflictDiagnosis: diagnosis)
+    }
+
+    static func registryMappingConflict(_ diagnosis: LegacyRegistryMappingDiagnosis) -> Self {
+        .init(state: .blocked, counts: .zero, rooms: [], registryMappingDiagnosis: diagnosis)
     }
 }

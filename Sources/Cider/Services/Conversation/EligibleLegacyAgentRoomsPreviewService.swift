@@ -24,20 +24,24 @@ final class EligibleLegacyAgentRoomsPreviewService {
               preview.counts.isExact else { return blocked() }
         switch preview.state {
         case .empty:
-            guard preview.conflictDiagnosis == nil else { return blocked() }
+            guard preview.conflictDiagnosis == nil, preview.registryMappingDiagnosis == nil else { return blocked() }
             return .empty(authority: .legacyAuthoritativePreview)
         case .blocked:
-            guard let diagnosis = preview.conflictDiagnosis else { return blocked() }
+            if let diagnosis = preview.registryMappingDiagnosis {
+                guard preview.conflictDiagnosis == nil else { return blocked() }
+                return registryMappingConflict(preview: preview, diagnosis: diagnosis)
+            }
+            guard let diagnosis = preview.conflictDiagnosis, preview.registryMappingDiagnosis == nil else { return blocked() }
             return identityConflict(preview: preview, diagnosis: diagnosis)
         case .failed:
-            guard preview.conflictDiagnosis == nil else { return blocked() }
+            guard preview.conflictDiagnosis == nil, preview.registryMappingDiagnosis == nil else { return blocked() }
             return .failed(authority: .legacyAuthoritativePreview, message: Self.failedMessage)
         case .eligibleEmpty:
-            guard preview.conflictDiagnosis == nil else { return blocked() }
+            guard preview.conflictDiagnosis == nil, preview.registryMappingDiagnosis == nil else { return blocked() }
             let notice = makeNotice(preview.counts, kind: .empty)
             return .eligibleEmpty(authority: .legacyAuthoritativePreview, notice: notice)
         case .ready:
-            guard preview.conflictDiagnosis == nil else { return blocked() }
+            guard preview.conflictDiagnosis == nil, preview.registryMappingDiagnosis == nil else { return blocked() }
             guard preview.rooms.count == preview.counts.displayedTotal else { return blocked() }
             let rooms = preview.rooms.compactMap(mapRoom)
             guard rooms.count == preview.rooms.count, let first = rooms.first else { return blocked() }
@@ -49,6 +53,27 @@ final class EligibleLegacyAgentRoomsPreviewService {
                 notice: notice
             )
         }
+    }
+
+    private func registryMappingConflict(
+        preview: LegacyConversationEligiblePreview,
+        diagnosis: LegacyRegistryMappingDiagnosis
+    ) -> AgentRoomsWorkspaceState {
+        guard diagnosis.isValid, preview.counts == .zero, preview.rooms.isEmpty else { return blocked() }
+        let rows = diagnosis.counts.compactMap { count -> AgentRoomsRegistryMappingNotice.Row? in
+            guard !count.conflictingMappingGroups.isZero else { return nil }
+            let label: String
+            switch count.kind {
+            case .conversationIdentityMapping: label = "Conversation mappings"
+            case .stableRoomMapping: label = "Stable room mappings"
+            }
+            return .init(label: label, count: count.conflictingMappingGroups.displayValue)
+        }
+        guard !rows.isEmpty else { return blocked() }
+        return .legacyRegistryMappingConflict(
+            authority: .legacyAuthoritativePreview,
+            notice: .init(rows: rows, affectedRegistryRecordCount: diagnosis.affectedRegistryRecordCount.displayValue)
+        )
     }
 
     private func identityConflict(

@@ -134,6 +134,8 @@ struct AgentRoomsWorkspaceView: View {
             )
         case .legacyIdentityConflict(let authority, let notice):
             identityConflictState(authority: authority, notice: notice)
+        case .legacyRegistryMappingConflict(let authority, let notice):
+            registryMappingConflictState(authority: authority, notice: notice)
         case .failed(let authority, let message):
             failedState(authority: authority, message: message)
         case .loaded(let authority, let rooms, let selectedRoom):
@@ -287,6 +289,53 @@ struct AgentRoomsWorkspaceView: View {
                         Text("Affected registered rooms")
                         Spacer(minLength: Spacing.lg)
                         Text(notice.affectedCandidateCount)
+                    }
+                }
+                .font(CiderFont.bodyMedium)
+                .foregroundColor(CiderColors.secondary)
+                .frame(maxWidth: 440)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). \(notice.accessibilityLabel)")
+
+            Button("Retry") {
+                Task { await reload() }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Retry read-only legacy Rooms diagnosis")
+        }
+        .padding(Spacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func registryMappingConflictState(
+        authority: AgentRoomsWorkspaceAuthority,
+        notice: AgentRoomsRegistryMappingNotice
+    ) -> some View {
+        VStack(spacing: Spacing.md) {
+            VStack(spacing: Spacing.md) {
+                Image(systemName: "lock.trianglebadge.exclamationmark")
+                    .font(CiderFont.emptyStateIcon)
+                    .foregroundColor(CiderColors.secondary)
+                Text(notice.title)
+                    .font(CiderFont.subheadingMedium)
+                    .foregroundColor(CiderColors.primary)
+                Text(notice.detail)
+                    .font(CiderFont.body)
+                    .foregroundColor(CiderColors.tertiary)
+                    .multilineTextAlignment(.center)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    ForEach(Array(notice.rows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: Spacing.lg) {
+                            Text(row.label)
+                            Spacer(minLength: Spacing.lg)
+                            Text(row.count)
+                        }
+                    }
+                    HStack(spacing: Spacing.lg) {
+                        Text("Affected registered rooms")
+                        Spacer(minLength: Spacing.lg)
+                        Text(notice.affectedRegistryRecordCount)
                     }
                 }
                 .font(CiderFont.bodyMedium)

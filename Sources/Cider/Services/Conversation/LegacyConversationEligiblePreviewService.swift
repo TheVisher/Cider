@@ -1,6 +1,41 @@
 import CryptoKit
 import Foundation
 
+private struct LegacyRegistryMappingDiagnoser {
+    private struct SaturatingCount {
+        private(set) var value: LegacyBoundedCount = .exact(0)
+        mutating func increment() {
+            switch value {
+            case .exact(let current) where current < 99: value = .exact(current + 1)
+            case .exact, .atLeast100: value = .atLeast100
+            }
+        }
+    }
+
+    static func diagnose(_ records: [CiderAgentChatRecord]) -> LegacyRegistryMappingDiagnosis? {
+        let conversationGroups = Dictionary(grouping: records.indices, by: { records[$0].conversationID })
+        let stableGroups = Dictionary(grouping: records.indices, by: { records[$0].stableID })
+        var conversationCount = SaturatingCount()
+        var stableCount = SaturatingCount()
+        var affected = Set<Int>()
+        var affectedCount = SaturatingCount()
+
+        for group in conversationGroups.values where group.count >= 2 {
+            conversationCount.increment()
+            for index in group where affected.insert(index).inserted { affectedCount.increment() }
+        }
+        for group in stableGroups.values where group.count >= 2 {
+            stableCount.increment()
+            for index in group where affected.insert(index).inserted { affectedCount.increment() }
+        }
+        guard !conversationCount.value.isZero || !stableCount.value.isZero else { return nil }
+        return .init(affectedRegistryRecordCount: affectedCount.value, counts: [
+            .init(kind: .conversationIdentityMapping, conflictingMappingGroups: conversationCount.value),
+            .init(kind: .stableRoomMapping, conflictingMappingGroups: stableCount.value),
+        ])
+    }
+}
+
 struct LegacyCandidateConflictDiagnoser {
     private struct RuntimeBindingIdentity: Hashable {
         let sourceNamespace: String
@@ -201,8 +236,8 @@ final class LegacyConversationEligiblePreviewService {
 
     private func evaluate(_ snapshot: Snapshot) throws -> LegacyConversationEligiblePreview {
         let registries = try decodeRegistries(snapshot.registry)
-        guard unique(registries.map(\.conversationID)), unique(registries.map(\.stableID)) else {
-            throw SnapshotError.blocked
+        if let diagnosis = LegacyRegistryMappingDiagnoser.diagnose(registries) {
+            return .registryMappingConflict(diagnosis)
         }
         let active = registries.filter { !$0.archived }
         let allRegistryIDs = Set(registries.map(\.conversationID))

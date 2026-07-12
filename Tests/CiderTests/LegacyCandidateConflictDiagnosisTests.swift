@@ -157,6 +157,83 @@ final class LegacyCandidateConflictDiagnosisTests: XCTestCase {
         XCTAssertFalse(source.contains("source selector"))
     }
 
+    func testRegistryMappingAdapterProjectsDistinctCopyAndRejectsForgery() throws {
+        let diagnosis = LegacyRegistryMappingDiagnosis(
+            affectedRegistryRecordCount: .atLeast100,
+            counts: [
+                .init(kind: .conversationIdentityMapping, conflictingMappingGroups: .exact(1)),
+                .init(kind: .stableRoomMapping, conflictingMappingGroups: .atLeast100),
+            ]
+        )
+        let preview = LegacyConversationEligiblePreview.registryMappingConflict(diagnosis)
+        guard case .legacyRegistryMappingConflict(let authority, let notice) =
+                EligibleLegacyAgentRoomsPreviewService(loadPreview: { preview }).loadWorkspace() else {
+            return XCTFail("Expected structured registry-mapping diagnosis")
+        }
+        XCTAssertEqual(authority, .legacyAuthoritativePreview)
+        XCTAssertEqual(notice.title, "Legacy Rooms have duplicate registry mappings")
+        XCTAssertEqual(notice.detail, "Multiple saved room registrations point to the same conversation identity. To avoid showing history under the wrong room, Cider is showing no rooms. Nothing was imported or changed.")
+        XCTAssertEqual(notice.rows, [
+            .init(label: "Conversation mappings", count: "1"),
+            .init(label: "Stable room mappings", count: "99+"),
+        ])
+        XCTAssertEqual(notice.affectedRegistryRecordCount, "99+")
+        XCTAssertTrue(notice.accessibilityLabel.contains("Read-only, legacy authoritative, noncanonical preview. No rooms shown. Nothing imported or changed. Messaging disabled."))
+
+        let invalid = [
+            LegacyRegistryMappingDiagnosis(affectedRegistryRecordCount: .exact(1), counts: diagnosis.counts),
+            LegacyRegistryMappingDiagnosis(affectedRegistryRecordCount: .exact(3), counts: Array(diagnosis.counts.reversed())),
+            LegacyRegistryMappingDiagnosis(affectedRegistryRecordCount: .exact(3), counts: Array(diagnosis.counts.dropLast())),
+            LegacyRegistryMappingDiagnosis(affectedRegistryRecordCount: .exact(3), counts: [diagnosis.counts[0], diagnosis.counts[0]]),
+            LegacyRegistryMappingDiagnosis(affectedRegistryRecordCount: .exact(3), counts: diagnosis.counts.map { .init(kind: $0.kind, conflictingMappingGroups: .exact(0)) }),
+        ]
+        for forged in invalid { assertGenericBlock(.registryMappingConflict(forged)) }
+
+        let overlappingGroups = LegacyRegistryMappingDiagnosis(
+            affectedRegistryRecordCount: .exact(2),
+            counts: [
+                .init(kind: .conversationIdentityMapping, conflictingMappingGroups: .exact(1)),
+                .init(kind: .stableRoomMapping, conflictingMappingGroups: .exact(1)),
+            ]
+        )
+        guard case .legacyRegistryMappingConflict(_, let overlappingNotice) =
+                EligibleLegacyAgentRoomsPreviewService(
+                    loadPreview: { .registryMappingConflict(overlappingGroups) }
+                ).loadWorkspace() else {
+            return XCTFail("Expected overlapping registry mapping groups to remain valid")
+        }
+        XCTAssertEqual(overlappingNotice.affectedRegistryRecordCount, "2")
+        XCTAssertEqual(overlappingNotice.rows.map(\.count), ["1", "1"])
+
+        var rooms = preview
+        rooms.rooms = [.init(plan: .init(), totalMessages: 0, messageCapOmitted: 0)]
+        assertGenericBlock(rooms)
+        var ordinary = preview
+        ordinary.counts.registeredActiveTotal = 1
+        assertGenericBlock(ordinary)
+        var bothDiagnoses = preview
+        bothDiagnoses.conflictDiagnosis = makeDiagnosis(affected: .exact(2), record: .exact(1))
+        assertGenericBlock(bothDiagnoses)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(preview)) as? [String: Any])
+        var nested = try XCTUnwrap(object["registryMappingDiagnosis"] as? [String: Any])
+        nested["formatVersion"] = "forged.registry.version"
+        object["registryMappingDiagnosis"] = nested
+        assertGenericBlock(try JSONDecoder().decode(LegacyConversationEligiblePreview.self, from: JSONSerialization.data(withJSONObject: object)))
+    }
+
+    func testRegistryMappingUIContractAndRetryRemainStaticallyAccessible() throws {
+        let source = try String(contentsOf: repositoryRoot.appendingPathComponent("Sources/Cider/Views/AgentRooms/AgentRoomsWorkspaceView.swift"), encoding: .utf8)
+        let block = try XCTUnwrap(source.range(of: "private func registryMappingConflictState").flatMap { start in
+            source.range(of: "private func failedState", range: start.upperBound..<source.endIndex).map { String(source[start.lowerBound..<$0.lowerBound]) }
+        })
+        let ignored = try XCTUnwrap(block.range(of: ".accessibilityElement(children: .ignore)"))
+        let retry = try XCTUnwrap(block.range(of: "Button(\"Retry\")"))
+        XCTAssertLessThan(ignored.upperBound, retry.lowerBound)
+        XCTAssertTrue(block.contains(".accessibilityLabel(\"Retry read-only legacy Rooms diagnosis\")"))
+        XCTAssertFalse(block.contains("Button(\"Repair"))
+    }
+
     private func makeDiagnosis(
         affected: LegacyBoundedCount,
         record: LegacyBoundedCount = .exact(0),

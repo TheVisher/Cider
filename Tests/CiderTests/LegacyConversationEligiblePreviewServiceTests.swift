@@ -210,12 +210,6 @@ struct LegacyConversationEligiblePreviewServiceTests {
     @Test("Earlier registry, filesystem, and limit blockers remain generic without diagnosis")
     func earlierGlobalBlockersRemainGeneric() throws {
         try withEligibleFixture { fixture in
-            try fixture.writeRoom(index: 1)
-            let duplicate = fixture.registryDirectory.appendingPathComponent("66666666-6666-4666-8666-666666666666.json")
-            try Data(contentsOf: fixture.registryURL(index: 1)).write(to: duplicate)
-            #expect(fixture.service.preview() == .sanitized(.blocked))
-        }
-        try withEligibleFixture { fixture in
             let symlink = fixture.conversationDirectory.appendingPathComponent("77777777-7777-4777-8777-777777777777.jsonl")
             try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: fixture.registryDirectory)
             #expect(fixture.service.preview() == .sanitized(.blocked))
@@ -229,6 +223,86 @@ struct LegacyConversationEligiblePreviewServiceTests {
             try fixture.writeRoom(index: 1)
             let limited = fixture.makeService(limits: .init(maximumFiles: 1))
             #expect(limited.preview() == .sanitized(.blocked))
+        }
+    }
+
+    @Test("Duplicate registry mappings report exact groups and affected-record unions")
+    func duplicateRegistryMappingDiagnosis() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, conversationIDOverride: fixture.roomID(index: 7))
+            try fixture.writeRoom(index: 2, conversationIDOverride: fixture.roomID(index: 7))
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .exact(2), conversation: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, stableIDOverride: "temporary.shared")
+            try fixture.writeRoom(index: 2, stableIDOverride: "temporary.shared")
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .exact(2), stable: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, conversationIDOverride: fixture.roomID(index: 7), stableIDOverride: "temporary.shared")
+            try fixture.writeRoom(index: 2, conversationIDOverride: fixture.roomID(index: 7), stableIDOverride: "temporary.shared")
+            try fixture.writeRoom(index: 3, stableIDOverride: "temporary.shared")
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .exact(3), conversation: .exact(1), stable: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, conversationIDOverride: fixture.roomID(index: 7))
+            try fixture.writeRoom(index: 2, conversationIDOverride: fixture.roomID(index: 7))
+            try fixture.writeRoom(index: 3, stableIDOverride: "temporary.shared")
+            try fixture.writeRoom(index: 4, stableIDOverride: "temporary.shared")
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .exact(4), conversation: .exact(1), stable: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            for index in 1...3 {
+                try fixture.writeRoom(index: index, stableIDOverride: "temporary.shared")
+            }
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .exact(3), stable: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, stableIDOverride: "temporary.first")
+            try fixture.writeRoom(index: 2, stableIDOverride: "temporary.first")
+            try fixture.writeRoom(index: 3, stableIDOverride: "temporary.second")
+            try fixture.writeRoom(index: 4, stableIDOverride: "temporary.second")
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .exact(4), stable: .exact(2))
+        }
+    }
+
+    @Test("Registry mapping counts saturate and unique registries retain the existing path")
+    func registryMappingSaturationAndUniquePath() throws {
+        try withEligibleFixture { fixture in
+            for index in 1...101 { try fixture.writeRoom(index: index, stableIDOverride: "temporary.shared") }
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .atLeast100, stable: .exact(1))
+        }
+        try withEligibleFixture { fixture in
+            for index in 1...200 { try fixture.writeRoom(index: index, stableIDOverride: "temporary.\((index - 1) / 2)") }
+            assertRegistryDiagnosis(fixture.service.preview(), affected: .atLeast100, stable: .atLeast100)
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1)
+            #expect(fixture.service.preview().state == .ready)
+            #expect(fixture.service.preview().registryMappingDiagnosis == nil)
+        }
+    }
+
+    @Test("Registry diagnosis retry is immutable and concurrent replacement discards it")
+    func registryMappingRetryAndSnapshotRevalidation() throws {
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, stableIDOverride: "temporary.shared")
+            try fixture.writeRoom(index: 2, stableIDOverride: "temporary.shared")
+            let inputs = try fixture.inputFingerprint()
+            let canonical = try fixture.databaseSnapshot()
+            #expect(fixture.service.preview() == fixture.service.preview())
+            #expect(try fixture.inputFingerprint() == inputs)
+            #expect(try fixture.databaseSnapshot() == canonical)
+        }
+        try withEligibleFixture { fixture in
+            try fixture.writeRoom(index: 1, stableIDOverride: "temporary.shared")
+            try fixture.writeRoom(index: 2, stableIDOverride: "temporary.shared")
+            let service = fixture.makeService(beforeRevalidation: {
+                try? Data("changed".utf8).write(to: fixture.registryURL(index: 1), options: .atomic)
+            })
+            let result = service.preview()
+            #expect(result == .sanitized(.failed))
+            #expect(result.registryMappingDiagnosis == nil)
         }
     }
 
@@ -344,6 +418,20 @@ struct LegacyConversationEligiblePreviewServiceTests {
             #expect(!String(describing: workspace).contains(sentinel))
             guard case .legacyIdentityConflict(_, let notice) = workspace else {
                 Issue.record("Expected safe identity conflict")
+                return
+            }
+            #expect(!notice.accessibilityLabel.contains(sentinel))
+        }
+        try withEligibleFixture { fixture in
+            let sentinel = "PRIVATE_REGISTRY_IDENTITY_TITLE_PATH_HASH_AUTH_SESSION_TIMESTAMP"
+            try fixture.writeRoom(index: 1, titleOverride: sentinel, stableIDOverride: sentinel)
+            try fixture.writeRoom(index: 2, titleOverride: sentinel, stableIDOverride: sentinel)
+            let preview = fixture.service.preview()
+            let workspace = EligibleLegacyAgentRoomsPreviewService(loadPreview: { preview }).loadWorkspace()
+            #expect(!String(describing: preview.registryMappingDiagnosis).contains(sentinel))
+            #expect(!String(describing: workspace).contains(sentinel))
+            guard case .legacyRegistryMappingConflict(_, let notice) = workspace else {
+                Issue.record("Expected safe registry mapping conflict")
                 return
             }
             #expect(!notice.accessibilityLabel.contains(sentinel))
@@ -503,6 +591,23 @@ private func assertDiagnosis(
 }
 
 @MainActor
+private func assertRegistryDiagnosis(
+    _ preview: LegacyConversationEligiblePreview,
+    affected: LegacyBoundedCount,
+    conversation: LegacyBoundedCount = .exact(0),
+    stable: LegacyBoundedCount = .exact(0)
+) {
+    #expect(preview.state == .blocked)
+    #expect(preview.rooms.isEmpty && preview.counts == .zero)
+    #expect(preview.conflictDiagnosis == nil)
+    #expect(preview.readOnly && !preview.changed && !preview.safeForBackfill && !preview.safeForShadowWrites)
+    #expect(preview.registryMappingDiagnosis == .init(affectedRegistryRecordCount: affected, counts: [
+        .init(kind: .conversationIdentityMapping, conflictingMappingGroups: conversation),
+        .init(kind: .stableRoomMapping, conflictingMappingGroups: stable),
+    ]))
+}
+
+@MainActor
 private struct PlannedParityReader: ConversationCoreParityReading {
     let existingRoom: ConversationRoom
     let existingBinding: ConversationRuntimeBinding
@@ -615,13 +720,15 @@ private final class EligibleFixture {
         messages suppliedMessages: [AIAssistantMessage]? = nil,
         sourceIDOverride: String? = nil,
         sessionOverride: String? = nil,
-        roleOverride: AIAssistantMessage.Role = .user
+        roleOverride: AIAssistantMessage.Role = .user,
+        conversationIDOverride: UUID? = nil,
+        stableIDOverride: String? = nil
     ) throws {
-        let roomID = UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", index))!
+        let roomID = conversationIDOverride ?? roomID(index: index)
         let title = titleOverride ?? "Temporary \(index)"
         let session = sessionOverride ?? "session-\(index)"
         let record = CiderAgentChatRecord(
-            stableID: "temporary.\(index)", title: title, kind: "chat", conversationID: roomID,
+            stableID: stableIDOverride ?? "temporary.\(index)", title: title, kind: "chat", conversationID: roomID,
             runtimeID: "hermes", activeRuntimeSessionID: session, runtimeSessionLineage: [session],
             lastSyncedMessageID: nil, lastSyncedTimestamp: nil, lastImportedRuntimeSessionID: session,
             scope: "temporary-test", archived: false, createdAt: timestamp,
@@ -662,7 +769,7 @@ private final class EligibleFixture {
         registryDirectory.appendingPathComponent("\(roomID(index: index).uuidString).json")
     }
 
-    private func roomID(index: Int) -> UUID {
+    func roomID(index: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", index))!
     }
 
