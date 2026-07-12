@@ -124,7 +124,7 @@ final class LegacyAgentRoomsPreviewServiceTests: XCTestCase {
         XCTAssertEqual(rooms.map(\.title), ["Legacy"])
     }
 
-    func testAdapterSourceHasStrictReadOnlyBoundaryAndProductionCompositionStaysCanonicalOnly() throws {
+    func testAdapterSourceHasStrictReadOnlyBoundaryAndProductionCompositionUsesStrictArbiter() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let adapter = try String(
             contentsOf: root.appendingPathComponent("Sources/Cider/Services/Conversation/LegacyAgentRoomsPreviewService.swift"),
@@ -146,9 +146,122 @@ final class LegacyAgentRoomsPreviewServiceTests: XCTestCase {
             composition.range(of: "case .aiAssistant:", range: start.upperBound..<composition.endIndex)
                 .map { composition[start.lowerBound..<$0.lowerBound] }
         })
-        XCTAssertTrue(roomsBlock.contains("AgentRoomsReadService"))
-        for prohibited in ["LegacyAgentRoomsPreviewService", "AgentRoomsWorkspaceLoader", "StoragePaths", "Fixture"] {
+        for required in [
+            "AgentRoomsReadService", "LegacyAgentRoomsPreviewService",
+            "AgentRoomsWorkspaceLoader", "StoragePaths.legacyConversationPreviewDirectories",
+            "ConversationRepositoryParityReader",
+        ] {
+            XCTAssertTrue(roomsBlock.contains(required), "Missing production composition: \(required)")
+        }
+        for prohibited in ["AIConversationStorage", "CiderAgentChatRegistry", "Fixture", "tolerant", "createDirectory"] {
             XCTAssertFalse(roomsBlock.contains(prohibited))
+        }
+    }
+
+    func testTemporaryProductionArbitrationMatrixIsStrictLabeledAndImmutableAcrossRetry() throws {
+        let readyFixture = try StrictRoomsFixture()
+        defer { readyFixture.remove() }
+        try readyFixture.writeRoom(
+            id: roomID,
+            stableKey: "legacy.integration",
+            title: "Legacy Integration",
+            updatedAt: timestamp,
+            messages: [
+                .init(
+                    id: UUID(),
+                    role: .user,
+                    content: "temporary fixture only",
+                    timestamp: timestamp,
+                    sourceID: "hermes:integration:user",
+                    sourceSessionID: "session-active",
+                    sourceName: "Hermes"
+                )
+            ]
+        )
+        let inputsBefore = try readyFixture.inputSnapshot()
+        let databaseBefore = try readyFixture.databaseSnapshot()
+        var legacyCalls = 0
+        let loadLegacy = {
+            legacyCalls += 1
+            return readyFixture.adapter(now: self.timestamp).loadWorkspace()
+        }
+        let canonicalRoom = mappedRoom(title: "Canonical")
+
+        for canonical in [
+            AgentRoomsWorkspaceState.loaded(
+                authority: .canonicalIncomplete,
+                rooms: [canonicalRoom],
+                selectedRoomID: canonicalRoom.id
+            ),
+            .failed(authority: .canonicalIncomplete, message: AgentRoomsReadService.unavailableMessage),
+            .loading(authority: .canonicalIncomplete),
+            .blocked(authority: .canonicalIncomplete, message: "canonical blocker"),
+        ] {
+            XCTAssertEqual(
+                AgentRoomsWorkspaceLoader(loadCanonical: { canonical }, loadLegacy: loadLegacy).loadWorkspace(),
+                canonical
+            )
+        }
+        XCTAssertEqual(legacyCalls, 0, "Canonical non-empty terminal states must not touch legacy paths")
+
+        for expectedCallCount in 1...2 {
+            let result = AgentRoomsWorkspaceLoader(
+                loadCanonical: { .empty(authority: .canonicalIncomplete) },
+                loadLegacy: loadLegacy
+            ).loadWorkspace()
+            guard case .loaded(let authority, let rooms, let selection) = result else {
+                return XCTFail("Expected strict legacy workspace")
+            }
+            XCTAssertEqual(authority, .legacyAuthoritativePreview)
+            XCTAssertEqual(rooms.map(\.title), ["Legacy Integration"])
+            XCTAssertEqual(selection, roomID.uuidString)
+            XCTAssertEqual(legacyCalls, expectedCallCount)
+            XCTAssertEqual(try readyFixture.inputSnapshot(), inputsBefore)
+            XCTAssertEqual(try readyFixture.databaseSnapshot(), databaseBefore)
+        }
+
+        let blockedFixture = try StrictRoomsFixture()
+        defer { blockedFixture.remove() }
+        try blockedFixture.writeRoom(
+            id: roomID,
+            stableKey: "legacy.blocked",
+            title: "Registry Title",
+            updatedAt: timestamp,
+            metadataTitle: "Mismatched Title",
+            messages: [
+                .init(id: UUID(), role: .user, content: "must not leak", timestamp: timestamp, sourceID: "hermes:blocked:user", sourceSessionID: "session-active", sourceName: "Hermes")
+            ]
+        )
+        let blockedInputsBefore = try blockedFixture.inputSnapshot()
+        let blockedDatabaseBefore = try blockedFixture.databaseSnapshot()
+        for _ in 0..<2 {
+            let result = AgentRoomsWorkspaceLoader(
+                loadCanonical: { .empty(authority: .canonicalIncomplete) },
+                loadLegacy: { blockedFixture.adapter(now: self.timestamp).loadWorkspace() }
+            ).loadWorkspace()
+            XCTAssertEqual(
+                result,
+                .blocked(authority: .legacyAuthoritativePreview, message: LegacyAgentRoomsPreviewService.blockedMessage)
+            )
+            XCTAssertFalse(String(describing: result).contains("must not leak"))
+            XCTAssertEqual(try blockedFixture.inputSnapshot(), blockedInputsBefore)
+            XCTAssertEqual(try blockedFixture.databaseSnapshot(), blockedDatabaseBefore)
+        }
+
+        let emptyFixture = try StrictRoomsFixture()
+        defer { emptyFixture.remove() }
+        let emptyInputsBefore = try emptyFixture.inputSnapshot()
+        let emptyDatabaseBefore = try emptyFixture.databaseSnapshot()
+        for _ in 0..<2 {
+            XCTAssertEqual(
+                AgentRoomsWorkspaceLoader(
+                    loadCanonical: { .empty(authority: .canonicalIncomplete) },
+                    loadLegacy: { emptyFixture.adapter(now: self.timestamp).loadWorkspace() }
+                ).loadWorkspace(),
+                .empty(authority: .legacyAuthoritativePreview)
+            )
+            XCTAssertEqual(try emptyFixture.inputSnapshot(), emptyInputsBefore)
+            XCTAssertEqual(try emptyFixture.databaseSnapshot(), emptyDatabaseBefore)
         }
     }
 

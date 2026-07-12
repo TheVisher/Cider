@@ -94,4 +94,24 @@ final class StoragePathsInitializationTests: XCTestCase {
             )
         }
     }
+
+    func testLegacyConversationPreviewPathLookupUsesConfiguredVaultWithoutCreatingAnything() {
+        let missingVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-missing-legacy-preview-\(UUID().uuidString)", isDirectory: true)
+        let config = CiderConfig(vaultDirectory: missingVault.path)
+
+        let paths = StoragePaths.legacyConversationPreviewDirectories(config: config)
+
+        XCTAssertEqual(
+            paths.registry,
+            missingVault.appendingPathComponent(".cider/agent-chats", isDirectory: true)
+        )
+        XCTAssertEqual(
+            paths.conversations,
+            missingVault.appendingPathComponent(".cider/ai-conversations", isDirectory: true)
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingVault.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.registry.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.conversations.path))
+    }
 }

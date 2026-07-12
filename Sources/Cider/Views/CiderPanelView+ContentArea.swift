@@ -412,8 +412,17 @@ extension CiderPanelView {
             case .agentRooms:
                 AgentRoomsWorkspaceView(
                     loadWorkspace: {
-                        AgentRoomsReadService(
-                            repository: ConversationRepository(database: CiderDatabase.shared)
+                        let repository = ConversationRepository(database: CiderDatabase.shared)
+                        let canonical = AgentRoomsReadService(repository: repository)
+                        let paths = StoragePaths.legacyConversationPreviewDirectories()
+                        let legacy = LegacyAgentRoomsPreviewService(
+                            registryDirectory: paths.registry,
+                            conversationDirectory: paths.conversations,
+                            parityReader: ConversationRepositoryParityReader(repository: repository)
+                        )
+                        return AgentRoomsWorkspaceLoader(
+                            loadCanonical: canonical.loadWorkspace,
+                            loadLegacy: legacy.loadWorkspace
                         ).loadWorkspace()
                     },
                     onOpenLiveChat: {

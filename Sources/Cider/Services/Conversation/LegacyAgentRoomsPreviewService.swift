@@ -1,7 +1,7 @@
 import Foundation
 
-/// Dormant, bounded presentation adapter over the strict legacy preview contract.
-/// Construction is intentionally injectable; production Rooms composition does not use it.
+/// Bounded presentation adapter over the strict, read-only legacy preview contract.
+/// Production Rooms may use it only behind explicit canonical-empty arbitration.
 @MainActor
 final class LegacyAgentRoomsPreviewService {
     static let blockedMessage = "Legacy preview unavailable because provenance validation did not pass."
@@ -22,7 +22,7 @@ final class LegacyAgentRoomsPreviewService {
         self.now = now
     }
 
-    /// This path-based initializer is reserved for temporary fixtures and reviewed harnesses.
+    /// Strict path-based construction never creates or writes legacy storage.
     init(
         registryDirectory: URL,
         conversationDirectory: URL,
@@ -260,7 +260,7 @@ final class LegacyAgentRoomsPreviewService {
     }
 }
 
-/// Selects one authority without merging. Production composition intentionally does not activate it.
+/// Selects one authority without merging; only explicit canonical-incomplete emptiness consults legacy.
 @MainActor
 final class AgentRoomsWorkspaceLoader {
     private let loadCanonical: () -> AgentRoomsWorkspaceState

@@ -57,6 +57,11 @@ enum StorageType: String, CaseIterable {
 }
 
 enum StoragePaths {
+    struct LegacyConversationPreviewDirectories: Equatable {
+        let registry: URL
+        let conversations: URL
+    }
+
     enum VaultStructureOperation: String, Equatable {
         case createDirectory = "create directory"
         case writeCompatibilityTemplate = "write compatibility template"
@@ -130,6 +135,19 @@ enum StoragePaths {
         let effectiveConfig = config ?? CiderConfig.load()
         let expanded = NSString(string: effectiveConfig.vaultDirectory).expandingTildeInPath
         return URL(fileURLWithPath: expanded)
+    }
+
+    /// Resolves the established legacy conversation locations without touching the file system.
+    /// Preview readers must use these URLs directly rather than constructing writer-backed stores.
+    static func legacyConversationPreviewDirectories(
+        config: CiderConfig? = nil
+    ) -> LegacyConversationPreviewDirectories {
+        let internalDirectory = vaultDirectoryURL(config: config)
+            .appendingPathComponent(ciderInternalDir, isDirectory: true)
+        return LegacyConversationPreviewDirectories(
+            registry: internalDirectory.appendingPathComponent("agent-chats", isDirectory: true),
+            conversations: internalDirectory.appendingPathComponent("ai-conversations", isDirectory: true)
+        )
     }
 
     /// Cached vault root URL.

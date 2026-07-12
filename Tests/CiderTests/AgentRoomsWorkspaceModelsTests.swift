@@ -539,7 +539,7 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
         }
     }
 
-    func testProductionRoomsCompositionUsesCanonicalReaderWithoutFixtureFallback() throws {
+    func testProductionRoomsCompositionUsesExactStrictEmptyStateArbitrationWithoutForbiddenDependencies() throws {
         let source = try String(
             contentsOf: Self.repositoryRoot.appendingPathComponent(
                 "Sources/Cider/Views/CiderPanelView+ContentArea.swift"
@@ -552,10 +552,30 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
                     .map { source[start.lowerBound..<$0.lowerBound] }
             }
         )
-        XCTAssertTrue(roomsComposition.contains("AgentRoomsReadService"))
-        XCTAssertTrue(roomsComposition.contains("ConversationRepository"))
-        XCTAssertTrue(roomsComposition.contains("CiderDatabase.shared"))
-        XCTAssertFalse(roomsComposition.contains("AgentRoomsFixtureProvider"))
+        for required in [
+            "let repository = ConversationRepository(database: CiderDatabase.shared)",
+            "AgentRoomsReadService(repository: repository)",
+            "StoragePaths.legacyConversationPreviewDirectories()",
+            "LegacyAgentRoomsPreviewService(",
+            "ConversationRepositoryParityReader(repository: repository)",
+            "AgentRoomsWorkspaceLoader(",
+            "loadCanonical: canonical.loadWorkspace",
+            "loadLegacy: legacy.loadWorkspace",
+            ").loadWorkspace()",
+        ] {
+            XCTAssertTrue(roomsComposition.contains(required), "Missing strict production composition: \(required)")
+        }
+        XCTAssertEqual(roomsComposition.components(separatedBy: "ConversationRepository(database:").count - 1, 1)
+        for prohibited in [
+            "AgentRoomsFixtureProvider", "AIConversationStorage", "CiderAgentChatRegistry",
+            "PrimarySaveCoordinator", "ShadowWriter", "Reconciler", "HealthStore", "backfill",
+            "import", "BridgeTransport", "tolerant", "createDirectory",
+        ] {
+            XCTAssertFalse(
+                roomsComposition.localizedCaseInsensitiveContains(prohibited),
+                "Production Rooms composition must exclude \(prohibited)"
+            )
+        }
     }
 
     private func withRepository<T>(_ body: (CiderDatabase, ConversationRepository) throws -> T) throws -> T {
