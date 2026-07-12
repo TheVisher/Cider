@@ -14,6 +14,7 @@
 		B1A00000000000000000001A /* menubar-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001C /* menubar-icon.png */; };
 		B1A00000000000000000001B /* cider-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001D /* cider-icon.png */; };
 		B1A00000000000000000001E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1A00000000000000000001F /* Assets.xcassets */; };
+		C80100000000000000000002 /* codex_usage_monitor.py in Resources */ = {isa = PBXBuildFile; fileRef = C80100000000000000000001 /* codex_usage_monitor.py */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,6 +26,7 @@
 		B1A00000000000000000001C /* menubar-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "menubar-icon.png"; path = "Sources/Cider/Resources/menubar-icon.png"; sourceTree = SOURCE_ROOT; };
 		B1A00000000000000000001D /* cider-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "cider-icon.png"; path = "Sources/Cider/Resources/cider-icon.png"; sourceTree = SOURCE_ROOT; };
 		B1A00000000000000000001F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Sources/Cider/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		C80100000000000000000001 /* codex_usage_monitor.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; name = codex_usage_monitor.py; path = scripts/codex_usage_monitor.py; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,6 +67,7 @@
 				B1A00000000000000000001C /* menubar-icon.png */,
 				B1A00000000000000000001D /* cider-icon.png */,
 				B1A00000000000000000001F /* Assets.xcassets */,
+				C80100000000000000000001 /* codex_usage_monitor.py */,
 				B1A000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -138,6 +141,7 @@
 				B1A00000000000000000001A /* menubar-icon.png in Resources */,
 				B1A00000000000000000001B /* cider-icon.png in Resources */,
 				B1A00000000000000000001E /* Assets.xcassets in Resources */,
+				C80100000000000000000002 /* codex_usage_monitor.py in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
