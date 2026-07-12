@@ -30,6 +30,8 @@ struct AgentRoomsWorkspaceView: View {
         _state = State(initialValue: state)
         if case .loaded(_, _, let selectedRoomID) = state {
             _selectedRoomID = State(initialValue: selectedRoomID)
+        } else if case .eligibleLoaded(_, _, let selectedRoomID, _) = state {
+            _selectedRoomID = State(initialValue: selectedRoomID)
         } else {
             _selectedRoomID = State(initialValue: nil)
         }
@@ -48,6 +50,10 @@ struct AgentRoomsWorkspaceView: View {
         }
         .onChange(of: state) { _, newState in
             if case .loaded(_, let rooms, let storedSelection) = newState {
+                selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
+                    ? storedSelection
+                    : rooms.first?.id
+            } else if case .eligibleLoaded(_, let rooms, let storedSelection, _) = newState {
                 selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
                     ? storedSelection
                     : rooms.first?.id
@@ -116,11 +122,27 @@ struct AgentRoomsWorkspaceView: View {
             loadingState
         case .empty(let authority):
             emptyState(authority: authority)
+        case .eligibleEmpty(_, let notice):
+            eligibleEmptyState(notice: notice)
         case .blocked(let authority, let message):
             blockedState(authority: authority, message: message)
         case .failed(_, let message):
             failedState(message: message)
         case .loaded(let authority, let rooms, let selectedRoom):
+            loadedWorkspace(authority: authority, rooms: rooms, selectedRoom: selectedRoom, notice: nil)
+        case .eligibleLoaded(let authority, let rooms, let selectedRoom, let notice):
+            loadedWorkspace(authority: authority, rooms: rooms, selectedRoom: selectedRoom, notice: notice)
+        }
+    }
+
+    private func loadedWorkspace(
+        authority: AgentRoomsWorkspaceAuthority,
+        rooms: [AgentRoom],
+        selectedRoom: AgentRoom,
+        notice: AgentRoomsEligibleNotice?
+    ) -> some View {
+        VStack(spacing: 0) {
+            if let notice { eligibleNotice(notice) }
             GeometryReader { proxy in
                 if proxy.size.width >= 660 {
                     HStack(spacing: 0) {
@@ -139,6 +161,35 @@ struct AgentRoomsWorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func eligibleNotice(_ notice: AgentRoomsEligibleNotice) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(notice.title).font(CiderFont.bodySemibold).foregroundColor(CiderColors.primary)
+            Text(notice.detail).font(CiderFont.caption).foregroundColor(CiderColors.secondary)
+        }
+        .padding(.horizontal, Spacing.xxl)
+        .padding(.vertical, Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CiderColors.surfaceSubtle)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(notice.accessibilityLabel)
+    }
+
+    private func eligibleEmptyState(notice: AgentRoomsEligibleNotice) -> some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
+                .font(CiderFont.emptyStateIcon)
+                .foregroundColor(CiderColors.tertiary)
+            Text(notice.title).font(CiderFont.subheadingMedium).foregroundColor(CiderColors.primary)
+            Text(notice.detail).font(CiderFont.body).foregroundColor(CiderColors.tertiary)
+                .multilineTextAlignment(.center)
+            openLiveChatButton
+        }
+        .padding(Spacing.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(notice.accessibilityLabel)
     }
 
     private var loadingState: some View {
@@ -174,11 +225,12 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private func blockedState(authority: AgentRoomsWorkspaceAuthority, message: String) -> some View {
-        VStack(spacing: Spacing.md) {
+        let eligible = message == EligibleLegacyAgentRoomsPreviewService.blockedMessage
+        return VStack(spacing: Spacing.md) {
             Image(systemName: "lock.trianglebadge.exclamationmark")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.secondary)
-            Text("Legacy preview blocked")
+            Text(eligible ? "Eligible legacy preview unavailable" : "Legacy preview blocked")
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.primary)
             Text(message)
@@ -193,15 +245,16 @@ struct AgentRoomsWorkspaceView: View {
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). Legacy preview blocked. \(message)")
+        .accessibilityLabel("\(authorityPresentation(for: authority).badgeAccessibility). \(eligible ? "Eligible legacy preview unavailable" : "Legacy preview blocked"). \(message) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled.")
     }
 
     private func failedState(message: String) -> some View {
-        VStack(spacing: Spacing.md) {
+        let eligible = message == EligibleLegacyAgentRoomsPreviewService.failedMessage
+        return VStack(spacing: Spacing.md) {
             Image(systemName: "exclamationmark.triangle")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.secondary)
-            Text("Rooms unavailable")
+            Text(eligible ? "Legacy Rooms preview is temporarily unavailable" : "Rooms unavailable")
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.primary)
             Text(message)
@@ -215,6 +268,8 @@ struct AgentRoomsWorkspaceView: View {
         }
         .padding(Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(eligible ? "Legacy Rooms preview is temporarily unavailable" : "Rooms unavailable"). \(message) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled.")
     }
 
     private func roomRail(rooms: [AgentRoom], selectedRoom: AgentRoom) -> some View {
@@ -330,6 +385,13 @@ struct AgentRoomsWorkspaceView: View {
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
                     transcriptHeading(room, authority: authority)
+
+                    if let notice = room.messageLimitNotice {
+                        Text(notice)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.secondary)
+                            .accessibilityLabel(notice)
+                    }
 
                     ForEach(room.transcript.messages) { message in
                         messageView(message)

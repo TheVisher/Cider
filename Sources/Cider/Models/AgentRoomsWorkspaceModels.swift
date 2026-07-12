@@ -52,6 +52,34 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let updatedAt: Date
     let relativeTime: String
     let transcript: AgentRoomTranscript
+    var messageLimitNotice: String? = nil
+}
+
+struct AgentRoomsEligibleNotice: Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case loaded, empty }
+
+    let kind: Kind
+    let displayed: Int
+    let omitted: Int
+    let capOmitted: Int
+    let unregistered: Int
+
+    private func bounded(_ value: Int) -> String { value > 99 ? "99+" : String(max(0, value)) }
+
+    var title: String { kind == .loaded ? "Eligible legacy preview" : "No eligible legacy rooms" }
+
+    var detail: String {
+        switch kind {
+        case .loaded:
+            return "Showing \(bounded(displayed)) independently validated room(s). \(bounded(omitted)) registered room(s) were omitted after validation. \(bounded(capOmitted)) additional eligible room(s) are not shown by the 20-room limit. \(bounded(unregistered)) unregistered conversation file(s) were excluded. Read-only, noncanonical legacy history. Nothing has been imported or changed."
+        case .empty:
+            return "No independently validated rooms can be shown. \(bounded(omitted)) registered room(s) were omitted after validation, and \(bounded(unregistered)) unregistered conversation file(s) were excluded. Nothing has been imported or changed."
+        }
+    }
+
+    var accessibilityLabel: String {
+        "\(title). \(detail) Read-only, legacy authoritative, noncanonical preview, not imported. Messaging disabled."
+    }
 }
 
 enum AgentRoomsWorkspaceAuthority: String, Equatable, Sendable {
@@ -65,12 +93,15 @@ enum AgentRoomsWorkspaceState: Equatable, Sendable {
     case blocked(authority: AgentRoomsWorkspaceAuthority, message: String)
     case failed(authority: AgentRoomsWorkspaceAuthority, message: String)
     case loaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoomID: String)
+    case eligibleEmpty(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsEligibleNotice)
+    case eligibleLoaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoomID: String, notice: AgentRoomsEligibleNotice)
 
     var authority: AgentRoomsWorkspaceAuthority {
         switch self {
         case .loading(let authority), .empty(let authority):
             return authority
-        case .blocked(let authority, _), .failed(let authority, _), .loaded(let authority, _, _):
+        case .blocked(let authority, _), .failed(let authority, _), .loaded(let authority, _, _),
+             .eligibleEmpty(let authority, _), .eligibleLoaded(let authority, _, _, _):
             return authority
         }
     }
@@ -90,6 +121,13 @@ enum AgentRoomsWorkspaceState: Equatable, Sendable {
             let requestedSelection = localSelection ?? storedSelection
             let selectedRoom = rooms.first(where: { $0.id == requestedSelection }) ?? firstRoom
             return .loaded(authority: authority, rooms: rooms, selectedRoom: selectedRoom)
+        case .eligibleEmpty(let authority, let notice):
+            return .eligibleEmpty(authority: authority, notice: notice)
+        case .eligibleLoaded(let authority, let rooms, let storedSelection, let notice):
+            guard let firstRoom = rooms.first else { return .eligibleEmpty(authority: authority, notice: notice) }
+            let requestedSelection = localSelection ?? storedSelection
+            let selectedRoom = rooms.first(where: { $0.id == requestedSelection }) ?? firstRoom
+            return .eligibleLoaded(authority: authority, rooms: rooms, selectedRoom: selectedRoom, notice: notice)
         }
     }
 }
@@ -100,6 +138,8 @@ enum AgentRoomsWorkspaceProjection: Equatable, Sendable {
     case blocked(authority: AgentRoomsWorkspaceAuthority, message: String)
     case failed(authority: AgentRoomsWorkspaceAuthority, message: String)
     case loaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoom: AgentRoom)
+    case eligibleEmpty(authority: AgentRoomsWorkspaceAuthority, notice: AgentRoomsEligibleNotice)
+    case eligibleLoaded(authority: AgentRoomsWorkspaceAuthority, rooms: [AgentRoom], selectedRoom: AgentRoom, notice: AgentRoomsEligibleNotice)
 }
 
 enum AgentRoomsFixtureProvider {
