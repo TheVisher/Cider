@@ -33,11 +33,11 @@ final class BuildRunScriptPolicyTests: XCTestCase {
         XCTAssertTrue(script.contains("Cannot verify a Cider window while the macOS screen is locked"))
     }
 
-    func testVerifyLaunchUsesNormalChromeWithVerificationPlacement() throws {
+    func testVerifyLaunchPreservesProductionMainWindowPlacement() throws {
         let script = try String(contentsOfFile: "script/build_and_run.sh", encoding: .utf8)
 
-        XCTAssertTrue(script.contains("--env \"CIDER_VERIFY_VISIBLE_WINDOW=1\""))
         XCTAssertTrue(script.contains("--env \"CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH\""))
+        XCTAssertFalse(script.contains("CIDER_VERIFY_VISIBLE_WINDOW"))
 
         let standardVerificationLaunch = try XCTUnwrap(
             script.range(of: "elif [[ \"$VERIFY\" -eq 1 ]]; then")

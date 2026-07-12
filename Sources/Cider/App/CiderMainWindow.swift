@@ -70,8 +70,6 @@ final class CiderMainWindow: NSWindow {
         let environment = ProcessInfo.processInfo.environment
         if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment) {
             showInQAVisibleFrame()
-        } else if CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: environment) {
-            showInVerificationVisibleFrame()
         } else if !restoreSavedFrameIfAvailable() {
             let targetScreen = screenContainingMouse() ?? NSScreen.main
 
@@ -89,8 +87,7 @@ final class CiderMainWindow: NSWindow {
         )
         persistCurrentFrame()
         makeKeyAndOrderFront(nil)
-        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment)
-            || CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: environment) {
+        if CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment) {
             collectionBehavior.insert(.moveToActiveSpace)
             orderFrontRegardless()
         }
@@ -276,25 +273,6 @@ final class CiderMainWindow: NSWindow {
         )
     }
 
-    private func showInVerificationVisibleFrame() {
-        let targetScreen = NSScreen.main
-            ?? screenContainingMouse()
-            ?? NSScreen.screens.first
-        guard let visibleFrame = targetScreen?.visibleFrame else {
-            center()
-            return
-        }
-
-        setFrame(
-            CiderMainWindowPlacement.qaVisibleFrame(
-                in: visibleFrame,
-                preferredSize: frame.size,
-                minimumSize: minSize
-            ),
-            display: true
-        )
-    }
-
     private func qaVisibleScreen() -> NSScreen? {
         NSScreen.screens.first {
             $0.frame.origin == .zero || $0.visibleFrame.origin == .zero
@@ -363,19 +341,13 @@ final class CiderMainWindow: NSWindow {
 
 enum CiderMainWindowChromePolicy {
     static let qaVisibleEnvironmentKey = "CIDER_QA_VISIBLE_WINDOW"
-    static let verificationVisibleEnvironmentKey = "CIDER_VERIFY_VISIBLE_WINDOW"
 
     static func usesQAVisibleWindowChrome(environment: [String: String]) -> Bool {
         isTruthy(environment[qaVisibleEnvironmentKey])
     }
 
-    static func usesVerificationVisibleWindowPlacement(environment: [String: String]) -> Bool {
-        isTruthy(environment[verificationVisibleEnvironmentKey])
-    }
-
     static func shouldPersistMainWindowFrame(environment: [String: String]) -> Bool {
         !usesQAVisibleWindowChrome(environment: environment)
-            && !usesVerificationVisibleWindowPlacement(environment: environment)
     }
 
     private static func isTruthy(_ value: String?) -> Bool {

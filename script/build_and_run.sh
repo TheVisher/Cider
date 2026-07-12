@@ -198,7 +198,6 @@ if [[ "$TELEMETRY" -eq 1 ]]; then
         --stderr "$LOG_DIR/stderr.log" \
         --env "CIDER_PERF_MONITOR=1" \
         --env "CIDER_PERF_LOG_PATH=$LOG_DIR/performance.log" \
-        --env "CIDER_VERIFY_VISIBLE_WINDOW=1" \
         --env "CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH" \
         "$APP_PATH"
     else
@@ -215,7 +214,6 @@ else
     /usr/bin/open --env "CIDER_QA_VISIBLE_WINDOW=1" "$APP_PATH"
   elif [[ "$VERIFY" -eq 1 ]]; then
     /usr/bin/open \
-      --env "CIDER_VERIFY_VISIBLE_WINDOW=1" \
       --env "CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH" \
       "$APP_PATH"
   else

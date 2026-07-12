@@ -170,7 +170,7 @@ extension AppDelegate {
     private func promoteVerificationWindowIfNeeded() {
         let environment = ProcessInfo.processInfo.environment
         guard CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: environment)
-            || CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: environment) else {
+            || environment["CIDER_VERIFY_WINDOW_STATUS_PATH"] != nil else {
             return
         }
         guard let window = qaCiderMainWindow ?? ciderMainWindow else {

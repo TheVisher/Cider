@@ -109,14 +109,7 @@ struct CiderMainWindowPlacementTests {
         #expect(CiderMainWindowChromePolicy.usesQAVisibleWindowChrome(environment: [
             CiderMainWindowChromePolicy.qaVisibleEnvironmentKey: "1"
         ]))
-        #expect(CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: [:]) == false)
-        #expect(CiderMainWindowChromePolicy.usesVerificationVisibleWindowPlacement(environment: [
-            CiderMainWindowChromePolicy.verificationVisibleEnvironmentKey: "1"
-        ]))
         #expect(CiderMainWindowChromePolicy.shouldPersistMainWindowFrame(environment: [:]))
-        #expect(CiderMainWindowChromePolicy.shouldPersistMainWindowFrame(environment: [
-            CiderMainWindowChromePolicy.verificationVisibleEnvironmentKey: "1"
-        ]) == false)
         #expect(CiderMainWindowChromePolicy.shouldPersistMainWindowFrame(environment: [
             CiderMainWindowChromePolicy.qaVisibleEnvironmentKey: "1"
         ]) == false)
