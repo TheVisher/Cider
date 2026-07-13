@@ -56,25 +56,48 @@ final class AgentRoomsSessionModel: ObservableObject {
     }
 
     convenience init(transport: any HermesBridgeTransport) {
-        let repository = ConversationRepository(database: CiderDatabase.shared)
-        let assignments = AgentRoomsAgentAssignmentService(repository: repository)
-        let participants = AgentRoomsParticipantService(repository: repository)
-        self.init(liveChat: AgentRoomsLiveChatModel(
+        let dependencies = Self.productionDependencies(
             transport: transport,
-            persistence: AgentRoomsConversationPersistence(
-                repository: repository,
-                defaultAgentProfile: assignments.defaultProfile
-            ),
-            agentAssignments: assignments,
-            participants: participants,
-            attachmentService: AgentRoomsAttachmentService(
-                database: CiderDatabase.shared,
-                didMaterialize: { VaultFileService.shared.scan() }
-            )
-        ), selectionStore: AgentRoomsSelectionStore.application,
-           draftStore: AgentRoomsDraftStore.application,
-           agentAssignments: assignments,
-           participants: participants)
+            database: CiderDatabase.shared,
+            vaultRoot: StoragePaths.cachedVaultDirectoryURL,
+            didMaterializeAttachments: { VaultFileService.shared.scan() }
+        )
+        self.init(
+            liveChat: dependencies.liveChat,
+            selectionStore: AgentRoomsSelectionStore.application,
+            draftStore: AgentRoomsDraftStore.application,
+            agentAssignments: dependencies.assignments,
+            participants: dependencies.participants
+        )
+    }
+
+    /// The real Rooms dependency graph, injectable only so compatibility tests can
+    /// exercise production call sites against a disposable database and vault.
+    static func production(
+        transport: any HermesBridgeTransport,
+        database: CiderDatabase = .shared,
+        vaultRoot: URL = StoragePaths.cachedVaultDirectoryURL,
+        selectionStore: any AgentRoomsSelectionPersisting = AgentRoomsSelectionStore.application,
+        draftStore: any AgentRoomsDraftPersisting = AgentRoomsDraftStore.application,
+        transcriptionService: any ConversationTranscriptionServicing = AppleSpeechTranscriptionService(),
+        didMaterializeAttachments: @escaping @MainActor () -> Void = {
+            VaultFileService.shared.scan()
+        }
+    ) -> AgentRoomsSessionModel {
+        let dependencies = productionDependencies(
+            transport: transport,
+            database: database,
+            vaultRoot: vaultRoot,
+            didMaterializeAttachments: didMaterializeAttachments
+        )
+        return AgentRoomsSessionModel(
+            liveChat: dependencies.liveChat,
+            selectionStore: selectionStore,
+            draftStore: draftStore,
+            agentAssignments: dependencies.assignments,
+            participants: dependencies.participants,
+            transcriptionService: transcriptionService
+        )
     }
 
     func selectRoom(id: String?, persistIfCanonical: Bool) {
@@ -125,7 +148,7 @@ final class AgentRoomsSessionModel: ObservableObject {
     func startTranscription() async {
         guard let selectedRoomID,
               UUID(uuidString: selectedRoomID) != nil,
-              selectedRoomID == liveChat.activeRoom?.id
+              liveChat.isDurableRoomInputEnabled(selectedRoomID: selectedRoomID)
         else {
             speechPresentation = .init(
                 state: .unavailable,
@@ -245,6 +268,21 @@ final class AgentRoomsSessionModel: ObservableObject {
             && completedSpeechOriginalDraft != nil
     }
 
+    func canStartTranscription(roomID: String) -> Bool {
+        guard selectedRoomID == roomID,
+              liveChat.isDurableRoomInputEnabled(selectedRoomID: roomID),
+              !liveChat.activeRunCanBeCancelled,
+              !speechPresentation.state.isActive
+        else { return false }
+        switch speechPresentation.state {
+        case .notDetermined, .ready, .completed, .cancelled, .failed:
+            return true
+        case .requestingPermission, .denied, .restricted, .unavailable, .offline,
+             .listening, .transcribing:
+            return false
+        }
+    }
+
     private func receiveTranscription(
         _ event: ConversationTranscriptionEvent,
         token: UUID,
@@ -346,5 +384,36 @@ final class AgentRoomsSessionModel: ObservableObject {
         isRestoringDraft = true
         composerText = roomID.flatMap { draftStore.loadDraft(roomID: $0) } ?? ""
         isRestoringDraft = false
+    }
+
+    private static func productionDependencies(
+        transport: any HermesBridgeTransport,
+        database: CiderDatabase,
+        vaultRoot: URL,
+        didMaterializeAttachments: @escaping @MainActor () -> Void
+    ) -> (
+        liveChat: AgentRoomsLiveChatModel,
+        assignments: AgentRoomsAgentAssignmentService,
+        participants: AgentRoomsParticipantService
+    ) {
+        let repository = ConversationRepository(database: database)
+        let assignments = AgentRoomsAgentAssignmentService(repository: repository)
+        let participants = AgentRoomsParticipantService(repository: repository)
+        let liveChat = AgentRoomsLiveChatModel(
+            transport: transport,
+            persistence: AgentRoomsConversationPersistence(
+                database: database,
+                repository: repository,
+                defaultAgentProfile: assignments.defaultProfile
+            ),
+            agentAssignments: assignments,
+            participants: participants,
+            attachmentService: AgentRoomsAttachmentService(
+                database: database,
+                vaultRoot: vaultRoot,
+                didMaterialize: didMaterializeAttachments
+            )
+        )
+        return (liveChat, assignments, participants)
     }
 }

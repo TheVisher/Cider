@@ -635,7 +635,7 @@ struct AgentRoomsLiveChatModelTests {
         let appDelegate = try String(contentsOf: root.appendingPathComponent("Sources/Cider/App/AppDelegate.swift"), encoding: .utf8)
         let liveModel = try String(contentsOf: root.appendingPathComponent("Sources/Cider/Services/Conversation/AgentRoomsLiveChatModel.swift"), encoding: .utf8)
 
-        #expect(appDelegate.contains("AgentRoomsSessionModel(transport: HermesRunTransport())"))
+        #expect(appDelegate.contains("AgentRoomsSessionModel.production(transport: HermesRunTransport())"))
         #expect(composition.contains("session: agentRoomsSession"))
         #expect(composition.contains("handleExternalOpenTarget(route.userInfo)"))
         #expect(!composition.contains("AgentRoomsLiveChatModel(transport:"))

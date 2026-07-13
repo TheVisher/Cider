@@ -339,7 +339,15 @@ struct AgentRoomsChatStatusPresentation: Equatable, Sendable {
 
 extension AgentRoomsLiveChatModel {
     var statusPresentation: AgentRoomsChatStatusPresentation {
-        AgentRoomsChatStatusPresentation.project(
+        if requiresActingAgentSelection {
+            return .init(
+                state: .unavailable,
+                title: "Choose an acting agent",
+                detail: composerMessage ?? "This older room remains unassigned until you explicitly choose an agent.",
+                allowsReconnect: false
+            )
+        }
+        return AgentRoomsChatStatusPresentation.project(
             transportState: transportState,
             turnState: turnState,
             receipt: activeRoom?.transcript.receipt,

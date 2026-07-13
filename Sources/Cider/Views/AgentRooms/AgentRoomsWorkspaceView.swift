@@ -993,9 +993,6 @@ struct AgentRoomsWorkspaceView: View {
     private func actingAgentControl(_ room: AgentRoom) -> some View {
         if canAssignAgent(room), let assignments = session.agentAssignments {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text("Acting agent")
-                    .font(CiderFont.captionMedium)
-                    .foregroundColor(CiderColors.secondary)
                 Menu {
                     ForEach(assignments.profiles, id: \.id) { profile in
                         Button {
@@ -1006,14 +1003,12 @@ struct AgentRoomsWorkspaceView: View {
                         }
                     }
                 } label: {
-                    Text(room.actingAgent?.displayName ?? "Choose agent")
+                    Text("Acting agent: \(room.actingAgent?.displayName ?? "Not assigned")")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 Spacer(minLength: 0)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Acting agent, \(room.actingAgent?.displayName ?? "not assigned")")
 
             if let reason = room.actingAgent?.unavailableReason {
                 Text(reason)
@@ -1059,11 +1054,14 @@ struct AgentRoomsWorkspaceView: View {
                                     .font(CiderFont.microMedium)
                                     .foregroundColor(CiderColors.controlAccent)
                             }
-                            Button(participant.available ? "Invoke next" : "Select unavailable") {
+                            Button(participant.available ? "Invoke next" : "Unavailable") {
                                 invokedParticipantByRoom[room.id] = participant.id
                             }
                             .buttonStyle(.link)
-                            .disabled(room.continuity != .liveContinuation)
+                            .disabled(
+                                !participant.available
+                                    || !liveChat.isParticipantInvocationEnabled(selectedRoomID: room.id)
+                            )
                             .accessibilityLabel(
                                 "Invoke \(participant.displayName) for the next turn, \(participant.available ? "available" : "unavailable")"
                             )
@@ -1086,6 +1084,13 @@ struct AgentRoomsWorkspaceView: View {
             .accessibilityLabel(
                 "Room participant roster, \(roster.members.count) participants, \(roster.availableCount) available, collapsed by default"
             )
+        } else if room.continuity == .liveContinuation {
+            Text("Participants: Not configured")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .accessibilityLabel(
+                    "Participants unavailable. This older room has no participant roster."
+                )
         }
     }
 
@@ -1746,7 +1751,9 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private func liveComposer(roomID: String) -> some View {
-        let enabled = liveChat.isComposerEnabled(selectedRoomID: selectedRoomID)
+        let canSend = liveChat.isComposerEnabled(selectedRoomID: selectedRoomID)
+        let canEditDraft = liveChat.isDraftEditingEnabled(selectedRoomID: selectedRoomID)
+        let canStageAttachments = liveChat.isAttachmentStagingEnabled(selectedRoomID: selectedRoomID)
         let speechActive = session.speechPresentation.state.isActive
         let validDraft = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && composerText.count <= AgentRoomsLiveChatModel.maximumMessageLength
@@ -1781,14 +1788,14 @@ struct AgentRoomsWorkspaceView: View {
                     Image(systemName: "paperclip")
                 }
                 .buttonStyle(.bordered)
-                .disabled(!enabled || liveChat.stagedAttachments.count >= AgentRoomsAttachmentService.maximumCount)
+                .disabled(!canStageAttachments)
                 .accessibilityLabel("Attach text or image files")
 
                 TextField(composerPlaceholder(roomID: roomID), text: composerTextBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .focused($focusedRegion, equals: .composer)
-                    .disabled(!enabled || speechActive)
+                    .disabled(!canEditDraft || speechActive)
                     .onKeyPress(.return, phases: .down) { press in
                         if press.modifiers.contains(.shift) {
                             if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
@@ -1816,7 +1823,7 @@ struct AgentRoomsWorkspaceView: View {
                     submitComposer(roomID: roomID)
                 }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!enabled || !validDraft || speechActive)
+                    .disabled(!canSend || !validDraft || speechActive)
                     .accessibilityLabel(composerActionAccessibilityLabel(roomID: roomID))
             }
             speechStatus
@@ -1868,6 +1875,7 @@ struct AgentRoomsWorkspaceView: View {
         .padding(.vertical, Spacing.sm)
         .background(CiderColors.surfaceSubtle)
         .background(CiderWindowDragExclusionReporter(id: "agent-rooms-live-composer"))
+        .background(AgentRoomsAttachmentDropAccessibilityMarker())
         .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
         .overlay {
             if attachmentDropTargeted {
@@ -1877,6 +1885,9 @@ struct AgentRoomsWorkspaceView: View {
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
+            guard liveChat.isAttachmentStagingEnabled(selectedRoomID: selectedRoomID) else {
+                return false
+            }
             liveChat.stageAttachments(from: urls, source: .dragAndDrop)
             return !urls.isEmpty
         } isTargeted: { attachmentDropTargeted = $0 }
@@ -1918,7 +1929,7 @@ struct AgentRoomsWorkspaceView: View {
                 Image(systemName: "mic")
             }
             .buttonStyle(.bordered)
-            .disabled(!roomIsActive || liveChat.activeRunCanBeCancelled)
+            .disabled(!roomIsActive || !session.canStartTranscription(roomID: roomID))
             .accessibilityLabel("Start microphone transcription")
         }
 
@@ -2196,6 +2207,18 @@ private struct AgentRoomsTranscriptBottomPreferenceKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+private struct AgentRoomsAttachmentDropAccessibilityMarker: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.group)
+        view.setAccessibilityLabel("File attachment drop target")
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
 private struct AgentRoomsComposerDraftBridge: NSViewRepresentable {
     let persist: @MainActor (String) -> Void
 
@@ -2248,7 +2271,7 @@ private final class AgentRoomsComposerDraftBridgeView: NSView {
 
     private static func findComposerField(in view: NSView) -> NSTextField? {
         if let field = view as? NSTextField,
-           field.placeholderString?.hasPrefix("Message Hermes in ") == true {
+           field.placeholderString?.hasPrefix("Message ") == true {
             return field
         }
         for subview in view.subviews {

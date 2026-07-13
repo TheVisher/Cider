@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var qaCiderMainWindow: NSWindow?
     var floatingPanelManager: CiderFloatingPanelManager?
     var externalOpenObserver: NSObjectProtocol?
-    let agentRoomsSession = AgentRoomsSessionModel(transport: HermesRunTransport())
+    let agentRoomsSession = AgentRoomsSessionModel.production(transport: HermesRunTransport())
 
     // Undo toast
     var undoToastPanel: BookmarkCaptureToastPanel?

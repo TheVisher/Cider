@@ -403,6 +403,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     )
     private var assignedProfileSupportsAttachments = true
     private var stagedAttachmentsByRoomID: [UUID: [ConversationStagedAttachment]] = [:]
+    private var activeRoomIsDurable = false
 
     private struct AcceptedSubmission {
         let text: String
@@ -414,6 +415,10 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     var testRoom: AgentRoom? {
         isReservedTestChat ? activeRoom : nil
+    }
+
+    var requiresActingAgentSelection: Bool {
+        roomID != nil && agentAssignments != nil && activeAgent == nil
     }
 
     var activeInvocationParticipantDisplayName: String? {
@@ -501,6 +506,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         completedAssistantSourceIDs = []
         participantAttributionByClientMessageID = [:]
         stagedAttachments = []
+        activeRoomIsDurable = false
         assignmentAllowsSend = agentAssignments == nil
         activeAgent = nil
     }
@@ -536,6 +542,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 }
             }
             roomID = id
+            activeRoomIsDurable = false
             activeRoomTitle = Self.roomTitle
             isReservedTestChat = true
             transportMessages = []
@@ -572,6 +579,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     func stageAttachments(from urls: [URL], source: ConversationAttachmentInputSource) {
+        guard isAttachmentStagingEnabled(selectedRoomID: roomID?.uuidString) else {
+            composerMessage = "Select an active durable Cider room before attaching files. Nothing was added."
+            rebuildRoom()
+            return
+        }
         var accepted = stagedAttachments
         var lastError: String?
         for url in urls {
@@ -592,11 +604,36 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     func isComposerEnabled(selectedRoomID: String?) -> Bool {
-        guard let roomID else { return false }
-        return selectedRoomID == roomID.uuidString
+        isDraftEditingEnabled(selectedRoomID: selectedRoomID)
             && assignmentAllowsSend
             && transportState == .ready
-            && activeAttemptID == nil
+    }
+
+    func isDraftEditingEnabled(selectedRoomID: String?) -> Bool {
+        guard let roomID,
+              selectedRoomID == roomID.uuidString,
+              activeRoom?.lifecycleState == .active,
+              activeAttemptID == nil
+        else { return false }
+        return true
+    }
+
+    func isAttachmentStagingEnabled(selectedRoomID: String?) -> Bool {
+        isDraftEditingEnabled(selectedRoomID: selectedRoomID)
+            && (persistence == nil || activeRoomIsDurable)
+            && stagedAttachments.count < AgentRoomsAttachmentService.maximumCount
+    }
+
+    func isDurableRoomInputEnabled(selectedRoomID: String?) -> Bool {
+        isDraftEditingEnabled(selectedRoomID: selectedRoomID)
+            && (persistence == nil || activeRoomIsDurable)
+    }
+
+    func isParticipantInvocationEnabled(selectedRoomID: String?) -> Bool {
+        guard isDraftEditingEnabled(selectedRoomID: selectedRoomID),
+              let roster = activeRoom?.participantRoster
+        else { return false }
+        return roster.members.contains(where: { $0.available })
     }
 
     @discardableResult
@@ -1417,7 +1454,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             activeRoom = nil
             return
         }
-        let displayName = activeAgent?.displayName ?? "Hermes"
+        let displayName = activeAgent?.displayName ?? (agentAssignments == nil ? "Hermes" : "Unassigned")
         let preview = roomMessages.last?.body ?? "New live conversation with \(displayName)"
         activeRoom = AgentRoom(
             id: roomID.uuidString,
@@ -1444,6 +1481,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             stagedAttachmentsByRoomID[roomID] = stagedAttachments
         }
         roomID = snapshot.room.id
+        activeRoomIsDurable = true
         stagedAttachments = stagedAttachmentsByRoomID[snapshot.room.id] ?? []
         activeRoomTitle = snapshot.room.title
         isReservedTestChat = reservedTestChat
