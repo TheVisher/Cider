@@ -88,10 +88,68 @@ struct SecondBrainFoundationTests {
         command: String
     ) throws -> [String: Any] {
         #expect(payload["command"] as? String == command)
+        #expect(payload["compatibilityWrapper"] as? Bool == true)
         #expect(payload["backendCommand"] as? String == "capture.add")
         let capture = try #require(payload["capture"] as? [String: Any])
         #expect(capture["command"] as? String == "capture.add")
+        let item = try #require(capture["item"] as? [String: Any])
+        #expect(payload["id"] as? String == item["id"] as? String)
         return capture
+    }
+
+    private func requireCaptureRoutingContract(
+        _ capture: [String: Any],
+        itemType: String,
+        reviewState: String,
+        reviewNeeded: Bool,
+        confidence: Double,
+        targetPath: String,
+        reasonFragment: String
+    ) throws {
+        #expect(capture["readOnly"] as? Bool == false)
+        #expect(capture["changed"] as? Bool == true)
+
+        let item = try #require(capture["item"] as? [String: Any])
+        let itemID = try #require(item["id"] as? String)
+        #expect(item["type"] as? String == itemType)
+
+        let routing = try #require(capture["routing"] as? [String: Any])
+        let candidateTarget = try #require(routing["candidateTarget"] as? [String: Any])
+        #expect(routing["reviewState"] as? String == reviewState)
+        #expect(routing["reviewNeeded"] as? Bool == reviewNeeded)
+        #expect(routing["confidence"] as? Double == confidence)
+        #expect(routing["status"] as? String == "recorded")
+        #expect(routing["decisionID"] as? String != nil)
+        #expect((routing["reason"] as? String)?.contains(reasonFragment) == true)
+        #expect(candidateTarget["relativePath"] as? String == targetPath)
+
+        let routingReadiness = try #require(capture["routingReadiness"] as? [String: Any])
+        #expect(routingReadiness["reviewState"] as? String == reviewState)
+        #expect(routingReadiness["routeReviewNeeded"] as? Bool == reviewNeeded)
+        #expect(routingReadiness["status"] as? String == (reviewNeeded ? "needs_review" : "ready"))
+        #expect(routingReadiness["safeNextAction"] as? String == (reviewNeeded ? "review_route" : "inspect_item"))
+        #expect(
+            routingReadiness["truthBoundary"] as? String
+                == "read_only_routing_readiness_no_route_mutation_or_auto_acceptance"
+        )
+
+        let provenance = try #require(capture["provenance"] as? [String: Any])
+        #expect(provenance["status"] as? String == "recorded")
+        #expect(provenance["ownerType"] as? String == "capture_event")
+        #expect(provenance["captureEventID"] as? String != nil)
+
+        let indexing = try #require(capture["indexing"] as? [String: Any])
+        #expect(indexing["status"] as? String == "indexed")
+        #expect(indexing["ownerType"] as? String == itemType)
+        #expect(indexing["ownerID"] as? String == itemID)
+
+        let safeNextCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli item get \(itemType) \(itemID) --json"))
+        #expect(safeNextCommands.allSatisfy { command in
+            command.hasPrefix("cider-cli item get ")
+                || command.hasPrefix("cider-cli routing explain ")
+                || command.hasPrefix("cider-cli review list ")
+        })
     }
 
     private func requireCaptureAddContract(_ payload: [String: Any]) throws -> [String: Any] {
@@ -226,8 +284,10 @@ struct SecondBrainFoundationTests {
         let source = try #require(capture["source"] as? [String: Any])
         #expect(source["kind"] as? String == "url")
         let routing = try #require(capture["routing"] as? [String: Any])
-        #expect(routing["reviewState"] as? String == "needs_review")
-        #expect(routing["reviewNeeded"] as? Bool == true)
+        #expect(routing["reviewState"] as? String == "accepted")
+        #expect(routing["reviewNeeded"] as? Bool == false)
+        #expect(routing["confidence"] as? Double == 1)
+        #expect((routing["reason"] as? String)?.contains("neutral staging") == true)
 
         let itemGet = try jsonObject(from: runCLI([
             "item", "get", "bookmark", bookmarkID,
@@ -258,7 +318,16 @@ struct SecondBrainFoundationTests {
         let noteRouting = try #require(noteCapture["routing"] as? [String: Any])
         #expect(noteItem["type"] as? String == "note")
         #expect(noteItem["title"] as? String == "Kitchen idea")
-        #expect(noteRouting["reviewState"] as? String == "needs_review")
+        #expect(noteRouting["reviewState"] as? String == "accepted")
+        try requireCaptureRoutingContract(
+            noteCapture,
+            itemType: "note",
+            reviewState: "accepted",
+            reviewNeeded: false,
+            confidence: 1,
+            targetPath: "Inbox/Notes",
+            reasonFragment: "neutral staging"
+        )
 
         let todoOutput = try runCLI([
             "todo", "create", "Call dentist",
@@ -273,6 +342,15 @@ struct SecondBrainFoundationTests {
         #expect(todoItem["type"] as? String == "todo")
         #expect(todoItem["title"] as? String == "Call dentist")
         #expect(todoRouting["reviewState"] as? String == "needs_review")
+        try requireCaptureRoutingContract(
+            todoCapture,
+            itemType: "todo",
+            reviewState: "needs_review",
+            reviewNeeded: true,
+            confidence: 0,
+            targetPath: "Inbox/Todos",
+            reasonFragment: "for review"
+        )
 
         let sourceURL = vault.appendingPathComponent("receipt.png")
         try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL)
@@ -288,6 +366,15 @@ struct SecondBrainFoundationTests {
         #expect(fileItem["type"] as? String == "vaultFile")
         #expect(fileItem["title"] as? String == "Receipt photo")
         #expect(fileRouting["reviewState"] as? String == "needs_review")
+        try requireCaptureRoutingContract(
+            fileCapture,
+            itemType: "vaultFile",
+            reviewState: "needs_review",
+            reviewNeeded: true,
+            confidence: 0,
+            targetPath: "Inbox/Images",
+            reasonFragment: "for review"
+        )
 
         let dbURL = vault.appendingPathComponent(".cider/cider.db")
         let db = CiderDatabase()
@@ -304,6 +391,66 @@ struct SecondBrainFoundationTests {
         #expect(try routing.explain(itemID: noteID).latestDecision?.source == "capture.add")
         #expect(try routing.explain(itemID: todoID).latestDecision?.source == "capture.add")
         #expect(try routing.explain(itemID: fileID).latestDecision?.source == "capture.add")
+    }
+
+    @Test("canonical capture add preserves note todo and file routing policy")
+    func canonicalCaptureAddPreservesNoteTodoAndFileRoutingPolicy() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-canonical-note-todo-file-routing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let noteCapture = try requireCaptureAddContract(jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "note",
+            "--title", "Canonical note",
+            "--content", "Canonical note routing contract.",
+            "--json",
+        ], vaultURL: vault)))
+        try requireCaptureRoutingContract(
+            noteCapture,
+            itemType: "note",
+            reviewState: "accepted",
+            reviewNeeded: false,
+            confidence: 1,
+            targetPath: "Inbox/Notes",
+            reasonFragment: "neutral staging"
+        )
+
+        let todoCapture = try requireCaptureAddContract(jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "todo",
+            "--content", "Canonical todo routing contract.",
+            "--json",
+        ], vaultURL: vault)))
+        try requireCaptureRoutingContract(
+            todoCapture,
+            itemType: "todo",
+            reviewState: "needs_review",
+            reviewNeeded: true,
+            confidence: 0,
+            targetPath: "Inbox/Todos",
+            reasonFragment: "for review"
+        )
+
+        let sourceURL = vault.appendingPathComponent("canonical-source.txt")
+        try "Canonical file routing contract.".write(to: sourceURL, atomically: true, encoding: .utf8)
+        let fileCapture = try requireCaptureAddContract(jsonObject(from: runCLI([
+            "capture", "add",
+            "--kind", "file",
+            "--path", sourceURL.path,
+            "--title", "Canonical file",
+            "--json",
+        ], vaultURL: vault)))
+        try requireCaptureRoutingContract(
+            fileCapture,
+            itemType: "vaultFile",
+            reviewState: "needs_review",
+            reviewNeeded: true,
+            confidence: 0,
+            targetPath: "Inbox/Files",
+            reasonFragment: "for review"
+        )
     }
 
     @Test("capture add stdin note preserves shell sensitive multiline text")
