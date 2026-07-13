@@ -156,13 +156,13 @@ struct CiderCaptureProvenanceEvidenceCheck: Codable, Equatable {
     }
 }
 
-enum CiderCaptureProvenanceCandidateEvidenceCategory: String, Codable, Equatable {
+enum CiderCaptureProvenanceCandidateEvidenceCategory: String, Codable, Equatable, Hashable {
     case exactPersistedItemReference = "exact_persisted_item_reference"
     case canonicalURLMatch = "canonical_url_match"
     case nearbyDuplicateAuditMatch = "nearby_duplicate_audit_match"
 }
 
-enum CiderCaptureProvenanceCandidateDiscoveryOutcome: String, Codable, Equatable {
+enum CiderCaptureProvenanceCandidateDiscoveryOutcome: String, Codable, Equatable, Hashable {
     case zeroCandidates = "zero_candidates"
     case oneCandidateInsufficient = "one_candidate_insufficient"
     case multipleCandidatesAmbiguous = "multiple_candidates_ambiguous"
@@ -343,6 +343,74 @@ struct CiderCaptureProvenanceGapPatternGroup: Codable, Equatable {
     }
 }
 
+struct CiderCaptureProvenanceCandidateOutcomeAggregateCount: Codable, Equatable {
+    var outcome: CiderCaptureProvenanceCandidateDiscoveryOutcome
+    var count: Int
+    var sampleCaptureEventRefs: [String]
+    var sampleRefsTruncated: Bool
+
+    func toDictionary() -> [String: Any] {
+        [
+            "outcome": outcome.rawValue,
+            "count": count,
+            "sampleCaptureEventRefs": sampleCaptureEventRefs,
+            "sampleRefsTruncated": sampleRefsTruncated,
+        ]
+    }
+}
+
+struct CiderCaptureProvenanceCandidateEvidenceAggregateCount: Codable, Equatable {
+    var category: CiderCaptureProvenanceCandidateEvidenceCategory
+    var eventCount: Int
+    var candidateCount: Int
+    var candidateCountIsLowerBound: Bool
+    var saturated: Bool
+    var statusCounts: [String: Int]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "category": category.rawValue,
+            "eventCount": eventCount,
+            "candidateCount": candidateCount,
+            "candidateCountIsLowerBound": candidateCountIsLowerBound,
+            "saturated": saturated,
+            "statusCounts": statusCounts,
+        ]
+    }
+}
+
+struct CiderCaptureProvenanceCandidateDiscoveryAggregate: Codable, Equatable {
+    var readOnly = true
+    var changed = false
+    var eligibleCount: Int
+    var excludedCount: Int
+    var sampledCount: Int
+    var sampleRefsTruncated: Bool
+    var countsByOutcome: [CiderCaptureProvenanceCandidateOutcomeAggregateCount]
+    var countsByEvidenceCategory: [CiderCaptureProvenanceCandidateEvidenceAggregateCount]
+    var saturated: Bool
+    var caps: [String: Int]
+    var truthBoundary: String
+    var safeVerificationCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "readOnly": readOnly,
+            "changed": changed,
+            "eligibleCount": eligibleCount,
+            "excludedCount": excludedCount,
+            "sampledCount": sampledCount,
+            "sampleRefsTruncated": sampleRefsTruncated,
+            "countsByOutcome": countsByOutcome.map { $0.toDictionary() },
+            "countsByEvidenceCategory": countsByEvidenceCategory.map { $0.toDictionary() },
+            "saturated": saturated,
+            "caps": caps,
+            "truthBoundary": truthBoundary,
+            "safeVerificationCommands": safeVerificationCommands,
+        ]
+    }
+}
+
 struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
     var command = "capture.provenance-gap-patterns"
     var readOnly = true
@@ -362,6 +430,7 @@ struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
     var coverage: String
     var sampledCount: Int
     var groups: [CiderCaptureProvenanceGapPatternGroup]
+    var candidateDiscovery: CiderCaptureProvenanceCandidateDiscoveryAggregate
     var failClosedCounts: [String: Int]
     var truthBoundary: String
     var safeNextCommands: [String]
@@ -388,6 +457,7 @@ struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
             "coverage": coverage,
             "sampledCount": sampledCount,
             "groups": groups.map { $0.toDictionary() },
+            "candidateDiscovery": candidateDiscovery.toDictionary(),
             "failClosedCounts": failClosedCounts,
             "truthBoundary": truthBoundary,
             "safeNextCommands": safeNextCommands,
@@ -470,6 +540,14 @@ final class CiderCaptureProvenanceDiagnosticService {
         var checkedEvidence: [CiderCaptureProvenanceAggregateEvidenceOutcome]
         var count: Int
         var captureEventRefs: [String]
+    }
+
+    private struct CandidateEvidenceAggregateAccumulator {
+        var eventCount = 0
+        var candidateCount = 0
+        var candidateCountIsLowerBound = false
+        var saturated = false
+        var statusCounts: [String: Int] = [:]
     }
 
     private let database: CiderDatabase
@@ -816,18 +894,26 @@ final class CiderCaptureProvenanceDiagnosticService {
         let appliedSampleLimit = min(max(requestedSampleLimit, 0), Self.maximumAggregateSampleLimit)
         let diagnostic = try diagnose(limit: requestedLimit)
         var accumulators: [AggregateGroupKey: AggregateGroupAccumulator] = [:]
+        var candidateOutcomeCounts: [CiderCaptureProvenanceCandidateDiscoveryOutcome: Int] = [:]
+        var candidateOutcomeRefs: [CiderCaptureProvenanceCandidateDiscoveryOutcome: [String]] = [:]
+        var candidateEvidenceCounts: [CiderCaptureProvenanceCandidateEvidenceCategory: CandidateEvidenceAggregateAccumulator] = [:]
+        var candidateEligibleCount = 0
+        var candidateExcludedCount = 0
+        var candidateEvidenceSaturated = false
         var failClosedCounts: [String: Int] = [:]
         var excludedCount = 0
 
         for finding in diagnostic.findings where finding.classification == .unresolvedProvenanceGap {
             guard Self.supportedSourceKinds.contains(finding.sourceKind) else {
                 excludedCount += 1
+                candidateExcludedCount += 1
                 failClosedCounts[CiderCaptureProvenanceExplanationError.unsupportedSourceKind.rawValue, default: 0] += 1
                 continue
             }
             guard let eventID = UUID(uuidString: finding.captureEventID),
                   let event = try captureEvent(id: eventID) else {
                 excludedCount += 1
+                candidateExcludedCount += 1
                 failClosedCounts["capture_event_readback_failed", default: 0] += 1
                 continue
             }
@@ -837,8 +923,31 @@ final class CiderCaptureProvenanceDiagnosticService {
                 explanation = try explain(captureEventRef: finding.captureEventRef)
             } catch let error as CiderCaptureProvenanceExplanationError {
                 excludedCount += 1
+                candidateExcludedCount += 1
                 failClosedCounts[error.rawValue, default: 0] += 1
                 continue
+            }
+
+            if explanation.checkedEvidence.contains(where: { $0.status == .malformed }) {
+                candidateExcludedCount += 1
+                failClosedCounts["malformed_candidate_discovery_input", default: 0] += 1
+            } else if let discovery = explanation.candidateDiscovery {
+                candidateEligibleCount += 1
+                candidateOutcomeCounts[discovery.outcome, default: 0] += 1
+                candidateOutcomeRefs[discovery.outcome, default: []].append(finding.captureEventRef)
+                candidateEvidenceSaturated = candidateEvidenceSaturated || discovery.saturated
+                for evidence in discovery.countsByEvidenceCategory {
+                    var accumulator = candidateEvidenceCounts[evidence.category] ?? CandidateEvidenceAggregateAccumulator()
+                    accumulator.eventCount += 1
+                    accumulator.candidateCount += evidence.candidateCount
+                    accumulator.candidateCountIsLowerBound = accumulator.candidateCountIsLowerBound || evidence.candidateCountIsLowerBound
+                    accumulator.saturated = accumulator.saturated || evidence.candidateCountIsLowerBound
+                    accumulator.statusCounts[evidence.status.rawValue, default: 0] += 1
+                    candidateEvidenceCounts[evidence.category] = accumulator
+                }
+            } else {
+                candidateExcludedCount += 1
+                failClosedCounts["candidate_discovery_unavailable", default: 0] += 1
             }
 
             let outcomes = explanation.checkedEvidence.map {
@@ -907,6 +1016,59 @@ final class CiderCaptureProvenanceDiagnosticService {
             "cider-cli capture provenance-gap \($0) --json"
         }
         let commands = orderedUnique([replayCommand] + drilldownCommands)
+        let outcomeOrder: [CiderCaptureProvenanceCandidateDiscoveryOutcome] = [
+            .zeroCandidates, .oneCandidateInsufficient, .multipleCandidatesAmbiguous, .cappedCandidateEvidence,
+        ]
+        var candidateSamplesRemaining = appliedSampleLimit
+        var candidateSampledCount = 0
+        let countsByOutcome = outcomeOrder.map { outcome in
+            let refs = (candidateOutcomeRefs[outcome] ?? []).sorted()
+            let sampleCount = min(candidateSamplesRemaining, refs.count)
+            let samples = Array(refs.prefix(sampleCount))
+            candidateSamplesRemaining -= sampleCount
+            candidateSampledCount += sampleCount
+            return CiderCaptureProvenanceCandidateOutcomeAggregateCount(
+                outcome: outcome,
+                count: candidateOutcomeCounts[outcome] ?? 0,
+                sampleCaptureEventRefs: samples,
+                sampleRefsTruncated: refs.count > samples.count
+            )
+        }
+        let evidenceCategoryOrder: [CiderCaptureProvenanceCandidateEvidenceCategory] = [
+            .exactPersistedItemReference, .canonicalURLMatch, .nearbyDuplicateAuditMatch,
+        ]
+        let countsByEvidenceCategory = evidenceCategoryOrder.map { category in
+            let accumulator = candidateEvidenceCounts[category] ?? CandidateEvidenceAggregateAccumulator()
+            return CiderCaptureProvenanceCandidateEvidenceAggregateCount(
+                category: category,
+                eventCount: accumulator.eventCount,
+                candidateCount: accumulator.candidateCount,
+                candidateCountIsLowerBound: accumulator.candidateCountIsLowerBound,
+                saturated: accumulator.saturated,
+                statusCounts: accumulator.statusCounts
+            )
+        }
+        let candidateSampleRefsTruncated = candidateEligibleCount > candidateSampledCount
+        let candidateCommands = orderedUnique([replayCommand] + countsByOutcome.flatMap(\.sampleCaptureEventRefs).map {
+            "cider-cli capture provenance-gap \($0) --json"
+        })
+        let candidateDiscovery = CiderCaptureProvenanceCandidateDiscoveryAggregate(
+            eligibleCount: candidateEligibleCount,
+            excludedCount: candidateExcludedCount,
+            sampledCount: candidateSampledCount,
+            sampleRefsTruncated: candidateSampleRefsTruncated,
+            countsByOutcome: countsByOutcome,
+            countsByEvidenceCategory: countsByEvidenceCategory,
+            saturated: diagnostic.hasMore || candidateEvidenceSaturated || candidateSampleRefsTruncated,
+            caps: [
+                "scanEvents": Self.maximumLimit,
+                "sampleCaptureEventRefs": appliedSampleLimit,
+                "candidateRefsPerEvent": Self.evidenceRefLimit,
+                "duplicateAuditEntriesPerEvent": Self.duplicateAuditLimit,
+            ],
+            truthBoundary: "read_only_bounded_candidate_evidence_aggregate_no_candidate_selection_provenance_inference_or_repair",
+            safeVerificationCommands: candidateCommands
+        )
         return CiderCaptureProvenanceGapAggregateReport(
             requestedLimit: requestedLimit,
             appliedLimit: diagnostic.appliedLimit,
@@ -923,6 +1085,7 @@ final class CiderCaptureProvenanceDiagnosticService {
             coverage: diagnostic.hasMore ? "partial_bounded_scan" : "complete_bounded_set",
             sampledCount: sampledCount,
             groups: groups,
+            candidateDiscovery: candidateDiscovery,
             failClosedCounts: failClosedCounts,
             truthBoundary: "read_only_bounded_aggregate_of_persisted_evidence_no_provenance_inference_selection_or_repair",
             safeNextCommands: commands,
