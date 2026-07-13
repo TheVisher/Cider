@@ -23,6 +23,97 @@ private final class CLIOutputBuffer: @unchecked Sendable {
 @Suite("Cider CLI Agent Safety Tests", .serialized)
 @MainActor
 struct CiderCLIAgentSafetyTests {
+    @Test("populated filtered review list JSON declares read-only unchanged contract")
+    func populatedFilteredReviewListJSONDeclaresReadOnlyUnchangedContract() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-list-contract-populated-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "todo",
+                "--content", "Verify the review list JSON contract",
+                "--title", "Review list contract fixture",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let safeNextCommands = try #require(capture["safeNextCommands"] as? [String])
+        #expect(safeNextCommands.contains("cider-cli review list --item-type todo --state needs_review --limit 10 --json"))
+
+        let result = try runCLI(
+            args: [
+                "review", "list",
+                "--item-type", "todo",
+                "--state", "needs_review",
+                "--limit", "10",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["command"] as? String == "review.list")
+        #expect((payload["count"] as? Int ?? 0) > 0)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let filters = try #require(payload["filters"] as? [String: Any])
+        #expect(filters["itemType"] as? String == "todo")
+        #expect(filters["state"] as? String == "needs_review")
+        #expect(filters["limit"] as? Int == 10)
+    }
+
+    @Test("empty filtered review list JSON declares read-only unchanged contract")
+    func emptyFilteredReviewListJSONDeclaresReadOnlyUnchangedContract() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-list-contract-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: [
+                "review", "list",
+                "--item-type", "contact",
+                "--state", "needs_review",
+                "--limit", "10",
+                "--json",
+            ],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["command"] as? String == "review.list")
+        #expect(payload["count"] as? Int == 0)
+        #expect((payload["items"] as? [[String: Any]])?.isEmpty == true)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+        let filters = try #require(payload["filters"] as? [String: Any])
+        #expect(filters["itemType"] as? String == "contact")
+        #expect(filters["state"] as? String == "needs_review")
+        #expect(filters["limit"] as? Int == 10)
+    }
+
+    @Test("review list help is command-specific and exits before vault access")
+    func reviewListHelpIsCommandSpecificAndExitsBeforeVaultAccess() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-list-help-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(args: ["review", "list", "--help"], vault: vault)
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Usage: cider-cli review list"))
+        #expect(result.stdout.contains("--item-type <type>"))
+        #expect(result.stdout.contains("--state <state>"))
+        #expect(FileManager.default.fileExists(atPath: vault.path) == false)
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".cider").path) == false)
+    }
+
     @Test("capture provenance diagnostic help is read only and machine actionable")
     func captureProvenanceDiagnosticHelpIsReadOnly() throws {
         let vault = FileManager.default.temporaryDirectory

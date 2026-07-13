@@ -277,6 +277,12 @@ struct CiderCLI {
             return true
         }
 
+        if command == "review", ["list", "ls"].contains(subcommand), hasHelpArg(args) {
+            print("Usage: cider-cli review list [--include-deferred] [--limit <n>] [--kind <kind>] [--item-type <type>] [--state <state>] [--safe-action <action>] [--json]")
+            print("Read-only filtered review queue. Listing review items does not change review state.")
+            return true
+        }
+
         guard command == "item" else {
             return false
         }
@@ -14711,6 +14717,8 @@ struct CiderCLI {
     static func printReviewQueueResult(_ result: CiderReviewQueueResult, filters: [String: Any]? = nil) {
         if jsonOutput {
             var payload = result.toDictionary()
+            payload["readOnly"] = true
+            payload["changed"] = false
             if let filters { payload["filters"] = filters }
             outputJSON(payload)
             return
