@@ -169,6 +169,9 @@ struct AgentRoomsWorkspaceView: View {
             guard activeRoomID == session.selectedRoomID else { return }
             Task { await liveChat.refreshTransportReadiness() }
         }
+        .onDisappear {
+            session.cancelTranscription()
+        }
         .alert("Rename Conversation", isPresented: Binding(
             get: { renameRoom != nil },
             set: { if !$0 { renameRoom = nil } }
@@ -1744,6 +1747,7 @@ struct AgentRoomsWorkspaceView: View {
 
     private func liveComposer(roomID: String) -> some View {
         let enabled = liveChat.isComposerEnabled(selectedRoomID: selectedRoomID)
+        let speechActive = session.speechPresentation.state.isActive
         let validDraft = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && composerText.count <= AgentRoomsLiveChatModel.maximumMessageLength
         let status = liveChat.statusPresentation
@@ -1769,6 +1773,8 @@ struct AgentRoomsWorkspaceView: View {
                     .accessibilityLabel(detail)
             }
             HStack(alignment: .bottom, spacing: Spacing.sm) {
+                microphoneControl(roomID: roomID)
+
                 Button {
                     showsAttachmentPicker = true
                 } label: {
@@ -1782,7 +1788,7 @@ struct AgentRoomsWorkspaceView: View {
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .focused($focusedRegion, equals: .composer)
-                    .disabled(!enabled)
+                    .disabled(!enabled || speechActive)
                     .onKeyPress(.return, phases: .down) { press in
                         if press.modifiers.contains(.shift) {
                             if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
@@ -1810,9 +1816,10 @@ struct AgentRoomsWorkspaceView: View {
                     submitComposer(roomID: roomID)
                 }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!enabled || !validDraft)
+                    .disabled(!enabled || !validDraft || speechActive)
                     .accessibilityLabel(composerActionAccessibilityLabel(roomID: roomID))
             }
+            speechStatus
             if !liveChat.stagedAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Spacing.sm) {
@@ -1882,6 +1889,85 @@ struct AgentRoomsWorkspaceView: View {
                 liveChat.stageAttachments(from: urls, source: .filePicker)
             }
         }
+    }
+
+    @ViewBuilder
+    private func microphoneControl(roomID: String) -> some View {
+        let state = session.speechPresentation.state
+        let roomIsActive = selectedRoomID == roomID && liveChat.activeRoom?.id == roomID
+        switch state {
+        case .listening:
+            Button {
+                session.stopTranscription()
+            } label: {
+                Image(systemName: "stop.circle.fill")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Stop microphone transcription")
+        case .requestingPermission, .transcribing:
+            Button {} label: {
+                Image(systemName: "waveform")
+            }
+            .buttonStyle(.bordered)
+            .disabled(true)
+            .accessibilityLabel("Microphone transcription processing")
+        default:
+            Button {
+                Task { await session.startTranscription() }
+            } label: {
+                Image(systemName: "mic")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!roomIsActive || liveChat.activeRunCanBeCancelled)
+            .accessibilityLabel("Start microphone transcription")
+        }
+
+        if state.isActive {
+            Button {
+                session.cancelTranscription()
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Cancel microphone transcription")
+        } else if session.canDiscardSpeechDraft {
+            Button {
+                session.discardSpeechDraft()
+            } label: {
+                Image(systemName: "delete.left")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Discard speech-derived draft")
+        }
+    }
+
+    private var speechStatus: some View {
+        let presentation = session.speechPresentation
+        return HStack(spacing: Spacing.xs) {
+            Circle()
+                .fill(presentation.state == .failed || presentation.state == .denied
+                    || presentation.state == .restricted
+                    ? CiderColors.destructive
+                    : CiderColors.controlAccent)
+                .frame(width: 6, height: 6)
+                .scaleEffect(1 + (presentation.level * 0.8))
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: presentation.level)
+                .accessibilityHidden(true)
+            Text(presentation.title)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(1)
+            if let detail = presentation.detail {
+                Text(detail)
+                    .font(CiderFont.micro)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            presentation.detail.map { "\(presentation.title). \($0)" } ?? presentation.title
+        )
     }
 
     private func composerPlaceholder(roomID: String) -> String {
