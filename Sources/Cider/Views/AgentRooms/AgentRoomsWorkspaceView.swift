@@ -1714,8 +1714,11 @@ struct AgentRoomsWorkspaceView: View {
 
     private func exportableRoomID(_ room: AgentRoom) -> UUID? {
         guard onExportRoom != nil,
-              state.authority == .canonicalIncomplete,
-              room.lifecycleState != .trashed
+              AgentRoomsRoomExportAvailability.allows(
+                  room: room,
+                  workspaceAuthority: state.authority,
+                  activeLiveRoomID: liveChat.activeRoom?.id
+              )
         else { return nil }
         return UUID(uuidString: room.id)
     }

@@ -61,6 +61,44 @@ final class AgentRoomsDailyQualityTests: XCTestCase {
         XCTAssertFalse(AgentRoomsTranscriptMotionPolicy.disablesScrollAnimations(reduceMotion: false))
     }
 
+    func testLiveDurableRoomExportStaysAvailableAcrossLegacyFallback() {
+        let roomID = UUID().uuidString
+        let room = AgentRoom(
+            id: roomID,
+            title: "Cider Test Chat",
+            preview: "Durable reply",
+            updatedAt: .now,
+            relativeTime: "Now",
+            transcript: AgentRoomTranscript(
+                runtimeLabel: "Hermes",
+                messages: [
+                    AgentRoomMessage(
+                        id: "message-1",
+                        role: .agent,
+                        author: "Hermes",
+                        body: "Durable reply"
+                    )
+                ],
+                link: nil,
+                receipt: nil,
+                futureArtifact: nil
+            ),
+            continuity: .liveContinuation,
+            lifecycleState: .active
+        )
+
+        XCTAssertTrue(AgentRoomsRoomExportAvailability.allows(
+            room: room,
+            workspaceAuthority: .legacyAuthoritativePreview,
+            activeLiveRoomID: roomID
+        ))
+        XCTAssertFalse(AgentRoomsRoomExportAvailability.allows(
+            room: room,
+            workspaceAuthority: .legacyAuthoritativePreview,
+            activeLiveRoomID: nil
+        ))
+    }
+
     func testExportErrorsAreBoundedAndDoNotExposeRawDetails() {
         let existing = AgentRoomsRoomExportPresenter.failurePresentation(
             for: AgentRoomsRoomExportError.destinationExists

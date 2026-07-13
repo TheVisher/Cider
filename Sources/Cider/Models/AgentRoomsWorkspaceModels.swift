@@ -114,6 +114,18 @@ enum AgentRoomsTranscriptMotionPolicy {
     static func disablesScrollAnimations(reduceMotion: Bool) -> Bool { reduceMotion }
 }
 
+enum AgentRoomsRoomExportAvailability {
+    static func allows(
+        room: AgentRoom,
+        workspaceAuthority: AgentRoomsWorkspaceAuthority,
+        activeLiveRoomID: String?
+    ) -> Bool {
+        guard room.lifecycleState != .trashed else { return false }
+        if workspaceAuthority == .canonicalIncomplete { return true }
+        return room.id == activeLiveRoomID && !room.transcript.messages.isEmpty
+    }
+}
+
 struct AgentRoomsEligibleNotice: Equatable, Sendable {
     enum Kind: Equatable, Sendable { case loaded, empty }
 
