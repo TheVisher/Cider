@@ -181,6 +181,18 @@ struct HermesBridgeTransportTests {
         #expect(snapshot.status == .completed("Done"))
     }
 
+    @Test("run snapshot replaces an incomplete delta prefix with terminal output")
+    func runSnapshotUsesTerminalOutputWhenDeltasWereIncomplete() {
+        let snapshot = HermesRunSnapshot.empty
+            .reducing(.messageDelta("C"))
+            .reducing(.messageDelta("ID"))
+            .reducing(.messageDelta("ER "))
+            .reducing(.completed(output: "CIDER CHAT OK."))
+
+        #expect(snapshot.visibleText == "CIDER CHAT OK.")
+        #expect(snapshot.status == .completed("CIDER CHAT OK."))
+    }
+
     @Test("run snapshot tracks tool preview separately from assistant text")
     func runSnapshotTracksToolPreviewSeparately() {
         let snapshot = HermesRunSnapshot.empty

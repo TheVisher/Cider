@@ -11,6 +11,11 @@ enum AgentRoomsLiveTurnState: String, Equatable, Sendable {
     case idle, sending, streaming, cancelling, failed, completed
 }
 
+enum AgentRoomsSubmissionDisposition: Equatable, Sendable {
+    case accepted
+    case rejected
+}
+
 struct AgentRoomsLiveActivity: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable { case reasoning, toolStarted, toolCompleted }
     let id: UUID
@@ -385,6 +390,14 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var recoveredDraft: String?
     private var recoveredDraftRoomID: String?
     private var persistentAttempt: AgentRoomsConversationAttempt?
+    private var activeSendTask: Task<Void, Never>?
+
+    private struct AcceptedSubmission {
+        let text: String
+        let clientID: String
+        let eventAttemptID: UUID
+        let persistentAttempt: AgentRoomsConversationAttempt?
+    }
 
     var testRoom: AgentRoom? {
         isReservedTestChat ? activeRoom : nil
@@ -466,6 +479,18 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     func createTestChat() {
         if !isReservedTestChat || roomID == nil {
+            if activeAttemptID == nil, let persistence {
+                do {
+                    if let snapshot = try persistence.restoreReservedTestChat() {
+                        apply(snapshot, reservedTestChat: true)
+                        return
+                    }
+                } catch {
+                    // Keep the explicit Test Chat affordance available, but do not
+                    // weaken persistence authority. A conflicting stable-key room
+                    // will still reject the first durable attempt before transport.
+                }
+            }
             let id = makeID()
             roomID = id
             activeRoomTitle = Self.roomTitle
@@ -502,19 +527,47 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         return selectedRoomID == roomID.uuidString && transportState == .ready && activeAttemptID == nil
     }
 
+    @discardableResult
+    func startSubmission(_ text: String, selectedRoomID: String?) -> AgentRoomsSubmissionDisposition {
+        guard let accepted = acceptSubmission(text, selectedRoomID: selectedRoomID) else {
+            return .rejected
+        }
+        activeSendTask = Task { [weak self] in
+            await self?.performSend(accepted)
+        }
+        return .accepted
+    }
+
     func send(_ text: String, selectedRoomID: String?) async {
-        guard isComposerEnabled(selectedRoomID: selectedRoomID) else { return }
+        guard let accepted = acceptSubmission(text, selectedRoomID: selectedRoomID) else { return }
+        await performSend(accepted)
+    }
+
+    private func acceptSubmission(_ text: String, selectedRoomID: String?) -> AcceptedSubmission? {
+        guard isComposerEnabled(selectedRoomID: selectedRoomID) else {
+            if activeAttemptID == nil, transportState == .ready {
+                surfacePreAcceptFailure(
+                    "This conversation is no longer ready to send. Re-select it and try again."
+                )
+            }
+            return nil
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            composerMessage = "Type a message before sending."
-            return
+            surfacePreAcceptFailure("Type a message before sending.")
+            return nil
         }
         guard trimmed.count <= Self.maximumMessageLength else {
-            composerMessage = "Messages can be up to \(Self.maximumMessageLength) characters."
-            return
+            surfacePreAcceptFailure("Messages can be up to \(Self.maximumMessageLength) characters.")
+            return nil
         }
 
-        guard let roomID else { return }
+        guard let roomID else {
+            surfacePreAcceptFailure(
+                "This conversation is no longer ready to send. Re-select it and try again."
+            )
+            return nil
+        }
         let userMessageID = makeID()
         let clientID = "cider-room-client:\(userMessageID.uuidString)"
         let attemptID = makeID()
@@ -534,8 +587,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 at: timestamp
             )
         } catch {
-            composerMessage = "Cider could not safely save this message. Nothing was sent."
-            return
+            surfacePreAcceptFailure("Cider could not safely save this message. Nothing was sent.")
+            return nil
         }
         roomMessages.append(.init(
             id: clientID,
@@ -544,8 +597,38 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             body: trimmed,
             deliveryState: .pending
         ))
+        return activateAcceptedSubmission(
+            text: trimmed,
+            clientID: clientID,
+            persistentAttempt: durableAttempt
+        )
+    }
+
+    private func activateAcceptedSubmission(
+        text: String,
+        clientID: String,
+        persistentAttempt: AgentRoomsConversationAttempt?
+    ) -> AcceptedSubmission {
+        let eventAttemptID = makeID()
+        activeAttemptID = eventAttemptID
+        activeClientMessageID = clientID
+        activeRunID = nil
+        self.persistentAttempt = persistentAttempt
+        eventIntegrityFailed = false
+        composerMessage = nil
+        recoveredDraft = nil
+        recoveredDraftRoomID = nil
+        receipt = nil
+        turnState = .sending
+        liveActivity = []
+        streamingAssistantID = persistentAttempt?.assistantMessageID.uuidString
         rebuildRoom()
-        await performSend(text: trimmed, clientID: clientID, persistentAttempt: durableAttempt)
+        return AcceptedSubmission(
+            text: text,
+            clientID: clientID,
+            eventAttemptID: eventAttemptID,
+            persistentAttempt: persistentAttempt
+        )
     }
 
     func takeRecoveredDraft() -> String? {
@@ -600,7 +683,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             rebuildRoom()
             return
         }
-        await performSend(text: text, clientID: clientMessageID, persistentAttempt: durableAttempt)
+        let accepted = activateAcceptedSubmission(
+            text: text,
+            clientID: clientMessageID,
+            persistentAttempt: durableAttempt
+        )
+        await performSend(accepted)
     }
 
     func cancelActiveSend() async {
@@ -642,25 +730,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         rebuildRoom()
     }
 
-    private func performSend(
-        text: String,
-        clientID: String,
-        persistentAttempt: AgentRoomsConversationAttempt?
-    ) async {
-        guard let state = conversationState, activeAttemptID == nil else { return }
-        let attemptID = makeID()
-        activeAttemptID = attemptID
-        activeClientMessageID = clientID
-        activeRunID = nil
-        self.persistentAttempt = persistentAttempt
-        eventIntegrityFailed = false
-        composerMessage = nil
-        recoveredDraft = nil
-        recoveredDraftRoomID = nil
-        receipt = nil
-        turnState = .sending
-        liveActivity = []
-        streamingAssistantID = persistentAttempt?.assistantMessageID.uuidString
+    private func performSend(_ submission: AcceptedSubmission) async {
+        let text = submission.text
+        let clientID = submission.clientID
+        let attemptID = submission.eventAttemptID
+        let persistentAttempt = submission.persistentAttempt
+        guard let state = conversationState, activeAttemptID == attemptID else { return }
 
         do {
             let result = try await coordinatedSend(text: text, state: state, attemptID: attemptID)
@@ -1006,6 +1081,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     private func clearActiveAttempt() {
+        activeSendTask = nil
         activeAttemptID = nil
         activeClientMessageID = nil
         activeRunID = nil
@@ -1013,6 +1089,14 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         eventIntegrityFailed = false
         streamingAssistantID = nil
         persistentAttempt = nil
+    }
+
+    private func surfacePreAcceptFailure(_ message: String) {
+        composerMessage = message
+        receipt = nil
+        turnState = .failed
+        liveActivity = []
+        rebuildRoom()
     }
 
     private func rebuildRoom() {

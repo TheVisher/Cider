@@ -54,9 +54,10 @@ struct HermesRunSnapshot: Equatable, Sendable {
             next.toolSummary = detail ?? "Waiting for approval"
         case .completed(let output):
             next.status = .completed(output)
-            if next.visibleText.isEmpty {
-                next.visibleText = output
-            }
+            // Runs streaming is provisional. The gateway's completed output is
+            // the authoritative per-turn transcript and may contain content the
+            // provider did not deliver through message.delta callbacks.
+            next.visibleText = output
         case .failed(let message):
             next.status = .failed(message)
         case .cancelled:

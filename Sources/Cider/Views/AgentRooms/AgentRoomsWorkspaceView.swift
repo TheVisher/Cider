@@ -1667,9 +1667,8 @@ struct AgentRoomsWorkspaceView: View {
 
     private func submitComposer(roomID: String) {
         let text = composerText
-        guard liveChat.isComposerEnabled(selectedRoomID: selectedRoomID) else { return }
+        guard liveChat.startSubmission(text, selectedRoomID: roomID) == .accepted else { return }
         composerText = ""
-        Task { await liveChat.send(text, selectedRoomID: roomID) }
     }
 
     @MainActor
