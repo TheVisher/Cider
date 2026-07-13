@@ -156,6 +156,75 @@ struct CiderCaptureProvenanceEvidenceCheck: Codable, Equatable {
     }
 }
 
+enum CiderCaptureProvenanceCandidateEvidenceCategory: String, Codable, Equatable {
+    case exactPersistedItemReference = "exact_persisted_item_reference"
+    case canonicalURLMatch = "canonical_url_match"
+    case nearbyDuplicateAuditMatch = "nearby_duplicate_audit_match"
+}
+
+enum CiderCaptureProvenanceCandidateDiscoveryOutcome: String, Codable, Equatable {
+    case zeroCandidates = "zero_candidates"
+    case oneCandidateInsufficient = "one_candidate_insufficient"
+    case multipleCandidatesAmbiguous = "multiple_candidates_ambiguous"
+    case cappedCandidateEvidence = "capped_candidate_evidence"
+}
+
+struct CiderCaptureProvenanceCandidateEvidenceCount: Codable, Equatable {
+    var category: CiderCaptureProvenanceCandidateEvidenceCategory
+    var status: CiderCaptureProvenanceEvidenceStatus
+    var reasonCode: String
+    var candidateCount: Int
+    var candidateCountIsLowerBound: Bool
+    var candidateRefs: [String]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "category": category.rawValue,
+            "status": status.rawValue,
+            "reasonCode": reasonCode,
+            "candidateCount": candidateCount,
+            "candidateCountIsLowerBound": candidateCountIsLowerBound,
+            "candidateRefs": candidateRefs,
+        ]
+    }
+}
+
+struct CiderCaptureProvenanceCandidateDiscovery: Codable, Equatable {
+    var readOnly = true
+    var changed = false
+    var outcome: CiderCaptureProvenanceCandidateDiscoveryOutcome
+    var reasonCode: String
+    var discoveredCandidateCount: Int
+    var discoveredCandidateCountIsLowerBound: Bool
+    var countsByEvidenceCategory: [CiderCaptureProvenanceCandidateEvidenceCount]
+    var candidateRefs: [String]
+    var candidateRefsTruncated: Bool
+    var candidateSelected = false
+    var saturated: Bool
+    var caps: [String: Int]
+    var truthBoundary: String
+    var safeVerificationCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "readOnly": readOnly,
+            "changed": changed,
+            "outcome": outcome.rawValue,
+            "reasonCode": reasonCode,
+            "discoveredCandidateCount": discoveredCandidateCount,
+            "discoveredCandidateCountIsLowerBound": discoveredCandidateCountIsLowerBound,
+            "countsByEvidenceCategory": countsByEvidenceCategory.map { $0.toDictionary() },
+            "candidateRefs": candidateRefs,
+            "candidateRefsTruncated": candidateRefsTruncated,
+            "candidateSelected": candidateSelected,
+            "saturated": saturated,
+            "caps": caps,
+            "truthBoundary": truthBoundary,
+            "safeVerificationCommands": safeVerificationCommands,
+        ]
+    }
+}
+
 struct CiderCaptureDuplicateAuditScanPage: Codable, Equatable {
     var requestedLimit: Int
     var appliedLimit: Int
@@ -203,6 +272,7 @@ struct CiderCaptureProvenanceGapExplanation: Codable, Equatable {
     var missingEvidenceReasons: [String]
     var caps: [String: Int]
     var duplicateAuditScan: CiderCaptureDuplicateAuditScanPage
+    var candidateDiscovery: CiderCaptureProvenanceCandidateDiscovery?
     var truthBoundary: String
     var safeNextCommands: [String]
     var safeVerificationCommands: [String]
@@ -229,6 +299,7 @@ struct CiderCaptureProvenanceGapExplanation: Codable, Equatable {
             "safeVerificationCommands": safeVerificationCommands,
         ]
         if let itemRef { result["itemRef"] = itemRef }
+        if let candidateDiscovery { result["candidateDiscovery"] = candidateDiscovery.toDictionary() }
         return result
     }
 }
@@ -382,6 +453,8 @@ final class CiderCaptureProvenanceDiagnosticService {
         var check: CiderCaptureProvenanceEvidenceCheck
         var uniqueBookmark: CanonicalItemEvidence?
         var canonicalURL: String?
+        var candidateCount: Int
+        var candidateCountIsLowerBound: Bool
     }
 
     private struct AggregateGroupKey: Hashable {
@@ -494,6 +567,18 @@ final class CiderCaptureProvenanceDiagnosticService {
         let safeCommands = orderedUnique([replayCommand] + [continuationCommand].compactMap { $0 } + finding.safeVerificationCommands)
         let refs = orderedUnique(finding.evidenceRefs + checks.flatMap(\.evidenceRefs))
             .prefix(Self.evidenceRefLimit)
+        let discovery = finding.classification == .unresolvedProvenanceGap
+            ? candidateDiscovery(
+                for: event,
+                metadata: metadata,
+                metadataEvidence: checks[2],
+                candidateEvidence: candidateEvidence,
+                auditEvidence: auditEvidence,
+                audits: boundedAudits,
+                auditPage: auditPage,
+                safeVerificationCommands: safeCommands
+            )
+            : nil
 
         return CiderCaptureProvenanceGapExplanation(
             captureEventID: event.id,
@@ -523,6 +608,7 @@ final class CiderCaptureProvenanceDiagnosticService {
                 scannedAuditRefsTruncated: auditPage.entries.count > Self.evidenceRefLimit,
                 continuationToken: auditPage.continuationToken
             ),
+            candidateDiscovery: discovery,
             truthBoundary: "read_only_explanation_no_inference_candidate_selection_or_provenance_repair",
             safeNextCommands: safeCommands,
             safeVerificationCommands: safeCommands
@@ -1193,7 +1279,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                         evidenceRefs: [item.itemRef]
                     ),
                     uniqueBookmark: nil,
-                    canonicalURL: nil
+                    canonicalURL: nil,
+                    candidateCount: 1,
+                    candidateCountIsLowerBound: false
                 )
             }
             return CanonicalCandidateEvidence(
@@ -1204,7 +1292,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                     evidenceRefs: []
                 ),
                 uniqueBookmark: nil,
-                canonicalURL: nil
+                canonicalURL: nil,
+                candidateCount: 0,
+                candidateCountIsLowerBound: false
             )
         }
         if let metadata, let duplicate = explicitDuplicateEvidence(metadata: metadata) {
@@ -1217,7 +1307,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                         evidenceRefs: [item.itemRef]
                     ),
                     uniqueBookmark: nil,
-                    canonicalURL: nil
+                    canonicalURL: nil,
+                    candidateCount: 1,
+                    candidateCountIsLowerBound: false
                 )
             }
             return CanonicalCandidateEvidence(
@@ -1228,7 +1320,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                     evidenceRefs: []
                 ),
                 uniqueBookmark: nil,
-                canonicalURL: nil
+                canonicalURL: nil,
+                candidateCount: 0,
+                candidateCountIsLowerBound: false
             )
         }
         guard event.sourceKind == "url",
@@ -1242,7 +1336,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                     evidenceRefs: []
                 ),
                 uniqueBookmark: nil,
-                canonicalURL: nil
+                canonicalURL: nil,
+                candidateCount: 0,
+                candidateCountIsLowerBound: false
             )
         }
 
@@ -1256,7 +1352,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                     evidenceRefs: candidates.prefix(Self.evidenceRefLimit).map(\.itemRef)
                 ),
                 uniqueBookmark: nil,
-                canonicalURL: canonicalURL
+                canonicalURL: canonicalURL,
+                candidateCount: candidates.count,
+                candidateCountIsLowerBound: true
             )
         }
         if candidates.count > 1 {
@@ -1268,7 +1366,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                     evidenceRefs: candidates.map(\.itemRef)
                 ),
                 uniqueBookmark: nil,
-                canonicalURL: canonicalURL
+                canonicalURL: canonicalURL,
+                candidateCount: candidates.count,
+                candidateCountIsLowerBound: false
             )
         }
         if let candidate = candidates.first {
@@ -1280,7 +1380,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                     evidenceRefs: [candidate.itemRef]
                 ),
                 uniqueBookmark: candidate,
-                canonicalURL: canonicalURL
+                canonicalURL: canonicalURL,
+                candidateCount: 1,
+                candidateCountIsLowerBound: false
             )
         }
         return CanonicalCandidateEvidence(
@@ -1291,7 +1393,9 @@ final class CiderCaptureProvenanceDiagnosticService {
                 evidenceRefs: []
             ),
             uniqueBookmark: nil,
-            canonicalURL: canonicalURL
+            canonicalURL: canonicalURL,
+            candidateCount: 0,
+            candidateCountIsLowerBound: false
         )
     }
 
@@ -1309,6 +1413,123 @@ final class CiderCaptureProvenanceDiagnosticService {
         } catch {
             return []
         }
+    }
+
+    private func candidateDiscovery(
+        for event: CaptureEventRow,
+        metadata: [String: String]?,
+        metadataEvidence: CiderCaptureProvenanceEvidenceCheck,
+        candidateEvidence: CanonicalCandidateEvidence,
+        auditEvidence: CiderCaptureProvenanceEvidenceCheck,
+        audits: [MutationAuditEntry],
+        auditPage: DuplicateAuditPage,
+        safeVerificationCommands: [String]
+    ) -> CiderCaptureProvenanceCandidateDiscovery {
+        let hasPersistedReference = metadata.map {
+            recoverableItemReference(metadata: $0) != nil || explicitDuplicateEvidence(metadata: $0) != nil
+        } ?? false
+        let exactCount = hasPersistedReference ? candidateEvidence.candidateCount : 0
+        let exactRefs = hasPersistedReference ? candidateEvidence.check.evidenceRefs.sorted() : []
+        let exactStatus = hasPersistedReference ? candidateEvidence.check.status : metadataEvidence.status
+        let exactReason = hasPersistedReference ? candidateEvidence.check.reasonCode : metadataEvidence.reasonCode
+
+        let canonicalCount = hasPersistedReference ? 0 : candidateEvidence.candidateCount
+        let canonicalRefs = hasPersistedReference ? [] : candidateEvidence.check.evidenceRefs.sorted()
+        let canonicalStatus: CiderCaptureProvenanceEvidenceStatus = hasPersistedReference
+            ? .notApplicable
+            : candidateEvidence.check.status
+        let canonicalReason = hasPersistedReference
+            ? "canonical_url_discovery_not_needed_for_exact_persisted_reference"
+            : candidateEvidence.check.reasonCode
+        let nearbyAuditRefs = nearbyDuplicateAuditCandidateRefs(for: event, audits: audits)
+        let counts = [
+            CiderCaptureProvenanceCandidateEvidenceCount(
+                category: .exactPersistedItemReference,
+                status: exactStatus,
+                reasonCode: exactReason,
+                candidateCount: exactCount,
+                candidateCountIsLowerBound: false,
+                candidateRefs: exactRefs
+            ),
+            CiderCaptureProvenanceCandidateEvidenceCount(
+                category: .canonicalURLMatch,
+                status: canonicalStatus,
+                reasonCode: canonicalReason,
+                candidateCount: canonicalCount,
+                candidateCountIsLowerBound: !hasPersistedReference && candidateEvidence.candidateCountIsLowerBound,
+                candidateRefs: canonicalRefs
+            ),
+            CiderCaptureProvenanceCandidateEvidenceCount(
+                category: .nearbyDuplicateAuditMatch,
+                status: auditEvidence.status,
+                reasonCode: auditEvidence.reasonCode,
+                candidateCount: nearbyAuditRefs.count,
+                candidateCountIsLowerBound: auditPage.hasMore,
+                candidateRefs: nearbyAuditRefs
+            ),
+        ]
+        let discoveredCount = hasPersistedReference ? exactCount : canonicalCount
+        let countIsLowerBound = !hasPersistedReference && candidateEvidence.candidateCountIsLowerBound
+        let saturated = countIsLowerBound || auditPage.hasMore
+        let outcome: CiderCaptureProvenanceCandidateDiscoveryOutcome
+        let reasonCode: String
+        if countIsLowerBound {
+            outcome = .cappedCandidateEvidence
+            reasonCode = "canonical_candidate_count_cap_reached"
+        } else if discoveredCount == 0 {
+            outcome = .zeroCandidates
+            reasonCode = "zero_surviving_canonical_candidates"
+        } else if discoveredCount == 1 {
+            outcome = .oneCandidateInsufficient
+            if auditPage.hasMore {
+                reasonCode = "one_candidate_with_capped_supporting_evidence"
+            } else if auditEvidence.status == .stale {
+                reasonCode = "one_candidate_with_stale_supporting_evidence"
+            } else {
+                reasonCode = "one_candidate_without_sufficient_provenance_evidence"
+            }
+        } else {
+            outcome = .multipleCandidatesAmbiguous
+            reasonCode = "multiple_surviving_canonical_candidates"
+        }
+        let candidateRefs = Array(orderedUnique(exactRefs + canonicalRefs).sorted().prefix(Self.evidenceRefLimit))
+
+        return CiderCaptureProvenanceCandidateDiscovery(
+            outcome: outcome,
+            reasonCode: reasonCode,
+            discoveredCandidateCount: discoveredCount,
+            discoveredCandidateCountIsLowerBound: countIsLowerBound,
+            countsByEvidenceCategory: counts,
+            candidateRefs: candidateRefs,
+            candidateRefsTruncated: discoveredCount > candidateRefs.count,
+            saturated: saturated,
+            caps: [
+                "candidateRefs": Self.evidenceRefLimit,
+                "duplicateAuditEntries": Self.duplicateAuditLimit,
+            ],
+            truthBoundary: "bounded_persisted_candidate_evidence_only_no_candidate_selection_provenance_inference_or_repair",
+            safeVerificationCommands: safeVerificationCommands
+        )
+    }
+
+    private func nearbyDuplicateAuditCandidateRefs(
+        for event: CaptureEventRow,
+        audits: [MutationAuditEntry]
+    ) -> [String] {
+        guard let sourceURL = event.sourceURL,
+              let canonicalURL = VaultDuplicateAuditor.canonicalBookmarkURL(sourceURL) else { return [] }
+        let refs = audits.compactMap { audit -> String? in
+            guard audit.action == "deduplicate_url_capture",
+                  audit.itemType == "bookmark",
+                  abs(audit.occurredAt.timeIntervalSince(event.createdAt)) <= Self.duplicateAuditWindow,
+                  let auditURL = audit.metadata["canonicalURL"] ?? audit.metadata["incomingURL"],
+                  VaultDuplicateAuditor.canonicalBookmarkURL(auditURL) == canonicalURL,
+                  let item = canonicalItem(type: "bookmark", id: audit.itemID.uuidString) else {
+                return nil
+            }
+            return item.itemRef
+        }
+        return Array(orderedUnique(refs).sorted().prefix(Self.evidenceRefLimit))
     }
 
     private func duplicateAuditEvidence(

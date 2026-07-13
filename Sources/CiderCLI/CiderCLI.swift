@@ -266,7 +266,7 @@ struct CiderCLI {
                     "usage": usage,
                     "readOnly": true,
                     "changed": false,
-                    "description": "Bounded evidence drilldown for one capture provenance gap, with resumable duplicate-audit evidence pages for URL events. Never infers, selects, repairs, or backfills provenance.",
+                    "description": "Bounded evidence drilldown for one capture provenance gap, including zero, one-insufficient, or ambiguous candidate evidence and resumable duplicate-audit pages for URL events. Never infers, selects, repairs, or backfills provenance.",
                     "safeVerificationCommands": ["cider-cli capture provenance-gap --help --json"],
                     "truthBoundary": "help_contract_only_not_vault_truth",
                 ])
@@ -2516,6 +2516,9 @@ struct CiderCLI {
                 print("  Reason: \(report.reasonCode)")
                 for check in report.checkedEvidence {
                     print("  \(check.category.rawValue): \(check.status.rawValue) (\(check.reasonCode))")
+                }
+                if let discovery = report.candidateDiscovery {
+                    print("  Candidate discovery: \(discovery.outcome.rawValue) (\(discovery.reasonCode)); \(discovery.discoveredCandidateCount) candidate(s)\(discovery.discoveredCandidateCountIsLowerBound ? "+" : "")")
                 }
                 print("  Duplicate audit page: \(report.duplicateAuditScan.scannedCount) scanned; \(report.duplicateAuditScan.hasMore ? "more available" : "exhausted")")
             }
