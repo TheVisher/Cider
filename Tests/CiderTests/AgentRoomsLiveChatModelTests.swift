@@ -60,7 +60,7 @@ struct AgentRoomsLiveChatModelTests {
         #expect(room.transcript.receipt?.status == .completed)
         #expect(room.transcript.receipt?.continuity == .liveContinuation)
         #expect(room.transcript.receipt?.sourceBackedTransport == true)
-        #expect(room.transcript.receipt?.detail == "Runs API · Source-backed terminal · Live continuation")
+        #expect(room.transcript.receipt?.detail == "Completed · Source-backed · Live continuation")
         #expect(room.transcript.receipt?.sourceIdentity == "Hermes Runs API")
         #expect(room.transcript.receipt?.runIdentity == "run-805")
         #expect(room.transcript.receipt?.activity.isEmpty == true)

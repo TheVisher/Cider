@@ -4,6 +4,62 @@ import Testing
 
 @MainActor
 struct AgentRoomsSessionModelTests {
+    @Test("drafts are isolated per canonical room and restored across session reconstruction")
+    func perRoomDraftContinuity() throws {
+        let suiteName = "AgentRoomsSessionModelTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let selectionStore = AgentRoomsSelectionStore(defaults: defaults, key: "selection")
+        let draftStore = AgentRoomsDraftStore(defaults: defaults, key: "drafts")
+        let firstRoomID = UUID().uuidString
+        let secondRoomID = UUID().uuidString
+        let session = AgentRoomsSessionModel(
+            liveChat: AgentRoomsLiveChatModel(transport: SessionContinuityTransport()),
+            selectionStore: selectionStore,
+            draftStore: draftStore
+        )
+
+        session.selectRoom(id: firstRoomID, persistIfCanonical: true)
+        session.composerText = "First room draft"
+        session.selectRoom(id: secondRoomID, persistIfCanonical: true)
+        #expect(session.composerText.isEmpty)
+        session.composerText = "Second room draft"
+        session.selectRoom(id: firstRoomID, persistIfCanonical: true)
+        #expect(session.composerText == "First room draft")
+        session.selectRoom(id: secondRoomID, persistIfCanonical: true)
+        #expect(session.composerText == "Second room draft")
+
+        let reconstructed = AgentRoomsSessionModel(
+            liveChat: AgentRoomsLiveChatModel(transport: SessionContinuityTransport()),
+            selectionStore: selectionStore,
+            draftStore: AgentRoomsDraftStore(defaults: defaults, key: "drafts")
+        )
+        #expect(reconstructed.selectedRoomID == secondRoomID)
+        #expect(reconstructed.composerText == "Second room draft")
+        reconstructed.selectRoom(id: firstRoomID, persistIfCanonical: true)
+        #expect(reconstructed.composerText == "First room draft")
+    }
+
+    @Test("a recovered failed draft is stored for its originating room without leaking into selection")
+    func recoveredDraftStaysWithOriginatingRoom() async throws {
+        let session = AgentRoomsSessionModel(
+            liveChat: AgentRoomsLiveChatModel(
+                transport: SessionPreAcceptFailureTransport(),
+                turnCoordinator: HermesTurnCoordinator()
+            )
+        )
+        await session.startTestChat()
+        let originRoomID = try #require(session.liveChat.activeRoom?.id)
+        await session.liveChat.send("Recover only here", selectedRoomID: originRoomID)
+        let otherRoomID = UUID().uuidString
+        session.selectRoom(id: otherRoomID, persistIfCanonical: false)
+
+        #expect(!session.restoreRecoveredDraftIfNeeded())
+        #expect(session.composerText.isEmpty)
+        session.selectRoom(id: originRoomID, persistIfCanonical: false)
+        #expect(session.composerText == "Recover only here")
+    }
+
     @Test("Rooms view reconstruction keeps the explicit process-lifetime test chat session")
     func viewReconstructionKeepsSession() async throws {
         let transport = SessionContinuityTransport()
@@ -174,3 +230,20 @@ private actor SessionContinuityTransport: HermesBridgeTransport {
 
     func stop(runID: String) async throws {}
 }
+
+private actor SessionPreAcceptFailureTransport: HermesBridgeTransport {
+    func availability() async -> HermesBridgeAvailability { .apiRuns }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult {
+        throw SessionPreAcceptFailure.disconnected
+    }
+
+    func stop(runID: String) async throws {}
+}
+
+private enum SessionPreAcceptFailure: Error { case disconnected }

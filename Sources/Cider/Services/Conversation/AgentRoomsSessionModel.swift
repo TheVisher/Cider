@@ -4,32 +4,47 @@ import Foundation
 @MainActor
 final class AgentRoomsSessionModel: ObservableObject {
     let liveChat: AgentRoomsLiveChatModel
+    let messagePresentationStore = AgentRoomsMessagePresentationStore()
 
     @Published var selectedRoomID: String?
-    @Published var composerText = ""
+    @Published var composerText = "" {
+        didSet {
+            guard !isRestoringDraft, let selectedRoomID else { return }
+            draftStore.saveDraft(composerText, roomID: selectedRoomID)
+        }
+    }
     private(set) var preferredCanonicalRoomID: String?
     private let selectionStore: (any AgentRoomsSelectionPersisting)?
+    private let draftStore: any AgentRoomsDraftPersisting
+    private var isRestoringDraft = false
 
     init(
         liveChat: AgentRoomsLiveChatModel,
-        selectionStore: (any AgentRoomsSelectionPersisting)? = nil
+        selectionStore: (any AgentRoomsSelectionPersisting)? = nil,
+        draftStore: (any AgentRoomsDraftPersisting)? = nil
     ) {
         self.liveChat = liveChat
         self.selectionStore = selectionStore
+        self.draftStore = draftStore ?? makeAgentRoomsMemoryDraftStore()
         let restoredSelection = selectionStore?.loadSelectedRoomID()
         self.selectedRoomID = restoredSelection
         self.preferredCanonicalRoomID = restoredSelection
+        self.composerText = restoredSelection.flatMap { self.draftStore.loadDraft(roomID: $0) } ?? ""
     }
 
     convenience init(transport: any HermesBridgeTransport) {
         self.init(liveChat: AgentRoomsLiveChatModel(
             transport: transport,
             persistence: AgentRoomsConversationPersistence()
-        ), selectionStore: AgentRoomsSelectionStore.application)
+        ), selectionStore: AgentRoomsSelectionStore.application, draftStore: AgentRoomsDraftStore.application)
     }
 
     func selectRoom(id: String?, persistIfCanonical: Bool) {
-        selectedRoomID = id
+        if selectedRoomID != id {
+            if let selectedRoomID { draftStore.saveDraft(composerText, roomID: selectedRoomID) }
+            selectedRoomID = id
+            restoreStoredDraft(for: id)
+        }
         guard persistIfCanonical, let id, let canonicalID = UUID(uuidString: id) else {
             if id != liveChat.activeRoom?.id { liveChat.deactivateRoom() }
             return
@@ -61,8 +76,16 @@ final class AgentRoomsSessionModel: ObservableObject {
 
     @discardableResult
     func restoreRecoveredDraftIfNeeded() -> Bool {
-        guard composerText.isEmpty, let recovered = liveChat.takeRecoveredDraft() else { return false }
-        composerText = recovered
-        return true
+        guard let recovered = liveChat.takeRecoveredDraftRecovery() else { return false }
+        draftStore.saveDraft(recovered.text, roomID: recovered.roomID)
+        guard selectedRoomID == recovered.roomID, composerText.isEmpty else { return false }
+        restoreStoredDraft(for: recovered.roomID)
+        return composerText == recovered.text
+    }
+
+    private func restoreStoredDraft(for roomID: String?) {
+        isRestoringDraft = true
+        composerText = roomID.flatMap { draftStore.loadDraft(roomID: $0) } ?? ""
+        isRestoringDraft = false
     }
 }

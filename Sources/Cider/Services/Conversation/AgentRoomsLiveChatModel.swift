@@ -18,6 +18,11 @@ struct AgentRoomsLiveActivity: Identifiable, Equatable, Sendable {
     let detail: String
 }
 
+struct AgentRoomsRecoveredDraft: Equatable, Sendable {
+    let roomID: String
+    let text: String
+}
+
 enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
     case bookmark(bookmarkID: UUID)
     case card(boardID: String, cardID: String)
@@ -271,6 +276,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var completedAssistantSourceIDs = Set<String>()
     private var streamingAssistantID: String?
     private var recoveredDraft: String?
+    private var recoveredDraftRoomID: String?
     private var persistentAttempt: AgentRoomsConversationAttempt?
 
     var testRoom: AgentRoom? {
@@ -428,8 +434,20 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     func takeRecoveredDraft() -> String? {
-        defer { recoveredDraft = nil }
+        defer {
+            recoveredDraft = nil
+            recoveredDraftRoomID = nil
+        }
         return recoveredDraft
+    }
+
+    func takeRecoveredDraftRecovery() -> AgentRoomsRecoveredDraft? {
+        defer {
+            recoveredDraft = nil
+            recoveredDraftRoomID = nil
+        }
+        guard let recoveredDraft, let recoveredDraftRoomID else { return nil }
+        return .init(roomID: recoveredDraftRoomID, text: recoveredDraft)
     }
 
     func retry(clientMessageID: String, selectedRoomID: String?) async {
@@ -440,6 +458,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         else { return }
         let text = roomMessages[index].body
         recoveredDraft = nil
+        recoveredDraftRoomID = nil
         roomMessages[index].deliveryState = .pending
         roomMessages[index].canRetry = false
         composerMessage = nil
@@ -479,7 +498,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         if activeRunID == nil,
            let activeClientMessageID,
            let message = roomMessages.first(where: { $0.id == activeClientMessageID }) {
-            recoveredDraft = message.body
+            setRecoveredDraft(message.body)
         }
         let partial = streamingAssistantID.flatMap { id in
             roomMessages.first(where: { $0.id == id })?.body
@@ -498,7 +517,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         turnState = .failed
         receipt = makeReceipt(
             title: "Hermes turn cancelled",
-            detail: "Runs API · Live continuation",
+            detail: activeRunID == nil
+                ? "Cancelled before acceptance · Safe to retry"
+                : "Cancelled · Accepted by Hermes · Partial response kept",
             status: .cancelled,
             runID: activeRunID
         )
@@ -519,10 +540,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         self.persistentAttempt = persistentAttempt
         eventIntegrityFailed = false
         composerMessage = nil
+        recoveredDraft = nil
+        recoveredDraftRoomID = nil
         receipt = nil
         turnState = .sending
         liveActivity = []
-        streamingAssistantID = nil
+        streamingAssistantID = persistentAttempt?.assistantMessageID.uuidString
 
         do {
             let result = try await coordinatedSend(text: text, state: state, attemptID: attemptID)
@@ -559,11 +582,13 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 )
             }
             failActiveMessage(message: "Hermes response was interrupted.", canRetry: activeRunID == nil)
-            recoveredDraft = activeRunID == nil ? text : nil
+            if activeRunID == nil { setRecoveredDraft(text) }
             turnState = .failed
             receipt = makeReceipt(
                 title: "Hermes turn interrupted",
-                detail: "Runs API · Live continuation",
+                detail: activeRunID == nil
+                    ? "Not accepted by Hermes · Safe to retry"
+                    : "Accepted by Hermes · Partial response kept · Cannot retry safely",
                 status: .cancelled,
                 runID: activeRunID
             )
@@ -589,11 +614,13 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 message: accepted ? Self.acceptedInterruptionMessage : Self.failedMessage,
                 canRetry: !accepted
             )
-            recoveredDraft = accepted ? nil : text
+            if !accepted { setRecoveredDraft(text) }
             turnState = .failed
             receipt = makeReceipt(
                 title: accepted ? "Hermes response interrupted" : "Hermes send failed",
-                detail: "Runs API · Live continuation",
+                detail: accepted
+                    ? "Accepted by Hermes · Partial response kept · Cannot retry safely"
+                    : "Not accepted by Hermes · Safe to retry",
                 status: .failed,
                 runID: activeRunID
             )
@@ -773,9 +800,14 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         if completedAssistantSourceIDs.insert(expectedAssistantSourceID).inserted {
             if let streamingAssistantID,
                let index = roomMessages.firstIndex(where: { $0.id == streamingAssistantID }) {
-                roomMessages[index] = .init(id: expectedAssistantSourceID, role: .agent, author: "Hermes", body: assistant.content)
+                roomMessages[index].body = assistant.content
             } else {
-                roomMessages.append(.init(id: expectedAssistantSourceID, role: .agent, author: "Hermes", body: assistant.content))
+                roomMessages.append(.init(
+                    id: persistentAttempt?.assistantMessageID.uuidString ?? expectedAssistantSourceID,
+                    role: .agent,
+                    author: "Hermes",
+                    body: assistant.content
+                ))
             }
         }
         transportMessages = completion.finalMessages
@@ -789,7 +821,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         receipt = .init(
             id: "cider-room-receipt:\(runID)",
             title: "Hermes completed a live turn",
-            detail: "Runs API · Source-backed terminal · Live continuation",
+            detail: "Completed · Source-backed · Live continuation",
             status: .completed,
             continuity: .liveContinuation,
             sourceBackedTransport: true,
@@ -877,6 +909,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         )
         liveActivity = snapshot.latestActivity
         recoveredDraft = snapshot.presentationMessages.last(where: { $0.canRetry })?.body
+        recoveredDraftRoomID = recoveredDraft == nil ? nil : snapshot.room.id.uuidString
 
         let lastAssistant = snapshot.transportMessages.last(where: { $0.role == .assistant })
         let objectReceipt = snapshot.latestCiderReferences.isEmpty
@@ -888,26 +921,55 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             }
             : AgentRoomsCiderReceiptProjector.project(snapshot.latestCiderReferences)
         if let status = snapshot.latestTurnStatus, status.isTerminal {
-            let presentation: (AgentRoomReceiptStatus, String)
+            let presentation: (status: AgentRoomReceiptStatus, title: String, detail: String)
             switch status {
             case .completed:
-                presentation = (.completed, "Hermes completed a live turn")
+                presentation = (
+                    .completed,
+                    "Hermes completed a live turn",
+                    "Completed · Source-backed · Live continuation"
+                )
             case .cancelled:
-                presentation = (.cancelled, "Hermes turn cancelled")
+                presentation = (
+                    .cancelled,
+                    "Hermes turn cancelled",
+                    snapshot.latestRunID == nil
+                        ? "Cancelled before acceptance · Safe to retry"
+                        : "Cancelled · Accepted by Hermes · Partial response kept"
+                )
             case .failed:
-                presentation = (.failed, "Hermes turn failed")
+                switch snapshot.latestErrorCode {
+                case "pre_accept_interruption":
+                    presentation = (
+                        .failed,
+                        "Message interrupted before acceptance",
+                        "Not accepted by Hermes · Safe to retry"
+                    )
+                case "accepted_interruption":
+                    presentation = (
+                        .failed,
+                        "Hermes response interrupted",
+                        "Accepted by Hermes · Cannot retry safely"
+                    )
+                default:
+                    presentation = (
+                        .failed,
+                        "Hermes turn failed",
+                        snapshot.latestRunID == nil
+                            ? "Not accepted by Hermes · Safe to retry"
+                            : "Accepted by Hermes · Cannot retry safely"
+                    )
+                }
             case .unknown:
-                presentation = (.failed, "Hermes turn outcome is unavailable")
+                presentation = (.failed, "Hermes turn outcome is unavailable", "Outcome unavailable · Cannot retry safely")
             case .pending, .running, .waiting:
-                presentation = (.failed, "Hermes turn interrupted")
+                presentation = (.failed, "Hermes turn interrupted", "Recovery required")
             }
             receipt = AgentRoomReceipt(
                 id: "cider-room-receipt:\(snapshot.latestRunID ?? snapshot.room.id.uuidString)",
-                title: presentation.1,
-                detail: snapshot.latestRunID == nil
-                    ? "Runs API · Session-only terminal · Live continuation"
-                    : "Runs API · Source-backed terminal · Live continuation",
-                status: presentation.0,
+                title: presentation.title,
+                detail: presentation.detail,
+                status: presentation.status,
                 continuity: .liveContinuation,
                 sourceBackedTransport: snapshot.latestRunID != nil,
                 sourceIdentity: Self.receiptSourceIdentity,
@@ -932,6 +994,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
         return trimmed
+    }
+
+    private func setRecoveredDraft(_ text: String) {
+        recoveredDraft = text
+        recoveredDraftRoomID = roomID?.uuidString
     }
 }
 

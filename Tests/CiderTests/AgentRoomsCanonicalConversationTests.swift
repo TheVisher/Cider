@@ -143,6 +143,44 @@ struct AgentRoomsCanonicalConversationTests {
         }
     }
 
+    @Test("streaming and terminal reconciliation retain the durable Cider assistant identity")
+    func streamingRetainsDurableAssistantIdentity() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Stable identity room")
+            let transport = CanonicalConversationGateTransport(
+                runID: "run-stable-id",
+                sessionID: "session-stable-id",
+                finalAnswer: "Stable terminal answer"
+            )
+            let model = makeModel(database: database, repository: repository, transport: transport)
+            #expect(model.activateCanonicalRoom(id: room.id))
+            await model.refreshTransportReadiness()
+
+            let send = Task { await model.send("Keep identity", selectedRoomID: room.id.uuidString) }
+            await transport.waitUntilStarted()
+            await transport.emit(.messageDelta("Stable"))
+            let streamingID = try #require(model.activeRoom?.transcript.messages.last?.id)
+            await transport.release()
+            await send.value
+
+            let terminalID = try #require(model.activeRoom?.transcript.messages.last?.id)
+            let durableAssistantID = try #require(
+                repository.messages(roomID: room.id).last(where: { $0.role == "assistant" })?.id.uuidString
+            )
+            #expect(streamingID == terminalID)
+            #expect(terminalID == durableAssistantID)
+
+            let reconstructed = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+            #expect(reconstructed.activateCanonicalRoom(id: room.id))
+            #expect(reconstructed.activeRoom?.transcript.messages.last?.id == durableAssistantID)
+        }
+    }
+
     @Test("pre-accept failure retry reuses one accepted user identity")
     func retryDoesNotDuplicateAcceptedUser() async throws {
         try await withTemporaryConversationDatabase { database, repository in
@@ -179,6 +217,85 @@ struct AgentRoomsCanonicalConversationTests {
             #expect(reconstructed.activeRoom?.transcript.messages.map(\.body) == ["Retry this", "Recovered"])
             #expect(reconstructed.activeRoom?.transcript.messages.first?.deliveryState == .sent)
             #expect(reconstructed.activeRoom?.transcript.receipt?.runIdentity == "run-retry")
+        }
+    }
+
+    @Test("reopen durably terminates a stale pre-accept turn and offers honest retry")
+    func stalePreAcceptRecovery() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Pre-accept recovery")
+            let persistence = AgentRoomsConversationPersistence(database: database, repository: repository)
+            _ = try persistence.beginAttempt(
+                roomID: room.id,
+                roomTitle: room.title,
+                isReservedTestChat: false,
+                attemptID: UUID(),
+                clientMessageID: "cider-room-client:pre-accept",
+                userMessageID: UUID(),
+                assistantMessageID: UUID(),
+                text: "Was this sent?",
+                at: Date(timeIntervalSince1970: 1_805_100_000)
+            )
+
+            let reconstructed = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+            #expect(reconstructed.activateCanonicalRoom(id: room.id))
+
+            let turn = try #require(repository.turns(roomID: room.id).last)
+            let message = try #require(reconstructed.activeRoom?.transcript.messages.last)
+            #expect(turn.status == .failed)
+            #expect(turn.error?.code == "pre_accept_interruption")
+            #expect(message.deliveryState == .failed)
+            #expect(message.canRetry)
+            #expect(reconstructed.activeRoom?.transcript.receipt?.title == "Message interrupted before acceptance")
+            #expect(reconstructed.activeRoom?.transcript.receipt?.detail == "Not accepted by Hermes · Safe to retry")
+        }
+    }
+
+    @Test("reopen durably terminates an accepted stale turn without unsafe retry")
+    func staleAcceptedRecovery() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Accepted recovery")
+            let persistence = AgentRoomsConversationPersistence(database: database, repository: repository)
+            let attempt = try persistence.beginAttempt(
+                roomID: room.id,
+                roomTitle: room.title,
+                isReservedTestChat: false,
+                attemptID: UUID(),
+                clientMessageID: "cider-room-client:accepted",
+                userMessageID: UUID(),
+                assistantMessageID: UUID(),
+                text: "Continue carefully",
+                at: Date(timeIntervalSince1970: 1_805_100_100)
+            )
+            try persistence.markRunStarted(
+                attempt,
+                runID: "run-stale-accepted",
+                activity: [],
+                at: Date(timeIntervalSince1970: 1_805_100_101)
+            )
+
+            let reconstructed = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+            #expect(reconstructed.activateCanonicalRoom(id: room.id))
+
+            let turn = try #require(repository.turns(roomID: room.id).last)
+            let message = try #require(reconstructed.activeRoom?.transcript.messages.last)
+            #expect(turn.status == .failed)
+            #expect(turn.error?.code == "accepted_interruption")
+            #expect(message.deliveryState == .failed)
+            #expect(!message.canRetry)
+            #expect(reconstructed.activeRoom?.transcript.receipt?.title == "Hermes response interrupted")
+            #expect(reconstructed.activeRoom?.transcript.receipt?.detail == "Accepted by Hermes · Cannot retry safely")
+            #expect(reconstructed.activeRoom?.transcript.receipt?.runIdentity == "run-stale-accepted")
         }
     }
 

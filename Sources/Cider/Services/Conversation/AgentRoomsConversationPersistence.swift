@@ -7,6 +7,7 @@ struct AgentRoomsConversationSnapshot: Sendable {
     let presentationMessages: [AgentRoomMessage]
     let latestTurnStatus: ConversationTurnStatus?
     let latestRunID: String?
+    let latestErrorCode: String?
     let latestCiderReferences: [HermesCiderReference]
     let latestActivity: [AgentRoomsLiveActivity]
 }
@@ -92,7 +93,11 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
     func restoreCanonicalRoom(id: UUID) throws -> AgentRoomsConversationSnapshot? {
         guard let room = try repository.room(id: id) else { return nil }
         try requireRoomAuthority(room, reserved: false)
-        return try snapshot(room: room)
+        try recoverInterruptedTurnIfNeeded(roomID: room.id)
+        guard let recoveredRoom = try repository.room(id: room.id) else {
+            throw AgentRoomsConversationPersistenceError.corruptHistory
+        }
+        return try snapshot(room: recoveredRoom)
     }
 
     func restoreReservedTestChat() throws -> AgentRoomsConversationSnapshot? {
@@ -100,7 +105,11 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             return nil
         }
         try requireRoomAuthority(room, reserved: true)
-        return try snapshot(room: room)
+        try recoverInterruptedTurnIfNeeded(roomID: room.id)
+        guard let recoveredRoom = try repository.room(id: room.id) else {
+            throw AgentRoomsConversationPersistenceError.corruptHistory
+        }
+        return try snapshot(room: recoveredRoom)
     }
 
     /// Compatibility entry point for callers that already hold a verified terminal
@@ -552,7 +561,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 )
             case "assistant":
                 return AgentRoomMessage(
-                    id: message.source?.id ?? message.id.uuidString,
+                    id: message.id.uuidString,
                     role: .agent,
                     author: "Hermes",
                     body: message.contentText
@@ -610,8 +619,31 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             presentationMessages: presentationMessages,
             latestTurnStatus: latestTurn?.status,
             latestRunID: latestRunID,
+            latestErrorCode: latestTurn?.error?.code,
             latestCiderReferences: try decodeReferences(latestTurn?.metadata["cider_references_json"]),
             latestActivity: decodeActivity(latestTurn?.metadata["activity_json"])
+        )
+    }
+
+    /// A process-local active attempt cannot survive app teardown. On the next
+    /// activation, close only the newest nonterminal turn using its durable run
+    /// acceptance evidence. This makes retry truth durable without guessing a
+    /// provider result or inventing an assistant message.
+    private func recoverInterruptedTurnIfNeeded(roomID: UUID) throws {
+        guard let latest = try repository.turns(roomID: roomID).last,
+              latest.status == .pending || latest.status == .running || latest.status == .waiting
+        else { return }
+        let accepted = latest.source?.namespace == Self.sourceNamespace
+            && latest.source?.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let recoveryDate = max(Date(), latest.updatedAt)
+        _ = try repository.transitionTurn(
+            id: latest.id,
+            to: .failed,
+            error: .init(
+                code: accepted ? "accepted_interruption" : "pre_accept_interruption",
+                detail: nil
+            ),
+            at: recoveryDate
         )
     }
 

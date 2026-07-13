@@ -66,9 +66,9 @@ struct AgentRoomsWorkspaceView: View {
     ) {
         let session = AgentRoomsSessionModel(liveChat: liveChat)
         if case .loaded(_, _, let selectedRoomID) = state {
-            session.selectedRoomID = selectedRoomID
+            session.selectRoom(id: selectedRoomID, persistIfCanonical: false)
         } else if case .eligibleLoaded(_, _, let selectedRoomID, _) = state {
-            session.selectedRoomID = selectedRoomID
+            session.selectRoom(id: selectedRoomID, persistIfCanonical: false)
         }
         self.init(
             state: state,
@@ -79,8 +79,7 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private var selectedRoomID: String? {
-        get { session.selectedRoomID }
-        nonmutating set { session.selectedRoomID = newValue }
+        session.selectedRoomID
     }
 
     private var composerText: String {
@@ -863,16 +862,23 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private var liveActivityView: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            ForEach(liveChat.liveActivity) { activity in
-                Text(activity.detail)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.tertiary)
-                    .lineLimit(2)
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(liveChat.liveActivity) { activity in
+                    receiptActivityRow(activity)
+                }
             }
+            .padding(.top, Spacing.xs)
+        } label: {
+            Label(
+                "Hermes is working · \(liveChat.liveActivity.count) update\(liveChat.liveActivity.count == 1 ? "" : "s")",
+                systemImage: "sparkles"
+            )
+            .font(CiderFont.captionMedium)
+            .foregroundColor(CiderColors.secondary)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Hermes live activity")
+        .tint(CiderColors.secondary)
+        .accessibilityLabel("Hermes live activity, \(liveChat.liveActivity.count) updates, collapsed by default")
     }
 
     private func transcriptHeading(_ room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
@@ -957,10 +963,9 @@ struct AgentRoomsWorkspaceView: View {
                 Text(message.author)
                     .font(CiderFont.captionSemibold)
                     .foregroundColor(CiderColors.tertiary)
-                Text(message.body)
-                    .font(CiderFont.label)
-                    .foregroundColor(CiderColors.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+                AgentRoomsMarkdownMessageView(
+                    document: session.messagePresentationStore.document(for: message)
+                )
             }
             .accessibilityElement(children: .combine)
             if showsDelivery, message.role == .human {
@@ -1171,28 +1176,29 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private func receiptActivityRow(_ activity: AgentRoomsLiveActivity) -> some View {
-        let presentation: (label: String, symbol: String) = switch activity.kind {
-        case .reasoning: ("Reasoning", "brain.head.profile")
-        case .toolStarted: ("Tool started", "wrench.and.screwdriver")
-        case .toolCompleted: ("Tool completed", "checkmark.circle")
+        let calm = AgentRoomsActivityPresentation.project(activity)
+        let symbol = switch activity.kind {
+        case .reasoning: "brain.head.profile"
+        case .toolStarted: "wrench.and.screwdriver"
+        case .toolCompleted: "checkmark.circle"
         }
         return HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: presentation.symbol)
+            Image(systemName: symbol)
                 .foregroundColor(CiderColors.tertiary)
                 .frame(width: 14)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(presentation.label)
+                Text(calm.label)
                     .font(CiderFont.microMedium)
                     .foregroundColor(CiderColors.tertiary)
-                Text(activity.detail)
+                Text(calm.summary)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.secondary)
                     .lineLimit(2)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(presentation.label), \(activity.detail)")
+        .accessibilityLabel(calm.accessibilityLabel)
     }
 
     private func receiptPresentation(
@@ -1252,17 +1258,28 @@ struct AgentRoomsWorkspaceView: View {
         let enabled = liveChat.isComposerEnabled(selectedRoomID: selectedRoomID)
         let validDraft = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && composerText.count <= AgentRoomsLiveChatModel.maximumMessageLength
+        let status = liveChat.statusPresentation
         return VStack(alignment: .leading, spacing: Spacing.xs) {
-            if let message = liveChat.composerMessage {
-                Text(message)
-                    .font(CiderFont.caption)
-                    .foregroundColor(CiderColors.secondary)
-                    .accessibilityLabel(message)
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(status.title)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(status.state == .failed || status.state == .unavailable
+                        ? CiderColors.destructive
+                        : CiderColors.secondary)
+                if status.allowsReconnect {
+                    Button("Reconnect") {
+                        Task { await liveChat.refreshTransportReadiness() }
+                    }
+                    .buttonStyle(.link)
+                    .accessibilityLabel("Reconnect to Hermes")
+                }
             }
-            Text(liveTurnStatusLabel)
-                .font(CiderFont.microMedium)
-                .foregroundColor(CiderColors.tertiary)
-                .accessibilityLabel("Hermes turn \(liveTurnStatusLabel)")
+            if let detail = status.detail {
+                Text(detail)
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .accessibilityLabel(detail)
+            }
             HStack(alignment: .bottom, spacing: Spacing.sm) {
                 TextField(composerPlaceholder(roomID: roomID), text: composerTextBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
@@ -1295,17 +1312,6 @@ struct AgentRoomsWorkspaceView: View {
         .background(CiderColors.surfaceSubtle)
         .background(CiderWindowDragExclusionReporter(id: "agent-rooms-live-composer"))
         .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
-    }
-
-    private var liveTurnStatusLabel: String {
-        switch liveChat.turnState {
-        case .idle: "Ready"
-        case .sending: "Sending…"
-        case .streaming: "Streaming…"
-        case .cancelling: "Cancelling…"
-        case .failed: "Failed"
-        case .completed: "Completed"
-        }
     }
 
     private func composerPlaceholder(roomID: String) -> String {

@@ -175,6 +175,43 @@ struct AgentRoomsTestChatPersistenceTests {
         }
     }
 
+    @Test("reserved Test Chat reopens an accepted stale run as durable non-retryable interruption")
+    func acceptedStaleRunRecoversInReservedTestChat() throws {
+        try withPersistence { _, repository, persistence in
+            let roomID = UUID()
+            let attempt = try persistence.beginAttempt(
+                roomID: roomID,
+                roomTitle: AgentRoomsLiveChatModel.roomTitle,
+                isReservedTestChat: true,
+                attemptID: UUID(),
+                clientMessageID: "cider-room-client:test-stale",
+                userMessageID: UUID(),
+                assistantMessageID: UUID(),
+                text: "Recover Test Chat",
+                at: Date(timeIntervalSince1970: 1_805_200_000)
+            )
+            try persistence.markRunStarted(
+                attempt,
+                runID: "run-test-stale",
+                activity: [],
+                at: Date(timeIntervalSince1970: 1_805_200_001)
+            )
+            let model = AgentRoomsLiveChatModel(
+                transport: DurableSessionTransport(),
+                turnCoordinator: HermesTurnCoordinator(),
+                persistence: persistence
+            )
+
+            #expect(model.restoreDurableTestChat())
+            #expect(model.testRoom?.id == roomID.uuidString)
+            #expect(model.testRoom?.transcript.messages.first?.canRetry == false)
+            #expect(model.testRoom?.transcript.receipt?.title == "Hermes response interrupted")
+            #expect(model.testRoom?.transcript.receipt?.detail == "Accepted by Hermes · Cannot retry safely")
+            #expect(try repository.turns(roomID: roomID).last?.status == .failed)
+            #expect(try repository.turns(roomID: roomID).last?.error?.code == "accepted_interruption")
+        }
+    }
+
     @Test("canonical saved-bookmark receipt restores its verified local thumbnail after repository reopen")
     func canonicalSavedBookmarkThumbnailSurvivesRepositoryReopen() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
