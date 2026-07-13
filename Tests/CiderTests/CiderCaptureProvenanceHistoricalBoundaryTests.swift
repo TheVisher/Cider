@@ -156,6 +156,57 @@ struct CiderCaptureProvenanceHistoricalBoundaryTests {
         }
     }
 
+    @Test("new canonical markers classify producing and terminal nonproducing events while legacy stays compatible")
+    func canonicalMarkersClassifyWithoutChangingLegacyCompatibility() throws {
+        let (database, vault) = try makeDatabase()
+        defer { database.close(); try? FileManager.default.removeItem(at: vault) }
+        let createdAt = Date(timeIntervalSince1970: 1_767_225_600)
+        let outcomes: [CaptureEventProvenanceContract.Outcome] = [
+            .completed,
+            .skipped,
+            .failed,
+            .cancelled,
+        ]
+        for (offset, outcome) in outcomes.enumerated() {
+            try insertEvent(
+                id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", offset + 200))!,
+                metadata: CaptureEventProvenanceContract.metadata(
+                    merging: ["PRIVATE_CAPTURE_SENTINEL": "caller-owned-content"],
+                    outcome: outcome
+                ),
+                createdAt: createdAt,
+                into: database
+            )
+        }
+        try insertEvent(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000299")!,
+            metadata: [:],
+            createdAt: createdAt,
+            into: database
+        )
+
+        let service = CiderCaptureProvenanceDiagnosticService(database: database)
+        let diagnostic = try service.diagnose(limit: 20)
+        let report = try service.aggregateUnresolvedGaps(limit: 20, sampleLimit: 10)
+        let groups = report.historicalBoundaries.groups
+
+        #expect(report.totalMissingCount == 5)
+        #expect(diagnostic.counts.explicitFailureOrAbandonment == 3)
+        #expect(diagnostic.counts.unresolvedProvenanceGap == 2)
+        #expect(report.historicalBoundaries.classifiedCount == 2)
+        #expect(groups.reduce(0) { $0 + ($1.provenanceGuarantee == .activeRelationRequired ? $1.count : 0) } == 1)
+        #expect(groups.reduce(0) { $0 + ($1.provenanceGuarantee == .inactiveNonproducing ? $1.count : 0) } == 0)
+        #expect(groups.reduce(0) { $0 + ($1.provenanceGuarantee == .notEvidenced ? $1.count : 0) } == 1)
+        #expect(groups.filter { $0.provenanceGuarantee != .notEvidenced }.allSatisfy {
+            $0.schemaMarkerStatus == .found
+                && $0.versionMarkerStatus == .found
+                && $0.lifecycleMarkerStatus == .found
+                && $0.versionBucket == "1"
+        })
+        #expect(!report.toDictionary().description.contains("PRIVATE_CAPTURE_SENTINEL"))
+        #expect(!report.toDictionary().description.contains("caller-owned-content"))
+    }
+
     @Test("boundary samples and scans are independently capped with explicit saturation")
     func capsAreExplicit() throws {
         let (database, vault) = try makeDatabase()

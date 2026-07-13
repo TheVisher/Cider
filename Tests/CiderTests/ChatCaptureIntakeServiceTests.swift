@@ -625,7 +625,14 @@ struct ChatCaptureIntakeServiceTests {
             #expect(stmt.string(at: 2) == "matrix")
             #expect(stmt.string(at: 3) == "room-attachments")
             #expect(stmt.string(at: 4) == "matrix-event-remote")
-            #expect(stmt.string(at: 5).contains("matrix-test"))
+            let metadata = try #require(DatabaseHelpers.decodeJSON(
+                [String: String].self,
+                from: stmt.string(at: 5)
+            ))
+            #expect(metadata["runtime"] == "matrix-test")
+            #expect(metadata["capture_schema_version"] == "1")
+            #expect(metadata["capture_version"] == "1")
+            #expect(metadata["capture_outcome"] == "skipped")
         }
     }
 

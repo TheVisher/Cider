@@ -596,6 +596,7 @@ struct SecondBrainFoundationTests {
         #expect(capture["kind"] as? String == "journal")
         let provenance = try #require(capture["provenance"] as? [String: Any])
         #expect(provenance["status"] as? String == "recorded")
+        let captureEventID = try #require(provenance["captureEventID"] as? String)
         let metadata = try #require(capture["journalMetadata"] as? [String: Any])
         #expect(metadata["journalDate"] as? String == "2026-06-11")
         let safeNextCommands = try #require(payload["safeNextCommands"] as? [String])
@@ -611,6 +612,22 @@ struct SecondBrainFoundationTests {
             entry["sourceKind"] as? String == "journal"
                 && entry["sourceText"] as? String == "Daily append must not bypass capture provenance."
         })
+
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let statement = try database.prepare("SELECT metadata FROM capture_events WHERE id = ?;")
+        statement.bind(captureEventID, at: 1)
+        #expect(try statement.step())
+        let eventMetadata = try #require(DatabaseHelpers.decodeJSON(
+            [String: String].self,
+            from: statement.string(at: 0)
+        ))
+        #expect(eventMetadata["command"] == "capture.add")
+        #expect(eventMetadata["kind"] == "journal")
+        #expect(eventMetadata["capture_schema_version"] == "1")
+        #expect(eventMetadata["capture_version"] == "1")
+        #expect(eventMetadata["capture_outcome"] == "completed")
     }
 
     @Test("capture add journal keeps source markdown honest while rich display is calm")

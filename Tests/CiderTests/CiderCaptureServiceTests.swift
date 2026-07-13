@@ -126,6 +126,16 @@ struct CiderCaptureServiceTests {
             #expect(stmt.string(at: 4) == "user-7")
             #expect(stmt.string(at: 5) == "Erik")
             #expect(stmt.string(at: 6) == "Ship provenance")
+            let metadata = try #require(DatabaseHelpers.decodeJSON(
+                [String: String].self,
+                from: stmt.string(at: 7)
+            ))
+            #expect(metadata == [
+                "bot": "hermes",
+                "capture_schema_version": "1",
+                "capture_version": "1",
+                "capture_outcome": "completed",
+            ])
 
             let relations = try SecondBrainStore(database: db).outgoingRelations(
                 for: SecondBrainOwnerRef(ownerType: "capture_event", ownerID: eventID.uuidString)

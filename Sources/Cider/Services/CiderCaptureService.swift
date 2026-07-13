@@ -2468,7 +2468,11 @@ final class CiderCaptureService {
             return result
         }
         do {
-            let metadata = DatabaseHelpers.encodeJSON(resolvedContext.metadata) ?? "{}"
+            let eventMetadata = CaptureEventProvenanceContract.metadata(
+                merging: resolvedContext.metadata,
+                outcome: .completed
+            )
+            let metadata = DatabaseHelpers.encodeJSON(eventMetadata) ?? "{}"
             let stmt = try database.prepare("""
                 INSERT INTO capture_events (
                     id, source_kind, surface, channel, channel_id, thread_id, message_id,

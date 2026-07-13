@@ -4526,6 +4526,10 @@ struct CiderCLI {
         metadata["date"] = result.date
         metadata["time"] = result.time
         metadata["appendSource"] = result.source
+        metadata = CaptureEventProvenanceContract.metadata(
+            merging: metadata,
+            outcome: .completed
+        )
         let encodedMetadata = DatabaseHelpers.encodeJSON(metadata) ?? "{}"
 
         do {

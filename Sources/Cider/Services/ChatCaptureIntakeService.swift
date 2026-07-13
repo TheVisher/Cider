@@ -322,7 +322,11 @@ final class ChatCaptureIntakeService {
 
         let eventID = UUID()
         let context = sourceContext(for: input)
-        let metadata = DatabaseHelpers.encodeJSON(reviewMetadata(for: input)) ?? "{}"
+        let eventMetadata = CaptureEventProvenanceContract.metadata(
+            merging: reviewMetadata(for: input),
+            outcome: .skipped
+        )
+        let metadata = DatabaseHelpers.encodeJSON(eventMetadata) ?? "{}"
         try db.withTransaction {
             let stmt = try db.prepare("""
                 INSERT INTO capture_events (
