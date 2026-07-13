@@ -411,6 +411,83 @@ struct CiderCaptureProvenanceCandidateDiscoveryAggregate: Codable, Equatable {
     }
 }
 
+enum CiderCaptureHistoricalMarkerStatus: String, Codable, Equatable {
+    case found
+    case missing
+    case malformed
+    case unsupported
+    case stale
+    case privacySensitive = "privacy_sensitive"
+    case ambiguous
+}
+
+enum CiderCaptureProvenanceGuaranteeStatus: String, Codable, Equatable {
+    case activeRelationRequired = "active_relation_required"
+    case inactiveNonproducing = "inactive_nonproducing"
+    case notEvidenced = "not_evidenced"
+}
+
+struct CiderCaptureProvenanceHistoricalBoundaryGroup: Codable, Equatable {
+    var timeBucket: String
+    var schemaMarkerStatus: CiderCaptureHistoricalMarkerStatus
+    var versionMarkerStatus: CiderCaptureHistoricalMarkerStatus
+    var lifecycleMarkerStatus: CiderCaptureHistoricalMarkerStatus
+    var versionBucket: String?
+    var lifecycleCapability: String
+    var provenanceGuarantee: CiderCaptureProvenanceGuaranteeStatus
+    var reasonCodes: [String]
+    var count: Int
+    var sampleCaptureEventRefs: [String]
+    var sampleRefsTruncated: Bool
+
+    func toDictionary() -> [String: Any] {
+        var result: [String: Any] = [
+            "timeBucket": timeBucket,
+            "schemaMarkerStatus": schemaMarkerStatus.rawValue,
+            "versionMarkerStatus": versionMarkerStatus.rawValue,
+            "lifecycleMarkerStatus": lifecycleMarkerStatus.rawValue,
+            "lifecycleCapability": lifecycleCapability,
+            "provenanceGuarantee": provenanceGuarantee.rawValue,
+            "reasonCodes": reasonCodes,
+            "count": count,
+            "sampleCaptureEventRefs": sampleCaptureEventRefs,
+            "sampleRefsTruncated": sampleRefsTruncated,
+        ]
+        if let versionBucket { result["versionBucket"] = versionBucket }
+        return result
+    }
+}
+
+struct CiderCaptureProvenanceHistoricalBoundaryReport: Codable, Equatable {
+    var readOnly = true
+    var changed = false
+    var classifiedCount: Int
+    var excludedCount: Int
+    var sampledCount: Int
+    var groups: [CiderCaptureProvenanceHistoricalBoundaryGroup]
+    var failClosedCounts: [String: Int]
+    var saturated: Bool
+    var caps: [String: Int]
+    var truthBoundary: String
+    var safeVerificationCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "readOnly": readOnly,
+            "changed": changed,
+            "classifiedCount": classifiedCount,
+            "excludedCount": excludedCount,
+            "sampledCount": sampledCount,
+            "groups": groups.map { $0.toDictionary() },
+            "failClosedCounts": failClosedCounts,
+            "saturated": saturated,
+            "caps": caps,
+            "truthBoundary": truthBoundary,
+            "safeVerificationCommands": safeVerificationCommands,
+        ]
+    }
+}
+
 struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
     var command = "capture.provenance-gap-patterns"
     var readOnly = true
@@ -431,6 +508,7 @@ struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
     var sampledCount: Int
     var groups: [CiderCaptureProvenanceGapPatternGroup]
     var candidateDiscovery: CiderCaptureProvenanceCandidateDiscoveryAggregate
+    var historicalBoundaries: CiderCaptureProvenanceHistoricalBoundaryReport
     var failClosedCounts: [String: Int]
     var truthBoundary: String
     var safeNextCommands: [String]
@@ -458,6 +536,7 @@ struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
             "sampledCount": sampledCount,
             "groups": groups.map { $0.toDictionary() },
             "candidateDiscovery": candidateDiscovery.toDictionary(),
+            "historicalBoundaries": historicalBoundaries.toDictionary(),
             "failClosedCounts": failClosedCounts,
             "truthBoundary": truthBoundary,
             "safeNextCommands": safeNextCommands,
@@ -548,6 +627,32 @@ final class CiderCaptureProvenanceDiagnosticService {
         var candidateCountIsLowerBound = false
         var saturated = false
         var statusCounts: [String: Int] = [:]
+    }
+
+    private struct HistoricalBoundaryEvidence {
+        var schemaMarkerStatus: CiderCaptureHistoricalMarkerStatus
+        var versionMarkerStatus: CiderCaptureHistoricalMarkerStatus
+        var lifecycleMarkerStatus: CiderCaptureHistoricalMarkerStatus
+        var versionBucket: String?
+        var lifecycleCapability: String
+        var provenanceGuarantee: CiderCaptureProvenanceGuaranteeStatus
+        var reasonCodes: [String]
+    }
+
+    private struct HistoricalBoundaryKey: Hashable {
+        var timeBucket: String
+        var schemaMarkerStatus: String
+        var versionMarkerStatus: String
+        var lifecycleMarkerStatus: String
+        var versionBucket: String?
+        var lifecycleCapability: String
+        var provenanceGuarantee: String
+        var reasonCodes: String
+    }
+
+    private struct HistoricalBoundaryAccumulator {
+        var count: Int
+        var captureEventRefs: [String]
     }
 
     private let database: CiderDatabase
@@ -902,19 +1007,26 @@ final class CiderCaptureProvenanceDiagnosticService {
         var candidateEvidenceSaturated = false
         var failClosedCounts: [String: Int] = [:]
         var excludedCount = 0
+        var historicalAccumulators: [HistoricalBoundaryKey: HistoricalBoundaryAccumulator] = [:]
+        var historicalFailClosedCounts: [String: Int] = [:]
+        var historicalExcludedCount = 0
 
         for finding in diagnostic.findings where finding.classification == .unresolvedProvenanceGap {
             guard Self.supportedSourceKinds.contains(finding.sourceKind) else {
                 excludedCount += 1
                 candidateExcludedCount += 1
+                historicalExcludedCount += 1
                 failClosedCounts[CiderCaptureProvenanceExplanationError.unsupportedSourceKind.rawValue, default: 0] += 1
+                historicalFailClosedCounts[CiderCaptureProvenanceExplanationError.unsupportedSourceKind.rawValue, default: 0] += 1
                 continue
             }
             guard let eventID = UUID(uuidString: finding.captureEventID),
                   let event = try captureEvent(id: eventID) else {
                 excludedCount += 1
                 candidateExcludedCount += 1
+                historicalExcludedCount += 1
                 failClosedCounts["capture_event_readback_failed", default: 0] += 1
+                historicalFailClosedCounts["capture_event_readback_failed", default: 0] += 1
                 continue
             }
 
@@ -924,8 +1036,35 @@ final class CiderCaptureProvenanceDiagnosticService {
             } catch let error as CiderCaptureProvenanceExplanationError {
                 excludedCount += 1
                 candidateExcludedCount += 1
+                historicalExcludedCount += 1
                 failClosedCounts[error.rawValue, default: 0] += 1
+                historicalFailClosedCounts[error.rawValue, default: 0] += 1
                 continue
+            }
+
+            let boundaryEvidence = Self.historicalBoundaryEvidence(for: event)
+            for reasonCode in boundaryEvidence.reasonCodes where reasonCode != "supported_historical_boundary_markers" {
+                historicalFailClosedCounts[reasonCode, default: 0] += 1
+            }
+            let boundaryKey = HistoricalBoundaryKey(
+                timeBucket: Self.utcMonthBucket(for: event.createdAt),
+                schemaMarkerStatus: boundaryEvidence.schemaMarkerStatus.rawValue,
+                versionMarkerStatus: boundaryEvidence.versionMarkerStatus.rawValue,
+                lifecycleMarkerStatus: boundaryEvidence.lifecycleMarkerStatus.rawValue,
+                versionBucket: boundaryEvidence.versionBucket,
+                lifecycleCapability: boundaryEvidence.lifecycleCapability,
+                provenanceGuarantee: boundaryEvidence.provenanceGuarantee.rawValue,
+                reasonCodes: boundaryEvidence.reasonCodes.joined(separator: "|")
+            )
+            if var accumulator = historicalAccumulators[boundaryKey] {
+                accumulator.count += 1
+                accumulator.captureEventRefs.append(finding.captureEventRef)
+                historicalAccumulators[boundaryKey] = accumulator
+            } else {
+                historicalAccumulators[boundaryKey] = HistoricalBoundaryAccumulator(
+                    count: 1,
+                    captureEventRefs: [finding.captureEventRef]
+                )
             }
 
             if explanation.checkedEvidence.contains(where: { $0.status == .malformed }) {
@@ -1069,6 +1208,55 @@ final class CiderCaptureProvenanceDiagnosticService {
             truthBoundary: "read_only_bounded_candidate_evidence_aggregate_no_candidate_selection_provenance_inference_or_repair",
             safeVerificationCommands: candidateCommands
         )
+        let sortedBoundaryKeys = historicalAccumulators.keys.sorted { lhs, rhs in
+            let leftCount = historicalAccumulators[lhs]?.count ?? 0
+            let rightCount = historicalAccumulators[rhs]?.count ?? 0
+            if leftCount != rightCount { return leftCount > rightCount }
+            return Self.historicalBoundarySortKey(lhs) < Self.historicalBoundarySortKey(rhs)
+        }
+        var historicalSamplesRemaining = appliedSampleLimit
+        var historicalSampledCount = 0
+        let historicalGroups = sortedBoundaryKeys.compactMap { key -> CiderCaptureProvenanceHistoricalBoundaryGroup? in
+            guard let accumulator = historicalAccumulators[key] else { return nil }
+            let sortedRefs = accumulator.captureEventRefs.sorted()
+            let sampleCount = min(historicalSamplesRemaining, sortedRefs.count)
+            let samples = Array(sortedRefs.prefix(sampleCount))
+            historicalSamplesRemaining -= sampleCount
+            historicalSampledCount += sampleCount
+            return CiderCaptureProvenanceHistoricalBoundaryGroup(
+                timeBucket: key.timeBucket,
+                schemaMarkerStatus: CiderCaptureHistoricalMarkerStatus(rawValue: key.schemaMarkerStatus) ?? .malformed,
+                versionMarkerStatus: CiderCaptureHistoricalMarkerStatus(rawValue: key.versionMarkerStatus) ?? .malformed,
+                lifecycleMarkerStatus: CiderCaptureHistoricalMarkerStatus(rawValue: key.lifecycleMarkerStatus) ?? .malformed,
+                versionBucket: key.versionBucket,
+                lifecycleCapability: key.lifecycleCapability,
+                provenanceGuarantee: CiderCaptureProvenanceGuaranteeStatus(rawValue: key.provenanceGuarantee) ?? .notEvidenced,
+                reasonCodes: key.reasonCodes.split(separator: "|").map(String.init),
+                count: accumulator.count,
+                sampleCaptureEventRefs: samples,
+                sampleRefsTruncated: sortedRefs.count > samples.count
+            )
+        }
+        if diagnostic.omittedCount > 0 {
+            historicalFailClosedCounts["scan_cap_reached"] = diagnostic.omittedCount
+        }
+        let historicalReplayCommands = orderedUnique([replayCommand] + historicalGroups.flatMap(\.sampleCaptureEventRefs).map {
+            "cider-cli capture provenance-gap \($0) --json"
+        })
+        let historicalBoundaries = CiderCaptureProvenanceHistoricalBoundaryReport(
+            classifiedCount: historicalGroups.reduce(0) { $0 + $1.count },
+            excludedCount: historicalExcludedCount,
+            sampledCount: historicalSampledCount,
+            groups: historicalGroups,
+            failClosedCounts: historicalFailClosedCounts,
+            saturated: diagnostic.hasMore || historicalGroups.contains(where: \.sampleRefsTruncated),
+            caps: [
+                "scanEvents": Self.maximumLimit,
+                "sampleCaptureEventRefs": appliedSampleLimit,
+            ],
+            truthBoundary: "source_backed_capture_metadata_markers_only_no_ownership_inference_provenance_creation_or_repair",
+            safeVerificationCommands: historicalReplayCommands
+        )
         return CiderCaptureProvenanceGapAggregateReport(
             requestedLimit: requestedLimit,
             appliedLimit: diagnostic.appliedLimit,
@@ -1086,6 +1274,7 @@ final class CiderCaptureProvenanceDiagnosticService {
             sampledCount: sampledCount,
             groups: groups,
             candidateDiscovery: candidateDiscovery,
+            historicalBoundaries: historicalBoundaries,
             failClosedCounts: failClosedCounts,
             truthBoundary: "read_only_bounded_aggregate_of_persisted_evidence_no_provenance_inference_selection_or_repair",
             safeNextCommands: commands,
@@ -1104,11 +1293,175 @@ final class CiderCaptureProvenanceDiagnosticService {
         ].joined(separator: "\u{1F}")
     }
 
+    private static func historicalBoundarySortKey(_ key: HistoricalBoundaryKey) -> String {
+        [
+            key.timeBucket,
+            key.schemaMarkerStatus,
+            key.versionMarkerStatus,
+            key.lifecycleMarkerStatus,
+            key.versionBucket ?? "",
+            key.lifecycleCapability,
+            key.provenanceGuarantee,
+            key.reasonCodes,
+        ].joined(separator: "\u{1F}")
+    }
+
     private static func utcMonthBucket(for date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let components = calendar.dateComponents([.year, .month], from: date)
         return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
+    }
+
+    private static func historicalBoundaryEvidence(for event: CaptureEventRow) -> HistoricalBoundaryEvidence {
+        guard let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: event.metadataJSON) else {
+            return HistoricalBoundaryEvidence(
+                schemaMarkerStatus: .malformed,
+                versionMarkerStatus: .malformed,
+                lifecycleMarkerStatus: .malformed,
+                versionBucket: nil,
+                lifecycleCapability: "unknown",
+                provenanceGuarantee: .notEvidenced,
+                reasonCodes: ["malformed_capture_metadata"]
+            )
+        }
+
+        let schema = historicalSchemaMarker(in: metadata)
+        let version = historicalVersionMarker(in: metadata)
+        let lifecycle = historicalLifecycleMarker(in: metadata, createdAt: event.createdAt)
+        var reasons = [schema.reasonCode, version.reasonCode, lifecycle.reasonCode]
+        if schema.status == .found, version.status == .found, lifecycle.status == .found {
+            reasons = ["supported_historical_boundary_markers"]
+        }
+
+        let guarantee: CiderCaptureProvenanceGuaranteeStatus
+        if schema.status == .found, version.status == .found, lifecycle.status == .found {
+            switch lifecycle.capability {
+            case "completed_producing_capture": guarantee = .activeRelationRequired
+            case "explicit_nonproducing_capture": guarantee = .inactiveNonproducing
+            default: guarantee = .notEvidenced
+            }
+        } else {
+            guarantee = .notEvidenced
+        }
+
+        return HistoricalBoundaryEvidence(
+            schemaMarkerStatus: schema.status,
+            versionMarkerStatus: version.status,
+            lifecycleMarkerStatus: lifecycle.status,
+            versionBucket: version.value,
+            lifecycleCapability: lifecycle.capability,
+            provenanceGuarantee: guarantee,
+            reasonCodes: reasons.sorted()
+        )
+    }
+
+    private static func historicalSchemaMarker(
+        in metadata: [String: String]
+    ) -> (status: CiderCaptureHistoricalMarkerStatus, reasonCode: String) {
+        let values = markerValues(
+            in: metadata,
+            keys: ["capture_schema_version", "captureSchemaVersion", "provenance_schema_version", "provenanceSchemaVersion"]
+        )
+        guard !values.isEmpty else { return (.missing, "missing_schema_marker") }
+        guard !values.contains(where: isPrivacySensitiveMarker) else {
+            return (.privacySensitive, "privacy_sensitive_schema_marker")
+        }
+        let distinct = Set(values)
+        guard distinct.count == 1, let value = distinct.first else {
+            return (.ambiguous, "ambiguous_schema_marker")
+        }
+        guard let schemaVersion = Int(value), String(schemaVersion) == value, schemaVersion > 0 else {
+            return (.malformed, "malformed_schema_marker")
+        }
+        guard schemaVersion == 1 else { return (.unsupported, "unsupported_schema_marker") }
+        return (.found, "supported_schema_marker")
+    }
+
+    private static func historicalVersionMarker(
+        in metadata: [String: String]
+    ) -> (status: CiderCaptureHistoricalMarkerStatus, value: String?, reasonCode: String) {
+        let values = markerValues(
+            in: metadata,
+            keys: ["app_version", "appVersion", "capture_version", "captureVersion", "source_version", "sourceVersion"]
+        )
+        guard !values.isEmpty else { return (.missing, nil, "missing_version_marker") }
+        guard !values.contains(where: isPrivacySensitiveMarker) else {
+            return (.privacySensitive, nil, "privacy_sensitive_version_marker")
+        }
+        let distinct = Set(values)
+        guard distinct.count == 1, let value = distinct.first else {
+            return (.ambiguous, nil, "ambiguous_version_marker")
+        }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".+-_"))
+        guard !value.isEmpty, value.count <= 32, value.unicodeScalars.allSatisfy(allowed.contains) else {
+            return (.malformed, nil, "malformed_version_marker")
+        }
+        return (.found, value, "supported_version_marker")
+    }
+
+    private static func historicalLifecycleMarker(
+        in metadata: [String: String],
+        createdAt: Date
+    ) -> (status: CiderCaptureHistoricalMarkerStatus, capability: String, reasonCode: String) {
+        let values = markerValues(in: metadata, keys: ["capture_outcome", "outcome"])
+        if values.isEmpty {
+            let producedTypes = markerValues(in: metadata, keys: ["produced_item_type", "producedItemType"])
+            let producedIDs = markerValues(in: metadata, keys: ["produced_item_id", "producedItemID"])
+            if !producedTypes.isEmpty || !producedIDs.isEmpty {
+                guard producedTypes.count == 1, producedIDs.count == 1 else {
+                    return (.ambiguous, "unknown", "ambiguous_lifecycle_marker")
+                }
+                guard !isPrivacySensitiveMarker(producedTypes[0]), !isPrivacySensitiveMarker(producedIDs[0]) else {
+                    return (.privacySensitive, "unknown", "privacy_sensitive_lifecycle_marker")
+                }
+                return (.found, "completed_producing_capture", "exact_produced_item_lifecycle_marker")
+            }
+            if metadata["review_reason"] == "unsupported_attachment" {
+                return (.found, "explicit_nonproducing_capture", "explicit_nonproducing_lifecycle_marker")
+            }
+            return (.missing, "unknown", "missing_lifecycle_marker")
+        }
+        guard !values.contains(where: isPrivacySensitiveMarker) else {
+            return (.privacySensitive, "unknown", "privacy_sensitive_lifecycle_marker")
+        }
+        let normalized = Set(values.map { $0.lowercased() })
+        guard normalized.count == 1, let outcome = normalized.first else {
+            return (.ambiguous, "unknown", "ambiguous_lifecycle_marker")
+        }
+        let completed: Set<String> = ["completed", "created", "success", "succeeded", "recorded", "produced"]
+        let nonproducing: Set<String> = [
+            "duplicate", "deduplicated", "existing_item", "failed", "failure", "error",
+            "abandoned", "cancelled", "canceled", "dismissed", "skipped",
+        ]
+        let pending: Set<String> = ["pending", "queued", "in_progress", "processing"]
+        if completed.contains(outcome) {
+            return (.found, "completed_producing_capture", "completed_lifecycle_marker")
+        }
+        if nonproducing.contains(outcome) {
+            return (.found, "explicit_nonproducing_capture", "explicit_nonproducing_lifecycle_marker")
+        }
+        if pending.contains(outcome) {
+            if Date().timeIntervalSince(createdAt) > 86_400 {
+                return (.stale, "pending_capture", "stale_lifecycle_marker")
+            }
+            return (.found, "pending_capture", "pending_lifecycle_marker")
+        }
+        return (.unsupported, "unknown", "unsupported_lifecycle_marker")
+    }
+
+    private static func markerValues(in metadata: [String: String], keys: [String]) -> [String] {
+        keys.compactMap { key in
+            guard let value = metadata[key] else { return nil }
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private static func isPrivacySensitiveMarker(_ value: String) -> Bool {
+        let normalized = value.uppercased()
+        return ["PRIVATE", "SECRET", "PASSWORD", "CREDENTIAL", "TOKEN", "SENTINEL"].contains {
+            normalized.contains($0)
+        }
     }
 
     private static func safeVersionBucket(metadataJSON: String) -> String? {
@@ -1119,6 +1472,7 @@ final class CiderCaptureProvenanceDiagnosticService {
         let candidate = versionKeys.compactMap { metadata[$0] }.first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let candidate, !candidate.isEmpty, candidate.count <= 32 else { return nil }
+        guard !isPrivacySensitiveMarker(candidate) else { return nil }
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".+-_"))
         guard candidate.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
         return candidate
