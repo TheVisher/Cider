@@ -104,7 +104,7 @@ struct AgentRoomsSessionModelTests {
         #expect(mainWindow.contains("agentRoomsSession: agentRoomsSession"))
         #expect(contentArea.contains("session: agentRoomsSession"))
         #expect(!contentArea.contains("AgentRoomsLiveChatModel(transport:"))
-        #expect(sessionModel.contains("AgentRoomsTestChatPersistence"))
+        #expect(sessionModel.contains("AgentRoomsConversationPersistence"))
         #expect(appDelegate.contains("restoreDurableTestChat"))
         for forbidden in ["CiderVault", "UserDefaults", "FileManager", "JSONL"] {
             #expect(!sessionModel.contains(forbidden))

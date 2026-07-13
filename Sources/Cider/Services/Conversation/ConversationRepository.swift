@@ -388,6 +388,57 @@ final class ConversationRepository {
         return try statement.step() ? try decodeTurn(statement) : nil
     }
 
+    /// Attaches provider-neutral execution identity to a nonterminal turn without
+    /// changing its stable Cider UUID or sequence. Existing runtime/source identity
+    /// may only be filled once or replayed exactly.
+    func bindActiveTurnExecution(
+        id: UUID,
+        runtimeBindingID: UUID?,
+        source: ConversationSourceIdentity?,
+        metadata: [String: String],
+        at date: Date
+    ) throws -> ConversationTurn {
+        try database.withTransaction {
+            let current = try requiredTurn(id: id)
+            guard !current.status.isTerminal else {
+                throw ConversationRepositoryError.integrity("Terminal conversation turn execution identity is immutable.")
+            }
+            if let runtimeBindingID {
+                let binding = try requiredBinding(id: runtimeBindingID)
+                guard binding.roomID == current.roomID else {
+                    throw ConversationRepositoryError.integrity("Turn runtime binding belongs to another room.")
+                }
+            }
+            try validateSource(source)
+            guard current.runtimeBindingID == nil || current.runtimeBindingID == runtimeBindingID else {
+                throw ConversationRepositoryError.integrity("Conversation turn runtime binding is already assigned.")
+            }
+            guard current.source == nil || current.source == source else {
+                throw ConversationRepositoryError.integrity("Conversation turn source identity is already assigned.")
+            }
+            if let source, let existing = try turn(source: source), existing.id != current.id {
+                throw ConversationRepositoryError.integrity("Turn source identity already belongs to another turn.")
+            }
+
+            let statement = try database.prepare("""
+                UPDATE conversation_turns
+                SET runtime_binding_id = COALESCE(runtime_binding_id, ?),
+                    source_namespace = COALESCE(source_namespace, ?),
+                    source_turn_id = COALESCE(source_turn_id, ?),
+                    metadata_json = ?, updated_at = ?
+                WHERE id = ?;
+                """)
+            statement.bind(runtimeBindingID?.uuidString, at: 1)
+                .bind(source?.namespace, at: 2)
+                .bind(source?.id, at: 3)
+                .bind(DatabaseHelpers.encodeJSON(metadata) ?? "{}", at: 4)
+                .bind(DatabaseHelpers.encode(date), at: 5)
+                .bind(id.uuidString, at: 6)
+            try statement.step()
+            return try requiredTurn(id: id)
+        }
+    }
+
     func turns(roomID: UUID) throws -> [ConversationTurn] {
         let statement = try database.prepare("""
             SELECT id, room_id, sequence, runtime_binding_id,

@@ -302,6 +302,59 @@ struct ConversationRepositoryTests {
         }
     }
 
+    @Test("Active turn execution binding preserves room identity and becomes immutable at terminal")
+    func activeTurnExecutionBinding() throws {
+        try withRepository { _, repository in
+            let room = try repository.createRoom(roomDraft(title: "Stable room"))
+            let binding = try repository.upsertRuntimeBinding(.init(
+                roomID: room.id,
+                runtimeID: "hermes",
+                transportID: "runs-api",
+                sourceNamespace: "hermes.runs.v1",
+                externalSessionID: "replaceable-session"
+            ))
+            let turn = try repository.beginTurn(.init(
+                roomID: room.id,
+                status: .pending,
+                metadata: ["attempt": "local"]
+            ))
+            let source = ConversationSourceIdentity(namespace: "hermes.runs.v1", id: "run-one")
+            let bound = try repository.bindActiveTurnExecution(
+                id: turn.id,
+                runtimeBindingID: binding.id,
+                source: source,
+                metadata: ["attempt": "accepted", "run": "run-one"],
+                at: Date(timeIntervalSince1970: 2_000)
+            )
+            let replay = try repository.bindActiveTurnExecution(
+                id: turn.id,
+                runtimeBindingID: binding.id,
+                source: source,
+                metadata: bound.metadata,
+                at: Date(timeIntervalSince1970: 2_001)
+            )
+
+            #expect(bound.id == turn.id)
+            #expect(bound.roomID == room.id)
+            #expect(bound.runtimeBindingID == binding.id)
+            #expect(bound.source == source)
+            #expect(replay.roomID == room.id)
+            #expect(try repository.room(id: room.id)?.id == room.id)
+
+            _ = try repository.transitionTurn(id: turn.id, to: .completed, at: Date(timeIntervalSince1970: 3_000))
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.bindActiveTurnExecution(
+                    id: turn.id,
+                    runtimeBindingID: binding.id,
+                    source: source,
+                    metadata: ["attempt": "rewritten"],
+                    at: Date(timeIntervalSince1970: 4_000)
+                )
+            }
+            #expect(try repository.turn(id: turn.id)?.status == .completed)
+        }
+    }
+
     @Test("Source identity is namespaced globally across rooms")
     func sourceIdentityNamespaceAndRoomRules() throws {
         try withRepository { _, repository in

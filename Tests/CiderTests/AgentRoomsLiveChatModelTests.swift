@@ -571,7 +571,7 @@ struct AgentRoomsLiveChatModelTests {
         for required in [
             "Start Cider Test Chat",
             "Live continuation",
-            "TextField(\"Message Hermes in Cider Test Chat\"",
+            "TextField(composerPlaceholder(roomID: roomID)",
             "Button(\"Send\")",
             ".onSubmit",
             "Shift-Return adds a line",

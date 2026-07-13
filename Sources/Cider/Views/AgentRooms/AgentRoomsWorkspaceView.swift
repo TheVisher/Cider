@@ -102,12 +102,18 @@ struct AgentRoomsWorkspaceView: View {
         .background(CiderColors.surfaceHighlight)
         .task {
             await reload()
+            if session.selectedRoomID == liveChat.activeRoom?.id {
+                await liveChat.refreshTransportReadiness()
+            }
             if session.restoreRecoveredDraftIfNeeded() {
                 focusedRegion = .composer
             }
         }
         .onChange(of: state) { _, newState in
-            if let testRoomID = visibleTestRoom?.id, selectedRoomID == testRoomID {
+            if case .loading = newState { return }
+            if let testRoomID = visibleLiveRoom?.id,
+               liveChat.testRoom?.id == testRoomID,
+               selectedRoomID == testRoomID {
                 return
             }
             if case .loaded(_, let rooms, let storedSelection) = newState {
@@ -132,9 +138,23 @@ struct AgentRoomsWorkspaceView: View {
                 session.selectRoom(id: nil, persistIfCanonical: false)
             }
         }
-        .onChange(of: liveChat.turnState) { _, turnState in
-            guard turnState == .failed else { return }
-            if session.restoreRecoveredDraftIfNeeded() { focusedRegion = .composer }
+        .onChange(of: liveChat.turnState) { previousState, turnState in
+            if turnState == .failed,
+               session.restoreRecoveredDraftIfNeeded() { focusedRegion = .composer }
+            let wasInFlight = previousState == .sending
+                || previousState == .streaming
+                || previousState == .cancelling
+            if wasInFlight && (turnState == .completed || turnState == .failed) {
+                Task { await reload() }
+            }
+        }
+        .onChange(of: session.selectedRoomID) { _, selected in
+            guard selected == liveChat.activeRoom?.id else { return }
+            Task { await liveChat.refreshTransportReadiness() }
+        }
+        .onChange(of: liveChat.activeRoom?.id) { _, activeRoomID in
+            guard activeRoomID == session.selectedRoomID else { return }
+            Task { await liveChat.refreshTransportReadiness() }
         }
         .alert("Rename Conversation", isPresented: Binding(
             get: { renameRoom != nil },
@@ -298,10 +318,10 @@ struct AgentRoomsWorkspaceView: View {
 
     @ViewBuilder
     private var workspaceBody: some View {
-        if let testRoom = visibleTestRoom {
+        if let liveRoom = visibleLiveRoom {
             let legacy = legacyRoomsAndNotice
-            let rooms = [testRoom] + legacy.rooms.filter { $0.id != testRoom.id }
-            let selected = rooms.first(where: { $0.id == selectedRoomID }) ?? testRoom
+            let rooms = [liveRoom] + legacy.rooms.filter { $0.id != liveRoom.id }
+            let selected = rooms.first(where: { $0.id == selectedRoomID }) ?? liveRoom
             VStack(spacing: 0) {
                 if let blocked = legacyBlockedSummary {
                     legacyBlockedBanner(title: blocked.title, detail: blocked.detail)
@@ -318,8 +338,8 @@ struct AgentRoomsWorkspaceView: View {
         }
     }
 
-    private var visibleTestRoom: AgentRoom? {
-        guard request.scope == .active, let room = liveChat.testRoom else { return nil }
+    private var visibleLiveRoom: AgentRoom? {
+        guard request.scope == .active, let room = liveChat.activeRoom else { return nil }
         let query = request.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return room }
         let matchesTitle = room.title.localizedCaseInsensitiveContains(query)
@@ -1244,13 +1264,13 @@ struct AgentRoomsWorkspaceView: View {
                 .foregroundColor(CiderColors.tertiary)
                 .accessibilityLabel("Hermes turn \(liveTurnStatusLabel)")
             HStack(alignment: .bottom, spacing: Spacing.sm) {
-                TextField("Message Hermes in Cider Test Chat", text: composerTextBinding, axis: .vertical)
+                TextField(composerPlaceholder(roomID: roomID), text: composerTextBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .focused($focusedRegion, equals: .composer)
                     .disabled(!enabled)
                     .onSubmit { submitComposer(roomID: roomID) }
-                    .accessibilityLabel("Message Hermes in Cider Test Chat")
+                    .accessibilityLabel(composerPlaceholder(roomID: roomID))
                     .background(AgentRoomsComposerDraftBridge { session.composerText = $0 })
 
                 if liveChat.activeRunCanBeCancelled {
@@ -1286,6 +1306,11 @@ struct AgentRoomsWorkspaceView: View {
         case .failed: "Failed"
         case .completed: "Completed"
         }
+    }
+
+    private func composerPlaceholder(roomID: String) -> String {
+        if roomID == liveChat.testRoom?.id { return "Message Hermes in Cider Test Chat" }
+        return "Message Hermes in \(liveChat.activeRoom?.title ?? "this conversation")"
     }
 
     private func submitComposer(roomID: String) {
@@ -1343,7 +1368,10 @@ struct AgentRoomsWorkspaceView: View {
             request = .init(scope: .active)
             searchText = ""
             session.selectRoom(id: room.id.uuidString, persistIfCanonical: true)
-            Task { await reload() }
+            Task {
+                await liveChat.refreshTransportReadiness()
+                await reload()
+            }
         } catch {
             actionError = error.localizedDescription
         }
@@ -1486,7 +1514,7 @@ private final class AgentRoomsComposerDraftBridgeView: NSView {
 
     private static func findComposerField(in view: NSView) -> NSTextField? {
         if let field = view as? NSTextField,
-           field.placeholderString == "Message Hermes in Cider Test Chat" {
+           field.placeholderString?.hasPrefix("Message Hermes in ") == true {
             return field
         }
         for subview in view.subviews {

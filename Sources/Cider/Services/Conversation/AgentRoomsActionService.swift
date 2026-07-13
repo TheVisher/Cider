@@ -27,6 +27,10 @@ final class AgentRoomsActionService: AgentRoomsActionServicing {
         let timestamp = now()
         return try repository.createRoom(.init(
             title: try normalizedTitle(title),
+            metadata: [
+                "authority": AgentRoomsConversationPersistence.nativeRoomAuthority,
+                "schema_version": "1",
+            ],
             createdAt: timestamp,
             updatedAt: timestamp
         ))

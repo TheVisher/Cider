@@ -1,0 +1,514 @@
+import Foundation
+import Testing
+@testable import Cider
+
+@Suite("Agent Rooms Canonical Conversation Tests")
+@MainActor
+struct AgentRoomsCanonicalConversationTests {
+    @Test("an arbitrary active canonical room can become the live conversation")
+    func arbitraryCanonicalRoomActivation() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Daily conversation")
+            let model = AgentRoomsLiveChatModel(
+                transport: CanonicalConversationUnavailableTransport(),
+                turnCoordinator: HermesTurnCoordinator(),
+                persistence: AgentRoomsConversationPersistence(
+                    database: database,
+                    repository: repository
+                )
+            )
+
+            let session = AgentRoomsSessionModel(liveChat: model)
+            session.selectRoom(id: room.id.uuidString, persistIfCanonical: true)
+            #expect(session.selectedRoomID == room.id.uuidString)
+            #expect(model.activeRoom?.id == room.id.uuidString)
+            #expect(model.activeRoom?.title == "Daily conversation")
+            #expect(model.activeRoom?.continuity == .liveContinuation)
+
+            _ = try AgentRoomsActionService(repository: repository)
+                .renameConversation(id: room.id, title: "Renamed daily conversation")
+            session.selectRoom(id: room.id.uuidString, persistIfCanonical: true)
+            #expect(model.activeRoom?.id == room.id.uuidString)
+            #expect(model.activeRoom?.title == "Renamed daily conversation")
+        }
+    }
+
+    @Test("arbitrary room streams in order persists and continues after database reopen and runtime rotation")
+    func sendStreamReopenAndRotateRuntime() async throws {
+        let url = temporaryDatabaseURL()
+        defer { removeDatabase(at: url) }
+
+        let firstDatabase = CiderDatabase()
+        try firstDatabase.open(at: url)
+        let firstRepository = ConversationRepository(database: firstDatabase)
+        let room = try AgentRoomsActionService(repository: firstRepository)
+            .createConversation(title: "Daily conversation")
+        let firstTransport = CanonicalConversationScriptTransport(scripts: [
+            .success(runID: "run-one", sessionID: "session-one", chunks: ["First", " answer"]),
+        ])
+        let firstModel = makeModel(
+            database: firstDatabase,
+            repository: firstRepository,
+            transport: firstTransport
+        )
+        #expect(firstModel.activateCanonicalRoom(id: room.id))
+        await firstModel.refreshTransportReadiness()
+        await firstModel.send("First question", selectedRoomID: room.id.uuidString)
+
+        #expect(firstModel.activeRoom?.id == room.id.uuidString)
+        #expect(firstModel.activeRoom?.transcript.messages.map(\.body) == ["First question", "First answer"])
+        #expect(firstModel.activeRoom?.transcript.receipt?.runIdentity == "run-one")
+        #expect(try firstRepository.turns(roomID: room.id).map(\.status) == [.completed])
+        #expect(try firstRepository.messages(roomID: room.id).map(\.sequence) == [1, 2])
+        #expect(try firstRepository.messages(roomID: room.id).last?.sourceCreatedAt == Date(timeIntervalSince1970: 1_805_000_000))
+        #expect(try firstRepository.bindings(roomID: room.id).compactMap(\.externalSessionID) == ["session-one"])
+        firstDatabase.close()
+
+        let reopenedDatabase = CiderDatabase()
+        try reopenedDatabase.open(at: url)
+        defer { reopenedDatabase.close() }
+        let reopenedRepository = ConversationRepository(database: reopenedDatabase)
+        let rotatedTransport = CanonicalConversationScriptTransport(scripts: [
+            .success(runID: "run-two", sessionID: "session-two", chunks: ["Second ", "answer"]),
+        ])
+        let reconstructed = makeModel(
+            database: reopenedDatabase,
+            repository: reopenedRepository,
+            transport: rotatedTransport
+        )
+        #expect(reconstructed.activateCanonicalRoom(id: room.id))
+        #expect(reconstructed.activeRoom?.transcript.messages.map(\.body) == ["First question", "First answer"])
+        await reconstructed.refreshTransportReadiness()
+        await reconstructed.send("Second question", selectedRoomID: room.id.uuidString)
+
+        #expect(reconstructed.activeRoom?.id == room.id.uuidString)
+        #expect(reconstructed.activeRoom?.transcript.messages.map(\.body) == [
+            "First question", "First answer", "Second question", "Second answer",
+        ])
+        #expect(try reopenedRepository.turns(roomID: room.id).map(\.status) == [.completed, .completed])
+        #expect(try reopenedRepository.messages(roomID: room.id).map(\.sequence) == [1, 2, 3, 4])
+        #expect(try reopenedRepository.bindings(roomID: room.id).compactMap(\.externalSessionID) == [
+            "session-one", "session-two",
+        ])
+        #expect(try reopenedRepository.room(id: room.id)?.id == room.id)
+        #expect(await rotatedTransport.observedRoomIDs() == [room.id])
+        #expect(await rotatedTransport.observedSessionIDs() == ["session-one"])
+        #expect(await rotatedTransport.observedExistingMessageBodies() == [["First question", "First answer"]])
+        #expect(await rotatedTransport.observedCursorTimestamps() == [Date(timeIntervalSince1970: 1_805_000_000)])
+        #expect(try reopenedDatabase.integrityCheck().isHealthy)
+    }
+
+    @Test("accepted cancellation persists one user and partial truth and rejects late completion")
+    func cancellationPersistsPartialAndDropsLateOutput() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Cancellation room")
+            let transport = CanonicalConversationGateTransport(
+                runID: "run-cancel",
+                sessionID: "session-cancel",
+                finalAnswer: "Late terminal output"
+            )
+            let model = makeModel(database: database, repository: repository, transport: transport)
+            #expect(model.activateCanonicalRoom(id: room.id))
+            await model.refreshTransportReadiness()
+
+            let send = Task { await model.send("Stop this", selectedRoomID: room.id.uuidString) }
+            await transport.waitUntilStarted()
+            await transport.emit(.messageDelta("Accepted partial"))
+            await model.cancelActiveSend()
+            await transport.release()
+            await send.value
+
+            let turns = try repository.turns(roomID: room.id)
+            let messages = try repository.messages(roomID: room.id)
+            #expect(turns.map(\.status) == [.cancelled])
+            #expect(messages.map(\.role) == ["user", "assistant"])
+            #expect(messages.map(\.contentText) == ["Stop this", "Accepted partial"])
+            #expect(messages[1].status == .incomplete)
+            #expect(messages[1].finishReason == .cancelled)
+            #expect(!messages.contains(where: { $0.contentText == "Late terminal output" }))
+            #expect(await transport.stoppedRunIDs() == ["run-cancel"])
+
+            let reconstructed = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+            #expect(reconstructed.activateCanonicalRoom(id: room.id))
+            #expect(reconstructed.activeRoom?.transcript.messages.map(\.body) == ["Stop this", "Accepted partial"])
+            #expect(reconstructed.activeRoom?.transcript.messages.first?.canRetry == false)
+            #expect(reconstructed.activeRoom?.transcript.receipt?.status == .cancelled)
+            #expect(reconstructed.activeRoom?.transcript.receipt?.runIdentity == "run-cancel")
+        }
+    }
+
+    @Test("pre-accept failure retry reuses one accepted user identity")
+    func retryDoesNotDuplicateAcceptedUser() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Retry room")
+            let transport = CanonicalConversationScriptTransport(scripts: [
+                .preAcceptFailure,
+                .success(runID: "run-retry", sessionID: "session-retry", chunks: ["Recovered"]),
+            ])
+            let model = makeModel(database: database, repository: repository, transport: transport)
+            #expect(model.activateCanonicalRoom(id: room.id))
+            await model.refreshTransportReadiness()
+            await model.send("Retry this", selectedRoomID: room.id.uuidString)
+
+            let clientID = try #require(model.activeRoom?.transcript.messages.first?.id)
+            #expect(model.activeRoom?.transcript.messages.first?.canRetry == true)
+            await model.retry(clientMessageID: clientID, selectedRoomID: room.id.uuidString)
+
+            let turns = try repository.turns(roomID: room.id)
+            let messages = try repository.messages(roomID: room.id)
+            #expect(turns.map(\.status) == [.failed, .completed])
+            #expect(messages.filter { $0.role == "user" }.count == 1)
+            #expect(messages.filter { $0.role == "assistant" }.count == 1)
+            #expect(messages.map(\.contentText) == ["Retry this", "Recovered"])
+            #expect(model.activeRoom?.transcript.messages.map(\.body) == ["Retry this", "Recovered"])
+            #expect(await transport.sentTexts() == ["Retry this", "Retry this"])
+
+            let reconstructed = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+            #expect(reconstructed.activateCanonicalRoom(id: room.id))
+            #expect(reconstructed.activeRoom?.transcript.messages.map(\.body) == ["Retry this", "Recovered"])
+            #expect(reconstructed.activeRoom?.transcript.messages.first?.deliveryState == .sent)
+            #expect(reconstructed.activeRoom?.transcript.receipt?.runIdentity == "run-retry")
+        }
+    }
+
+    @Test("legacy and archived rooms remain fail-closed and byte-logically unchanged")
+    func blockedRoomOwnershipIsNotActivated() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let legacy = try repository.createRoom(.init(
+                stableKey: "legacy.private.room",
+                title: "Private legacy room",
+                metadata: ["authority": "legacy-authoritative"]
+            ))
+            let archived = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Archived native room")
+            try repository.setLifecycle(roomID: archived.id, state: .archived, at: Date())
+            let legacyBefore = try repository.room(id: legacy.id)
+            let archivedBefore = try repository.room(id: archived.id)
+            let model = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+
+            #expect(!model.activateCanonicalRoom(id: legacy.id))
+            #expect(!model.activateCanonicalRoom(id: archived.id))
+            #expect(model.activeRoom == nil)
+            #expect(try repository.room(id: legacy.id) == legacyBefore)
+            #expect(try repository.room(id: archived.id) == archivedBefore)
+            #expect(try repository.turns(roomID: legacy.id).isEmpty)
+            #expect(try repository.messages(roomID: legacy.id).isEmpty)
+            #expect(try database.integrityCheck().isHealthy)
+        }
+    }
+
+    @Test("conflicting accepted run events cannot attach terminal output")
+    func conflictingRunDoesNotPersistTerminalOutput() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Integrity room")
+            let transport = CanonicalConversationScriptTransport(scripts: [
+                .conflictingCompletion(
+                    runID: "run-authoritative",
+                    conflictingRunID: "run-conflict",
+                    sessionID: "session-integrity",
+                    answer: "Must not persist"
+                ),
+            ])
+            let model = makeModel(database: database, repository: repository, transport: transport)
+            #expect(model.activateCanonicalRoom(id: room.id))
+            await model.refreshTransportReadiness()
+            await model.send("Check integrity", selectedRoomID: room.id.uuidString)
+
+            #expect(try repository.turns(roomID: room.id).map(\.status) == [.failed])
+            #expect(try repository.messages(roomID: room.id).map(\.contentText) == ["Check integrity"])
+            #expect(model.activeRoom?.transcript.messages.map(\.body) == ["Check integrity"])
+            #expect(model.activeRoom?.transcript.receipt?.status == .failed)
+            #expect(model.activeRoom?.transcript.receipt?.runIdentity == "run-authoritative")
+        }
+    }
+
+    @Test("shared canonical restore rejects malformed durable message state")
+    func malformedCanonicalHistoryFailsClosed() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Corruption check")
+            let writer = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationScriptTransport(scripts: [
+                    .success(runID: "run-corrupt", sessionID: "session-corrupt", chunks: ["Before corruption"]),
+                ])
+            )
+            #expect(writer.activateCanonicalRoom(id: room.id))
+            await writer.refreshTransportReadiness()
+            await writer.send("Persist safely", selectedRoomID: room.id.uuidString)
+            try database.runSQL("UPDATE conversation_messages SET status = 'streaming' WHERE role = 'assistant';")
+
+            let reader = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationUnavailableTransport()
+            )
+            #expect(!reader.activateCanonicalRoom(id: room.id))
+            #expect(reader.activeRoom == nil)
+            #expect(try database.integrityCheck().isHealthy)
+        }
+    }
+
+    private func makeModel(
+        database: CiderDatabase,
+        repository: ConversationRepository,
+        transport: some HermesBridgeTransport
+    ) -> AgentRoomsLiveChatModel {
+        AgentRoomsLiveChatModel(
+            transport: transport,
+            turnCoordinator: HermesTurnCoordinator(),
+            savedBookmarkMatches: { _ in [] },
+            persistence: AgentRoomsConversationPersistence(database: database, repository: repository)
+        )
+    }
+
+    private func withTemporaryConversationDatabase<T>(
+        _ body: (CiderDatabase, ConversationRepository) async throws -> T
+    ) async throws -> T {
+        let url = temporaryDatabaseURL()
+        let database = CiderDatabase()
+        try database.open(at: url)
+        defer {
+            database.close()
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(atPath: url.path + "-wal")
+            try? FileManager.default.removeItem(atPath: url.path + "-shm")
+        }
+        return try await body(database, ConversationRepository(database: database))
+    }
+
+    private func temporaryDatabaseURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-canonical-conversation-\(UUID().uuidString).db")
+    }
+
+    private func removeDatabase(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(atPath: url.path + "-wal")
+        try? FileManager.default.removeItem(atPath: url.path + "-shm")
+    }
+}
+
+private actor CanonicalConversationUnavailableTransport: HermesBridgeTransport {
+    func availability() async -> HermesBridgeAvailability { .unavailable("test") }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult {
+        throw CancellationError()
+    }
+
+    func stop(runID: String) async throws {}
+}
+
+private enum CanonicalConversationScript: Sendable {
+    case preAcceptFailure
+    case success(runID: String, sessionID: String, chunks: [String])
+    case conflictingCompletion(runID: String, conflictingRunID: String, sessionID: String, answer: String)
+}
+
+private enum CanonicalConversationTransportError: Error, Sendable {
+    case disconnected
+}
+
+private actor CanonicalConversationScriptTransport: HermesBridgeTransport {
+    private var scripts: [CanonicalConversationScript]
+    private var roomIDs: [UUID] = []
+    private var sessionIDs: [String] = []
+    private var existingMessageBodies: [[String]] = []
+    private var cursorTimestamps: [Date?] = []
+    private var texts: [String] = []
+
+    init(scripts: [CanonicalConversationScript]) { self.scripts = scripts }
+
+    func availability() async -> HermesBridgeAvailability { .apiRuns }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult {
+        roomIDs.append(state.conversationID)
+        sessionIDs.append(state.activeRuntimeSessionID)
+        existingMessageBodies.append(existingMessages.map(\.content))
+        cursorTimestamps.append(state.lastSyncedTimestamp)
+        texts.append(text)
+        guard !scripts.isEmpty else { throw CanonicalConversationTransportError.disconnected }
+        switch scripts.removeFirst() {
+        case .preAcceptFailure:
+            throw CanonicalConversationTransportError.disconnected
+        case .success(let runID, let sessionID, let chunks):
+            await onEvent?(.runStarted(runID))
+            for chunk in chunks { await onEvent?(.messageDelta(chunk)) }
+            let answer = chunks.joined()
+            await onEvent?(.completed(output: answer))
+            return .init(completion: canonicalCompletion(
+                state: state,
+                existingMessages: existingMessages,
+                text: text,
+                answer: answer,
+                runID: runID,
+                sessionID: sessionID
+            ))
+        case .conflictingCompletion(let runID, let conflictingRunID, let sessionID, let answer):
+            await onEvent?(.runStarted(runID))
+            await onEvent?(.runStarted(conflictingRunID))
+            return .init(completion: canonicalCompletion(
+                state: state,
+                existingMessages: existingMessages,
+                text: text,
+                answer: answer,
+                runID: runID,
+                sessionID: sessionID
+            ))
+        }
+    }
+
+    func stop(runID: String) async throws {}
+    func observedRoomIDs() -> [UUID] { roomIDs }
+    func observedSessionIDs() -> [String] { sessionIDs }
+    func observedExistingMessageBodies() -> [[String]] { existingMessageBodies }
+    func observedCursorTimestamps() -> [Date?] { cursorTimestamps }
+    func sentTexts() -> [String] { texts }
+}
+
+private actor CanonicalConversationGateTransport: HermesBridgeTransport {
+    let runID: String
+    let sessionID: String
+    let finalAnswer: String
+    private var state: HermesConversationState?
+    private var existingMessages: [AIAssistantMessage] = []
+    private var text = ""
+    private var handler: (@Sendable (HermesRunEvent) async -> Void)?
+    private var started = false
+    private var released = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var stopped: [String] = []
+
+    init(runID: String, sessionID: String, finalAnswer: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.finalAnswer = finalAnswer
+    }
+
+    func availability() async -> HermesBridgeAvailability { .apiRuns }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult {
+        self.state = state
+        self.existingMessages = existingMessages
+        self.text = text
+        handler = onEvent
+        started = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+        await onEvent?(.runStarted(runID))
+        if !released { await withCheckedContinuation { releaseWaiters.append($0) } }
+        return .init(completion: canonicalCompletion(
+            state: state,
+            existingMessages: existingMessages,
+            text: text,
+            answer: finalAnswer,
+            runID: runID,
+            sessionID: sessionID
+        ))
+    }
+
+    func stop(runID: String) async throws { stopped.append(runID) }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func emit(_ event: HermesRunEvent) async { await handler?(event) }
+
+    func release() {
+        released = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+
+    func stoppedRunIDs() -> [String] { stopped }
+}
+
+private func canonicalCompletion(
+    state: HermesConversationState,
+    existingMessages: [AIAssistantMessage],
+    text: String,
+    answer: String,
+    runID: String,
+    sessionID: String
+) -> HermesRunCompletionEnvelope {
+    let timestamp = Date(timeIntervalSince1970: 1_805_000_000 + Double(existingMessages.count))
+    let userSourceID = "hermes-run:\(runID):user"
+    let assistantSourceID = "hermes-run:\(runID):assistant"
+    let user = AIAssistantMessage(
+        role: .user,
+        content: text,
+        timestamp: timestamp,
+        sourceID: userSourceID,
+        sourceSessionID: sessionID,
+        sourceName: "Hermes"
+    )
+    let assistant = AIAssistantMessage(
+        role: .assistant,
+        content: answer,
+        timestamp: timestamp,
+        sourceID: assistantSourceID,
+        sourceSessionID: sessionID,
+        sourceName: "Hermes"
+    )
+    var nextState = state
+    nextState.activeRuntimeSessionID = sessionID
+    if !nextState.runtimeSessionLineage.contains(sessionID) {
+        nextState.runtimeSessionLineage.append(sessionID)
+    }
+    nextState.lastSyncedAt = timestamp
+    nextState.lastSyncedMessageID = assistantSourceID
+    nextState.lastSyncedTimestamp = timestamp
+    nextState.lastImportedRuntimeSessionID = sessionID
+    return .init(
+        provenance: .hermesRunsAPI,
+        runID: runID,
+        terminalStatus: .completed,
+        observedFacts: .none,
+        finalSessionSynchronizationComplete: true,
+        finalMessages: existingMessages + [user, assistant],
+        finalState: nextState,
+        modelIdentity: "fake-hermes",
+        terminalSourceEvidence: .init(
+            reportedTerminalRunID: runID,
+            userSourceID: userSourceID,
+            assistantSourceID: assistantSourceID,
+            userSourceSessionID: sessionID,
+            assistantSourceSessionID: sessionID
+        )
+    )
+}

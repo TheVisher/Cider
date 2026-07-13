@@ -1,6 +1,6 @@
 import Foundation
 
-/// Owns the explicit Test Chat UI state and delegates durable completed turns to Conversation Core.
+/// Owns selected-room UI state while the live model delegates durable turns to Conversation Core.
 @MainActor
 final class AgentRoomsSessionModel: ObservableObject {
     let liveChat: AgentRoomsLiveChatModel
@@ -24,15 +24,24 @@ final class AgentRoomsSessionModel: ObservableObject {
     convenience init(transport: any HermesBridgeTransport) {
         self.init(liveChat: AgentRoomsLiveChatModel(
             transport: transport,
-            persistence: AgentRoomsTestChatPersistence()
+            persistence: AgentRoomsConversationPersistence()
         ), selectionStore: AgentRoomsSelectionStore.application)
     }
 
     func selectRoom(id: String?, persistIfCanonical: Bool) {
         selectedRoomID = id
-        guard persistIfCanonical, let id, UUID(uuidString: id) != nil else { return }
+        guard persistIfCanonical, let id, let canonicalID = UUID(uuidString: id) else {
+            if id != liveChat.activeRoom?.id { liveChat.deactivateRoom() }
+            return
+        }
         preferredCanonicalRoomID = id
         selectionStore?.saveSelectedRoomID(id)
+        if liveChat.testRoom?.id != id {
+            let activated = liveChat.activateCanonicalRoom(id: canonicalID)
+            if !activated, liveChat.activeRoom?.id != id {
+                liveChat.deactivateRoom()
+            }
+        }
     }
 
     @discardableResult

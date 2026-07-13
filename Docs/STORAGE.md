@@ -10,7 +10,7 @@ Cider is local-first. The user's local SQLite database is the canonical memory/q
 - Vault files are durable user artifacts where the file itself matters: notes, `.webloc` bookmarks, `.ics` todos/events, `.vcf` contacts, and saved files.
 - JSON indexes and sidecars are transitional, compatibility, cache, or export surfaces unless explicitly documented otherwise.
 - Kanban board YAML files remain the canonical project/workflow store, but selected card detail is projected into SQLite for structured sections and search.
-- Durable Rooms Test Chat history lives in the canonical SQLite Conversation Core tables (`conversation_rooms`, runtime bindings, turns, and messages). It has no JSONL, defaults, sidecar, or legacy-history fallback.
+- Durable native Rooms history, including the reserved Cider Test Chat, lives in the canonical SQLite Conversation Core tables (`conversation_rooms`, runtime bindings, turns, and messages). The room UUID is stable product identity; Hermes session/run IDs are replaceable runtime bindings and source identities. Accepted user messages, partial assistant output, terminal turn outcomes, retry identity, and source-backed receipt metadata persist there without a JSONL, defaults, sidecar, or legacy-history fallback. Legacy/private previews remain ineligible for this live path unless ownership is independently canonical and explicit.
 
 ## File-Backed Domain Contracts
 
