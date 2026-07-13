@@ -237,6 +237,26 @@ struct CiderCLI {
             return true
         }
 
+        if command == "capture", subcommand == "provenance-gap-patterns", hasHelpArg(args) {
+            let usage = "cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]"
+            if args.contains("--json") {
+                outputJSON([
+                    "ok": true,
+                    "command": "capture.provenance-gap-patterns.help",
+                    "usage": usage,
+                    "readOnly": true,
+                    "changed": false,
+                    "description": "Bounded content-free aggregate of unresolved capture provenance gap evidence patterns. Never infers, selects, repairs, or backfills provenance.",
+                    "safeVerificationCommands": ["cider-cli capture provenance-gap-patterns --help --json"],
+                    "truthBoundary": "help_contract_only_not_vault_truth",
+                ])
+            } else {
+                print("Usage: \(usage)")
+                print("Read-only bounded aggregate of unresolved capture provenance gap evidence patterns. Never infers, selects, repairs, or backfills provenance.")
+            }
+            return true
+        }
+
         if command == "capture", subcommand == "provenance-gap", hasHelpArg(args) {
             let usage = "cider-cli capture provenance-gap <capture_event:UUID> [--json]"
             if args.contains("--json") {
@@ -762,9 +782,11 @@ struct CiderCLI {
 
         if command.lowercased() == "capture",
            let captureSubcommand = subcommand?.lowercased(),
-           ["provenance-gaps", "provenance-gap-diagnostic", "provenance-gap"].contains(captureSubcommand) {
+           ["provenance-gaps", "provenance-gap-diagnostic", "provenance-gap", "provenance-gap-patterns"].contains(captureSubcommand) {
             if captureSubcommand == "provenance-gap" {
                 handleCaptureProvenanceGap(args: remaining)
+            } else if captureSubcommand == "provenance-gap-patterns" {
+                handleCaptureProvenanceGapPatterns(args: remaining)
             } else {
                 handleCaptureProvenanceGaps(args: remaining)
             }
@@ -917,6 +939,7 @@ struct CiderCLI {
                 || subcommand == "provenance-gaps"
                 || subcommand == "provenance-gap-diagnostic"
                 || subcommand == "provenance-gap"
+                || subcommand == "provenance-gap-patterns"
         case "bookmark", "bm":
             return isMutationSubcommand(
                 subcommand,
@@ -2415,12 +2438,15 @@ struct CiderCLI {
         case "provenance-gap":
             handleCaptureProvenanceGap(args: args)
 
+        case "provenance-gap-patterns":
+            handleCaptureProvenanceGapPatterns(args: args)
+
         case nil, "help", "--help", "-h":
             printCaptureUsage()
 
         default:
             print("Unknown capture command: \(subcommand ?? "nil")")
-            print("Commands: add, review-queue, provenance-gaps, provenance-gap, journal-cleanup, archive-artifacts")
+            print("Commands: add, review-queue, provenance-gaps, provenance-gap, provenance-gap-patterns, journal-cleanup, archive-artifacts")
         }
     }
 
@@ -2472,11 +2498,36 @@ struct CiderCLI {
         }
     }
 
+    static func handleCaptureProvenanceGapPatterns(args: [String]) {
+        guard let limit = parsePositiveIntFlag("--limit", from: args, command: "capture.provenance-gap-patterns", minimum: 1),
+              let sampleLimit = parsePositiveIntFlag("--sample-limit", from: args, command: "capture.provenance-gap-patterns", minimum: 0) else {
+            return
+        }
+        do {
+            let report = try CiderCaptureProvenanceDiagnosticService(database: .shared).aggregateUnresolvedGaps(
+                limit: limit ?? CiderCaptureProvenanceDiagnosticService.defaultLimit,
+                sampleLimit: sampleLimit ?? CiderCaptureProvenanceDiagnosticService.defaultAggregateSampleLimit
+            )
+            if jsonOutput {
+                outputJSON(report.toDictionary())
+            } else {
+                print("Unresolved capture provenance patterns: \(report.unresolvedCount) unresolved in \(report.scannedCount) scanned missing event(s).")
+                print("  Groups: \(report.groups.count)")
+                print("  Coverage: \(report.coverage)")
+                if report.excludedCount > 0 { print("  Failed closed: \(report.excludedCount)") }
+                if report.saturated { print("  Omitted by scan cap: \(report.omittedCount)") }
+            }
+        } catch {
+            printCLIError(error.localizedDescription)
+        }
+    }
+
     static func printCaptureUsage() {
         print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill")
         print("       cider-cli capture provenance-gap <capture_event:UUID> [--json]  # read-only evidence drilldown")
+        print("       cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]  # read-only content-free aggregate")
         print("       cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
         print("       Journal capture: use `cider-cli capture add --kind journal --date today --stdin --json` so readable Markdown, metadata, provenance, indexing, and reviewable candidates stay connected.")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
@@ -30994,6 +31045,7 @@ struct CiderCLI {
           cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]
           cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill
           cider-cli capture provenance-gap <capture_event:UUID> [--json]  # read-only evidence drilldown
+          cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]  # read-only content-free aggregate
 
         TEST RUN
           cider-cli test-run cleanup <run-id> --dry-run [--json]

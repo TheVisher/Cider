@@ -194,10 +194,104 @@ struct CiderCaptureProvenanceGapExplanation: Codable, Equatable {
     }
 }
 
+struct CiderCaptureProvenanceAggregateEvidenceOutcome: Codable, Equatable {
+    var category: CiderCaptureProvenanceEvidenceCategory
+    var status: CiderCaptureProvenanceEvidenceStatus
+    var reasonCode: String
+
+    func toDictionary() -> [String: Any] {
+        [
+            "category": category.rawValue,
+            "status": status.rawValue,
+            "reasonCode": reasonCode,
+        ]
+    }
+}
+
+struct CiderCaptureProvenanceGapPatternGroup: Codable, Equatable {
+    var sourceKind: String
+    var classification: CiderCaptureProvenanceGapClassification
+    var reasonCode: String
+    var checkedEvidence: [CiderCaptureProvenanceAggregateEvidenceOutcome]
+    var timeBucket: String
+    var versionBucket: String?
+    var count: Int
+    var sampleCaptureEventRefs: [String]
+
+    func toDictionary() -> [String: Any] {
+        var result: [String: Any] = [
+            "sourceKind": sourceKind,
+            "classification": classification.rawValue,
+            "reasonCode": reasonCode,
+            "checkedEvidence": checkedEvidence.map { $0.toDictionary() },
+            "timeBucket": timeBucket,
+            "count": count,
+            "sampleCaptureEventRefs": sampleCaptureEventRefs,
+        ]
+        if let versionBucket { result["versionBucket"] = versionBucket }
+        return result
+    }
+}
+
+struct CiderCaptureProvenanceGapAggregateReport: Codable, Equatable {
+    var command = "capture.provenance-gap-patterns"
+    var readOnly = true
+    var changed = false
+    var requestedLimit: Int
+    var appliedLimit: Int
+    var maximumLimit: Int
+    var requestedSampleLimit: Int
+    var appliedSampleLimit: Int
+    var maximumSampleLimit: Int
+    var totalMissingCount: Int
+    var scannedCount: Int
+    var unresolvedCount: Int
+    var excludedCount: Int
+    var omittedCount: Int
+    var saturated: Bool
+    var coverage: String
+    var sampledCount: Int
+    var groups: [CiderCaptureProvenanceGapPatternGroup]
+    var failClosedCounts: [String: Int]
+    var truthBoundary: String
+    var safeNextCommands: [String]
+    var safeVerificationCommands: [String]
+
+    func toDictionary() -> [String: Any] {
+        [
+            "ok": true,
+            "command": command,
+            "readOnly": readOnly,
+            "changed": changed,
+            "requestedLimit": requestedLimit,
+            "appliedLimit": appliedLimit,
+            "maximumLimit": maximumLimit,
+            "requestedSampleLimit": requestedSampleLimit,
+            "appliedSampleLimit": appliedSampleLimit,
+            "maximumSampleLimit": maximumSampleLimit,
+            "totalMissingCount": totalMissingCount,
+            "scannedCount": scannedCount,
+            "unresolvedCount": unresolvedCount,
+            "excludedCount": excludedCount,
+            "omittedCount": omittedCount,
+            "saturated": saturated,
+            "coverage": coverage,
+            "sampledCount": sampledCount,
+            "groups": groups.map { $0.toDictionary() },
+            "failClosedCounts": failClosedCounts,
+            "truthBoundary": truthBoundary,
+            "safeNextCommands": safeNextCommands,
+            "safeVerificationCommands": safeVerificationCommands,
+        ]
+    }
+}
+
 @MainActor
 final class CiderCaptureProvenanceDiagnosticService {
     static let defaultLimit = 50
     static let maximumLimit = 100
+    static let defaultAggregateSampleLimit = 3
+    static let maximumAggregateSampleLimit = 10
     private static let duplicateAuditLimit = 500
     private static let duplicateAuditWindow: TimeInterval = 120
     private static let evidenceRefLimit = 10
@@ -224,6 +318,21 @@ final class CiderCaptureProvenanceDiagnosticService {
         var check: CiderCaptureProvenanceEvidenceCheck
         var uniqueBookmark: CanonicalItemEvidence?
         var canonicalURL: String?
+    }
+
+    private struct AggregateGroupKey: Hashable {
+        var sourceKind: String
+        var classification: String
+        var reasonCode: String
+        var evidenceSignature: String
+        var timeBucket: String
+        var versionBucket: String?
+    }
+
+    private struct AggregateGroupAccumulator {
+        var checkedEvidence: [CiderCaptureProvenanceAggregateEvidenceOutcome]
+        var count: Int
+        var captureEventRefs: [String]
     }
 
     private let database: CiderDatabase
@@ -356,6 +465,158 @@ final class CiderCaptureProvenanceDiagnosticService {
             safeNextCommands: orderedUnique([replayCommand] + eventCommands),
             safeVerificationCommands: [replayCommand]
         )
+    }
+
+    func aggregateUnresolvedGaps(
+        limit requestedLimit: Int = CiderCaptureProvenanceDiagnosticService.defaultLimit,
+        sampleLimit requestedSampleLimit: Int = CiderCaptureProvenanceDiagnosticService.defaultAggregateSampleLimit
+    ) throws -> CiderCaptureProvenanceGapAggregateReport {
+        let appliedSampleLimit = min(max(requestedSampleLimit, 0), Self.maximumAggregateSampleLimit)
+        let diagnostic = try diagnose(limit: requestedLimit)
+        var accumulators: [AggregateGroupKey: AggregateGroupAccumulator] = [:]
+        var failClosedCounts: [String: Int] = [:]
+        var excludedCount = 0
+
+        for finding in diagnostic.findings where finding.classification == .unresolvedProvenanceGap {
+            guard Self.supportedSourceKinds.contains(finding.sourceKind) else {
+                excludedCount += 1
+                failClosedCounts[CiderCaptureProvenanceExplanationError.unsupportedSourceKind.rawValue, default: 0] += 1
+                continue
+            }
+            guard let eventID = UUID(uuidString: finding.captureEventID),
+                  let event = try captureEvent(id: eventID) else {
+                excludedCount += 1
+                failClosedCounts["capture_event_readback_failed", default: 0] += 1
+                continue
+            }
+
+            let explanation: CiderCaptureProvenanceGapExplanation
+            do {
+                explanation = try explain(captureEventRef: finding.captureEventRef)
+            } catch let error as CiderCaptureProvenanceExplanationError {
+                excludedCount += 1
+                failClosedCounts[error.rawValue, default: 0] += 1
+                continue
+            }
+
+            let outcomes = explanation.checkedEvidence.map {
+                CiderCaptureProvenanceAggregateEvidenceOutcome(
+                    category: $0.category,
+                    status: $0.status,
+                    reasonCode: $0.reasonCode
+                )
+            }
+            for reason in explanation.missingEvidenceReasons {
+                failClosedCounts[reason, default: 0] += 1
+            }
+            let key = AggregateGroupKey(
+                sourceKind: explanation.sourceKind,
+                classification: explanation.classification.rawValue,
+                reasonCode: explanation.reasonCode,
+                evidenceSignature: outcomes.map {
+                    "\($0.category.rawValue)=\($0.status.rawValue):\($0.reasonCode)"
+                }.joined(separator: "|"),
+                timeBucket: Self.utcMonthBucket(for: event.createdAt),
+                versionBucket: Self.safeVersionBucket(metadataJSON: event.metadataJSON)
+            )
+            if var accumulator = accumulators[key] {
+                accumulator.count += 1
+                accumulator.captureEventRefs.append(finding.captureEventRef)
+                accumulators[key] = accumulator
+            } else {
+                accumulators[key] = AggregateGroupAccumulator(
+                    checkedEvidence: outcomes,
+                    count: 1,
+                    captureEventRefs: [finding.captureEventRef]
+                )
+            }
+        }
+
+        if diagnostic.omittedCount > 0 {
+            failClosedCounts["scan_cap_reached"] = diagnostic.omittedCount
+        }
+        let sortedKeys = accumulators.keys.sorted { lhs, rhs in
+            let leftCount = accumulators[lhs]?.count ?? 0
+            let rightCount = accumulators[rhs]?.count ?? 0
+            if leftCount != rightCount { return leftCount > rightCount }
+            return Self.aggregateSortKey(lhs) < Self.aggregateSortKey(rhs)
+        }
+        var samplesRemaining = appliedSampleLimit
+        var sampledCount = 0
+        let groups = sortedKeys.compactMap { key -> CiderCaptureProvenanceGapPatternGroup? in
+            guard let accumulator = accumulators[key] else { return nil }
+            let sampleCount = min(samplesRemaining, accumulator.captureEventRefs.count)
+            let samples = Array(accumulator.captureEventRefs.prefix(sampleCount))
+            samplesRemaining -= sampleCount
+            sampledCount += sampleCount
+            return CiderCaptureProvenanceGapPatternGroup(
+                sourceKind: key.sourceKind,
+                classification: CiderCaptureProvenanceGapClassification(rawValue: key.classification) ?? .unresolvedProvenanceGap,
+                reasonCode: key.reasonCode,
+                checkedEvidence: accumulator.checkedEvidence,
+                timeBucket: key.timeBucket,
+                versionBucket: key.versionBucket,
+                count: accumulator.count,
+                sampleCaptureEventRefs: samples
+            )
+        }
+        let replayCommand = "cider-cli capture provenance-gap-patterns --limit \(diagnostic.appliedLimit) --sample-limit \(appliedSampleLimit) --json"
+        let drilldownCommands = groups.flatMap(\.sampleCaptureEventRefs).map {
+            "cider-cli capture provenance-gap \($0) --json"
+        }
+        let commands = orderedUnique([replayCommand] + drilldownCommands)
+        return CiderCaptureProvenanceGapAggregateReport(
+            requestedLimit: requestedLimit,
+            appliedLimit: diagnostic.appliedLimit,
+            maximumLimit: Self.maximumLimit,
+            requestedSampleLimit: requestedSampleLimit,
+            appliedSampleLimit: appliedSampleLimit,
+            maximumSampleLimit: Self.maximumAggregateSampleLimit,
+            totalMissingCount: diagnostic.totalMissingCount,
+            scannedCount: diagnostic.scannedCount,
+            unresolvedCount: groups.reduce(0) { $0 + $1.count },
+            excludedCount: excludedCount,
+            omittedCount: diagnostic.omittedCount,
+            saturated: diagnostic.hasMore,
+            coverage: diagnostic.hasMore ? "partial_bounded_scan" : "complete_bounded_set",
+            sampledCount: sampledCount,
+            groups: groups,
+            failClosedCounts: failClosedCounts,
+            truthBoundary: "read_only_bounded_aggregate_of_persisted_evidence_no_provenance_inference_selection_or_repair",
+            safeNextCommands: commands,
+            safeVerificationCommands: commands
+        )
+    }
+
+    private static func aggregateSortKey(_ key: AggregateGroupKey) -> String {
+        [
+            key.sourceKind,
+            key.classification,
+            key.reasonCode,
+            key.evidenceSignature,
+            key.timeBucket,
+            key.versionBucket ?? "",
+        ].joined(separator: "\u{1F}")
+    }
+
+    private static func utcMonthBucket(for date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
+    }
+
+    private static func safeVersionBucket(metadataJSON: String) -> String? {
+        guard let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: metadataJSON) else {
+            return nil
+        }
+        let versionKeys = ["app_version", "appVersion", "capture_version", "captureVersion", "source_version", "sourceVersion"]
+        let candidate = versionKeys.compactMap { metadata[$0] }.first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let candidate, !candidate.isEmpty, candidate.count <= 32 else { return nil }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".+-_"))
+        guard candidate.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+        return candidate
     }
 
     private func missingCaptureEventCount() throws -> Int {
