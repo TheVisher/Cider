@@ -10,6 +10,10 @@ struct AgentRoomsConversationSnapshot: Sendable {
     let latestErrorCode: String?
     let latestCiderReferences: [HermesCiderReference]
     let latestActivity: [AgentRoomsLiveActivity]
+    let latestContextCheckpointFactState: HermesStructuredFactState
+    let latestContextCheckpoint: HermesCiderContextCheckpoint?
+    let latestApprovalFactState: HermesStructuredFactState
+    let latestApprovalRequests: [HermesApprovalRequest]
 }
 
 struct AgentRoomsConversationAttempt: Equatable, Sendable {
@@ -264,6 +268,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             expectedText: expectedText,
             expectedConversationID: attempt.roomID
         )
+        let structuredFacts = normalizedStructuredFacts(completion)
         try database.withTransaction {
             let room = try requiredRoom(id: attempt.roomID)
             let reserved = room.stableKey == AgentRoomsTestChatPersistence.stableRoomKey
@@ -282,6 +287,10 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 runID: terminal.runID,
                 modelIdentity: terminal.modelIdentity,
                 references: completion.ciderReferences,
+                contextCheckpointFactState: structuredFacts.contextState,
+                contextCheckpoint: structuredFacts.context,
+                approvalFactState: structuredFacts.approvalState,
+                approvalRequests: structuredFacts.approvals,
                 activity: activity,
                 userSourceID: terminal.userSourceID,
                 assistantSourceID: terminal.assistantSourceID
@@ -621,7 +630,19 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             latestRunID: latestRunID,
             latestErrorCode: latestTurn?.error?.code,
             latestCiderReferences: try decodeReferences(latestTurn?.metadata["cider_references_json"]),
-            latestActivity: decodeActivity(latestTurn?.metadata["activity_json"])
+            latestActivity: decodeActivity(latestTurn?.metadata["activity_json"]),
+            latestContextCheckpointFactState: try decodeFactState(
+                latestTurn?.metadata["context_checkpoint_fact_state"]
+            ),
+            latestContextCheckpoint: try decodeContextCheckpoint(
+                latestTurn?.metadata["context_checkpoint_json"]
+            ),
+            latestApprovalFactState: try decodeFactState(
+                latestTurn?.metadata["approval_fact_state"]
+            ),
+            latestApprovalRequests: try decodeApprovalRequests(
+                latestTurn?.metadata["approval_requests_json"]
+            )
         )
     }
 
@@ -820,6 +841,10 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         runID: String,
         modelIdentity: String,
         references: [HermesCiderReference],
+        contextCheckpointFactState: HermesStructuredFactState,
+        contextCheckpoint: HermesCiderContextCheckpoint?,
+        approvalFactState: HermesStructuredFactState,
+        approvalRequests: [HermesApprovalRequest],
         activity: [AgentRoomsLiveActivity],
         userSourceID: String,
         assistantSourceID: String
@@ -832,6 +857,14 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         )
         metadata["model_identity"] = modelIdentity
         metadata["cider_references_json"] = encodeReferences(references)
+        metadata["context_checkpoint_fact_state"] = contextCheckpointFactState.rawValue
+        metadata["approval_fact_state"] = approvalFactState.rawValue
+        if let contextCheckpoint {
+            metadata["context_checkpoint_json"] = encode(contextCheckpoint)
+        }
+        if !approvalRequests.isEmpty {
+            metadata["approval_requests_json"] = encode(approvalRequests)
+        }
         metadata["terminal_user_source_id"] = userSourceID
         metadata["terminal_assistant_source_id"] = assistantSourceID
         return metadata
@@ -897,6 +930,75 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
               references.count <= AgentRoomsCiderReceiptProjector.maximumReferenceCount
         else { throw AgentRoomsConversationPersistenceError.corruptHistory }
         return references
+    }
+
+    private struct NormalizedStructuredFacts {
+        let contextState: HermesStructuredFactState
+        let context: HermesCiderContextCheckpoint?
+        let approvalState: HermesStructuredFactState
+        let approvals: [HermesApprovalRequest]
+    }
+
+    private func normalizedStructuredFacts(
+        _ completion: HermesRunCompletionEnvelope
+    ) -> NormalizedStructuredFacts {
+        let contextProjection = AgentRoomsContextCheckpointProjector.project(
+            factState: completion.contextCheckpointFactState,
+            checkpoint: completion.contextCheckpoint,
+            bookmarkThumbnail: { _ in nil }
+        )
+        let contextValid = contextProjection != nil
+        let contextState = contextValid ? completion.contextCheckpointFactState : .rejected
+        let context = contextState == .validated ? completion.contextCheckpoint : nil
+
+        let approvalCheckpoint = AgentRoomsApprovalProjector.checkpoint(
+            factState: completion.approvalFactState,
+            requests: completion.approvalRequests,
+            bookmarkThumbnail: { _ in nil }
+        )
+        let approvalValid = completion.approvalFactState == .notReported
+            ? completion.approvalRequests.isEmpty
+            : approvalCheckpoint?.state == .available
+        let approvalState = approvalValid ? completion.approvalFactState : .rejected
+        let approvals = approvalState == .validated ? completion.approvalRequests : []
+        return NormalizedStructuredFacts(
+            contextState: contextState,
+            context: context,
+            approvalState: approvalState,
+            approvals: approvals
+        )
+    }
+
+    private func encode<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let encoded = String(data: data, encoding: .utf8)
+        else { return "" }
+        return encoded
+    }
+
+    private func decodeFactState(_ raw: String?) throws -> HermesStructuredFactState {
+        guard let raw else { return .notReported }
+        guard let state = HermesStructuredFactState(rawValue: raw) else {
+            throw AgentRoomsConversationPersistenceError.corruptHistory
+        }
+        return state
+    }
+
+    private func decodeContextCheckpoint(_ raw: String?) throws -> HermesCiderContextCheckpoint? {
+        guard let raw else { return nil }
+        guard let data = raw.data(using: .utf8),
+              let value = try? JSONDecoder().decode(HermesCiderContextCheckpoint.self, from: data)
+        else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+        return value
+    }
+
+    private func decodeApprovalRequests(_ raw: String?) throws -> [HermesApprovalRequest] {
+        guard let raw else { return [] }
+        guard let data = raw.data(using: .utf8),
+              let values = try? JSONDecoder().decode([HermesApprovalRequest].self, from: data),
+              values.count <= AgentRoomsApprovalProjector.maximumApprovalCount
+        else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+        return values
     }
 
     private func requiredRoom(id: UUID) throws -> ConversationRoom {

@@ -51,6 +51,10 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
     let output: String?
     let error: String?
     let ciderReferences: [HermesCiderReference]
+    let contextCheckpointFactState: HermesStructuredFactState
+    let contextCheckpoint: HermesCiderContextCheckpoint?
+    let approvalFactState: HermesStructuredFactState
+    let approvalRequests: [HermesApprovalRequest]
 
     enum CodingKeys: String, CodingKey {
         case object
@@ -60,6 +64,8 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
         case output
         case error
         case ciderReferences = "cider_references"
+        case contextCheckpoint = "cider_context_checkpoint"
+        case approvalRequests = "approval_requests"
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +77,28 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
         output = try container.decodeIfPresent(String.self, forKey: .output)
         error = try container.decodeIfPresent(String.self, forKey: .error)
         ciderReferences = (try? container.decodeIfPresent([HermesCiderReference].self, forKey: .ciderReferences)) ?? []
+        (contextCheckpointFactState, contextCheckpoint) = Self.decodeStructuredFact(
+            HermesCiderContextCheckpoint.self,
+            forKey: .contextCheckpoint,
+            from: container
+        )
+        let approvalFact: (HermesStructuredFactState, [HermesApprovalRequest]?) = Self.decodeStructuredFact(
+            [HermesApprovalRequest].self,
+            forKey: .approvalRequests,
+            from: container
+        )
+        approvalFactState = approvalFact.0
+        approvalRequests = approvalFact.1 ?? []
+    }
+
+    private static func decodeStructuredFact<T: Decodable>(
+        _ type: T.Type,
+        forKey key: CodingKeys,
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> (HermesStructuredFactState, T?) {
+        guard container.contains(key) else { return (.notReported, nil) }
+        guard let value = try? container.decode(T.self, forKey: key) else { return (.rejected, nil) }
+        return (.validated, value)
     }
 }
 
@@ -83,6 +111,10 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
     let tool: String?
     let preview: String?
     let status: String?
+    let approval: HermesApprovalRequest?
+    let approvalFactState: HermesStructuredFactState
+    let contextCheckpoint: HermesCiderContextCheckpoint?
+    let contextCheckpointFactState: HermesStructuredFactState
 
     enum CodingKeys: String, CodingKey {
         case event
@@ -93,6 +125,62 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
         case tool
         case preview
         case status
+        case approval
+        case contextCheckpoint = "cider_context_checkpoint"
+    }
+
+    init(
+        event: String,
+        runID: String?,
+        delta: String?,
+        output: String?,
+        error: String?,
+        tool: String?,
+        preview: String?,
+        status: String?,
+        approval: HermesApprovalRequest? = nil,
+        approvalFactState: HermesStructuredFactState = .notReported,
+        contextCheckpoint: HermesCiderContextCheckpoint? = nil,
+        contextCheckpointFactState: HermesStructuredFactState = .notReported
+    ) {
+        self.event = event
+        self.runID = runID
+        self.delta = delta
+        self.output = output
+        self.error = error
+        self.tool = tool
+        self.preview = preview
+        self.status = status
+        self.approval = approval
+        self.approvalFactState = approvalFactState
+        self.contextCheckpoint = contextCheckpoint
+        self.contextCheckpointFactState = contextCheckpointFactState
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        event = try container.decode(String.self, forKey: .event)
+        runID = try container.decodeIfPresent(String.self, forKey: .runID)
+        delta = try container.decodeIfPresent(String.self, forKey: .delta)
+        output = try container.decodeIfPresent(String.self, forKey: .output)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        tool = try container.decodeIfPresent(String.self, forKey: .tool)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        if container.contains(.approval) {
+            approval = try? container.decode(HermesApprovalRequest.self, forKey: .approval)
+            approvalFactState = approval == nil ? .rejected : .validated
+        } else {
+            approval = nil
+            approvalFactState = event.hasPrefix("approval.") ? .rejected : .notReported
+        }
+        if container.contains(.contextCheckpoint) {
+            contextCheckpoint = try? container.decode(HermesCiderContextCheckpoint.self, forKey: .contextCheckpoint)
+            contextCheckpointFactState = contextCheckpoint == nil ? .rejected : .validated
+        } else {
+            contextCheckpoint = nil
+            contextCheckpointFactState = event.hasPrefix("context.") ? .rejected : .notReported
+        }
     }
 
     var bridgeEvent: HermesRunEvent? {

@@ -115,6 +115,64 @@ struct HermesAPIClientTests {
         #expect(decoded.ciderReferences.first?.sourceRef == "kanban_card:2afee0/8d2bd6")
     }
 
+    @Test("terminal status normalizes structured context and approval facts")
+    func statusDecodesStructuredTurnFacts() throws {
+        let json = #"""
+        {
+          "run_id": "run-826",
+          "status": "completed",
+          "cider_context_checkpoint": {
+            "id": "checkpoint-826",
+            "selected": [{
+              "kind": "note", "id": "A1000000-0000-4000-8000-000000000001",
+              "title": "Trip plan", "source": "cider",
+              "source_ref": "note:A1000000-0000-4000-8000-000000000001"
+            }],
+            "citations": [],
+            "source": "cider",
+            "source_ref": "context_checkpoint:checkpoint-826"
+          },
+          "approval_requests": [{
+            "id": "approval-826", "action": "Update note", "risk": "medium",
+            "scope": "write", "status": "requested", "source": "hermes_runs_api",
+            "source_ref": "approval:approval-826",
+            "target": {
+              "kind": "note", "id": "A1000000-0000-4000-8000-000000000001",
+              "title": "Trip plan", "source": "cider",
+              "source_ref": "note:A1000000-0000-4000-8000-000000000001"
+            }
+          }]
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+        #expect(decoded.contextCheckpointFactState == .validated)
+        #expect(decoded.contextCheckpoint?.id == "checkpoint-826")
+        #expect(decoded.contextCheckpoint?.selected.count == 1)
+        #expect(decoded.approvalFactState == .validated)
+        #expect(decoded.approvalRequests.first?.status == "requested")
+    }
+
+    @Test("malformed structured turn facts are rejected without preserving raw payload")
+    func malformedStructuredTurnFactsAreRejected() throws {
+        let json = #"""
+        {
+          "run_id": "run-826",
+          "status": "completed",
+          "output": "Normal answer",
+          "cider_context_checkpoint": {"raw_jsonrpc": "/Users/private/.env"},
+          "approval_requests": [{"command": "cat ~/.ssh/id_rsa"}]
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+        #expect(decoded.output == "Normal answer")
+        #expect(decoded.contextCheckpointFactState == .rejected)
+        #expect(decoded.contextCheckpoint == nil)
+        #expect(decoded.approvalFactState == .rejected)
+        #expect(decoded.approvalRequests.isEmpty)
+    }
+
     @Test("malformed terminal references fail closed without losing the normal result")
     func malformedStatusReferenceFailsClosed() throws {
         let json = """
@@ -153,5 +211,7 @@ struct HermesAPIClientTests {
 
         #expect(decoded.output?.hasSuffix("https://chromeindustries.com/products/cohesive-35l-backpack") == true)
         #expect(decoded.ciderReferences.isEmpty)
+        #expect(decoded.contextCheckpointFactState == .notReported)
+        #expect(decoded.approvalFactState == .notReported)
     }
 }

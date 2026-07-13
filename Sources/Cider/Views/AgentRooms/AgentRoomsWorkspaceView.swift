@@ -813,6 +813,12 @@ struct AgentRoomsWorkspaceView: View {
                         if !receipt.objectReceipts.isEmpty {
                             ciderSourcesDisclosure(receipt.objectReceipts)
                         }
+                        if let checkpoint = receipt.contextCheckpoint {
+                            contextCheckpointDisclosure(checkpoint)
+                        }
+                        if let checkpoint = receipt.approvalCheckpoint {
+                            approvalCheckpointDisclosure(checkpoint)
+                        }
                     }
 
                     if let artifact = room.transcript.futureArtifact {
@@ -1149,6 +1155,145 @@ struct AgentRoomsWorkspaceView: View {
         .padding(Spacing.md)
         .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
         .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
+    }
+
+    private func contextCheckpointDisclosure(_ checkpoint: AgentRoomsContextCheckpoint) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if checkpoint.selectedContext.isEmpty {
+                    Text(checkpoint.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    contextReferenceGroup("Selected and sent", receipts: checkpoint.selectedContext)
+                    if checkpoint.citations.isEmpty {
+                        Text("No terminal citations were selected from this context.")
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.tertiary)
+                    } else {
+                        contextReferenceGroup("Citations", receipts: checkpoint.citations)
+                    }
+                }
+                Text("\(checkpoint.provenance) · \(checkpoint.truthBoundary)")
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(.top, Spacing.sm)
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: checkpoint.state == .available ? "scope" : "eye.slash")
+                    .foregroundColor(checkpoint.state == .rejected ? CiderColors.warning : CiderColors.controlAccent)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(checkpoint.title)
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text(checkpoint.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Context checkpoint. \(checkpoint.detail) \(checkpoint.truthBoundary).")
+        }
+        .tint(CiderColors.secondary)
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
+    }
+
+    private func contextReferenceGroup(
+        _ title: String,
+        receipts: [AgentRoomsCiderObjectReceipt]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(title)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.secondary)
+            ForEach(receipts) { receipt in
+                ciderObjectReceiptRow(receipt)
+            }
+        }
+    }
+
+    private func approvalCheckpointDisclosure(_ checkpoint: AgentRoomsApprovalCheckpoint) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if checkpoint.requests.isEmpty {
+                    Text(checkpoint.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    ForEach(checkpoint.requests) { request in
+                        approvalRequestRow(request)
+                    }
+                }
+                Text("Read-only. Cider did not execute or decide this request here.")
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+            }
+            .padding(.top, Spacing.sm)
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: checkpoint.state == .available ? "hand.raised" : "eye.slash")
+                    .foregroundColor(checkpoint.state == .available ? CiderColors.warning : CiderColors.secondary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(checkpoint.requests.count == 1 ? "Approval request" : "Approval requests")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text(checkpoint.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Read-only approval presentation. \(checkpoint.detail). Nothing executed.")
+        }
+        .tint(CiderColors.secondary)
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
+    }
+
+    private func approvalRequestRow(_ request: AgentRoomsApprovalPresentation) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(request.action)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                Spacer(minLength: Spacing.sm)
+                Text(request.status.rawValue.capitalized)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(request.status == .requested ? CiderColors.warning : CiderColors.secondary)
+            }
+            approvalIdentityRow(label: "Target", value: request.target)
+            approvalIdentityRow(label: "Scope", value: request.scope.rawValue.capitalized)
+            approvalIdentityRow(label: "Risk", value: request.risk.rawValue.capitalized)
+            Text(request.provenance)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+        }
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceSubtle))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Approval request, \(request.action), target \(request.target), \(request.scope.rawValue) scope, \(request.risk.rawValue) risk, status \(request.status.rawValue), read-only, nothing executed."
+        )
+    }
+
+    private func approvalIdentityRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(label)
+                .font(CiderFont.microMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .frame(width: 44, alignment: .leading)
+            Text(value)
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(2)
+        }
     }
 
     @ViewBuilder

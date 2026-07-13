@@ -208,6 +208,32 @@ struct HermesBridgeTransportTests {
         #expect(!envelope.isEligibleForFutureShadowPersistence)
     }
 
+    @Test("structured context or approval facts cannot enter the legacy shadow envelope")
+    func structuredFactsRemainIneligibleForLegacyShadow() {
+        let context = HermesCiderContextCheckpoint(
+            id: "checkpoint-826", selected: [], citations: [], omissionReason: "no_context_selected",
+            source: "cider", sourceRef: "context_checkpoint:checkpoint-826"
+        )
+        let withContext = replacing(
+            eligibleEnvelope(),
+            contextCheckpointFactState: .validated,
+            contextCheckpoint: context
+        )
+        let approval = HermesApprovalRequest(
+            id: "approval-826", action: "Update note", target: nil, risk: "medium",
+            scope: "write", status: "requested", source: "hermes_runs_api",
+            sourceRef: "approval:approval-826"
+        )
+        let withApproval = replacing(
+            eligibleEnvelope(),
+            approvalFactState: .validated,
+            approvalRequests: [approval]
+        )
+
+        #expect(!withContext.isEligibleForFutureShadowPersistence)
+        #expect(!withApproval.isEligibleForFutureShadowPersistence)
+    }
+
     @Test("every excluded event or content fact independently fails closed", arguments: [
         HermesRunObservedFacts(containedToolEvent: true, containedReasoningEvent: false, containedApprovalEvent: false, containedAttachmentContentOrEvent: false, containedPendingContentOrEvent: false, containedStreamingContentOrEvent: false, runIdentityConsistent: true),
         HermesRunObservedFacts(containedToolEvent: false, containedReasoningEvent: true, containedApprovalEvent: false, containedAttachmentContentOrEvent: false, containedPendingContentOrEvent: false, containedStreamingContentOrEvent: false, runIdentityConsistent: true),
@@ -325,6 +351,76 @@ struct HermesBridgeTransportTests {
         #expect(facts.runIdentityConsistent)
     }
 
+    @Test("approval event accumulator keeps only normalized structured current status")
+    func approvalEventAccumulatorKeepsStructuredStatus() {
+        let target = HermesCiderReference(
+            kind: "note", id: "A1000000-0000-4000-8000-000000000001", title: "Trip plan",
+            boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "note:A1000000-0000-4000-8000-000000000001"
+        )
+        let requested = HermesApprovalRequest(
+            id: "approval-826", action: "Update note", target: target, risk: "medium",
+            scope: "write", status: "requested", source: "hermes_runs_api",
+            sourceRef: "approval:approval-826"
+        )
+        let approved = HermesApprovalRequest(
+            id: requested.id, action: requested.action, target: target, risk: requested.risk,
+            scope: requested.scope, status: "approved", source: requested.source,
+            sourceRef: requested.sourceRef
+        )
+        var accumulator = HermesRunObservationAccumulator(runID: "run-826")
+        accumulator.record(.init(
+            event: "approval.requested", runID: "run-826", delta: nil, output: nil,
+            error: nil, tool: nil, preview: "ignored raw preview", status: nil,
+            approval: requested, approvalFactState: .validated
+        ))
+        accumulator.record(.init(
+            event: "approval.approved", runID: "run-826", delta: nil, output: nil,
+            error: nil, tool: nil, preview: nil, status: nil,
+            approval: approved, approvalFactState: .validated
+        ))
+
+        let projection = accumulator.approvalProjection()
+        #expect(projection.state == .validated)
+        #expect(projection.requests == [approved])
+    }
+
+    @Test("context event accumulator preserves only a normalized checkpoint")
+    func contextEventAccumulatorKeepsStructuredCheckpoint() {
+        let note = HermesCiderReference(
+            kind: "note", id: "A1000000-0000-4000-8000-000000000001", title: "Trip plan",
+            boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "note:A1000000-0000-4000-8000-000000000001"
+        )
+        let checkpoint = HermesCiderContextCheckpoint(
+            id: "checkpoint-826", selected: [note], citations: [], omissionReason: nil,
+            source: "cider", sourceRef: "context_checkpoint:checkpoint-826"
+        )
+        var accumulator = HermesRunObservationAccumulator(runID: "run-826")
+        accumulator.record(.init(
+            event: "context.checkpoint", runID: "run-826", delta: nil, output: nil,
+            error: nil, tool: nil, preview: nil, status: nil,
+            contextCheckpoint: checkpoint, contextCheckpointFactState: .validated
+        ))
+
+        let projection = accumulator.contextProjection()
+        #expect(projection.state == .validated)
+        #expect(projection.checkpoint == checkpoint)
+    }
+
+    @Test("raw approval preview never becomes structured approval authority")
+    func rawApprovalPreviewFailsClosed() {
+        var accumulator = HermesRunObservationAccumulator(runID: "run-826")
+        accumulator.record(.init(
+            event: "approval.requested", runID: "run-826", delta: nil, output: nil,
+            error: nil, tool: nil, preview: "Edit /Users/private/.env", status: nil
+        ))
+
+        let projection = accumulator.approvalProjection()
+        #expect(projection.state == .rejected)
+        #expect(projection.requests.isEmpty)
+    }
+
     @Test("completion envelope owns immutable value copies of final messages and state")
     func envelopeIsUnaffectedByLaterFixtureMutation() {
         var sourceMessages = expectedMessages()
@@ -409,7 +505,11 @@ struct HermesBridgeTransportTests {
         finalMessages: [AIAssistantMessage]? = nil,
         finalState: HermesConversationState? = nil,
         modelIdentity: String? = "hermes-model-5",
-        terminalSourceEvidence: HermesTerminalSourceIdentityEvidence? = nil
+        terminalSourceEvidence: HermesTerminalSourceIdentityEvidence? = nil,
+        contextCheckpointFactState: HermesStructuredFactState? = nil,
+        contextCheckpoint: HermesCiderContextCheckpoint? = nil,
+        approvalFactState: HermesStructuredFactState? = nil,
+        approvalRequests: [HermesApprovalRequest]? = nil
     ) -> HermesRunCompletionEnvelope {
         HermesRunCompletionEnvelope(
             provenance: provenance ?? envelope.provenance,
@@ -420,7 +520,12 @@ struct HermesBridgeTransportTests {
             finalMessages: finalMessages ?? envelope.finalMessages,
             finalState: finalState ?? envelope.finalState,
             modelIdentity: modelIdentity,
-            terminalSourceEvidence: terminalSourceEvidence ?? envelope.terminalSourceEvidence
+            terminalSourceEvidence: terminalSourceEvidence ?? envelope.terminalSourceEvidence,
+            ciderReferences: envelope.ciderReferences,
+            contextCheckpointFactState: contextCheckpointFactState ?? envelope.contextCheckpointFactState,
+            contextCheckpoint: contextCheckpoint ?? envelope.contextCheckpoint,
+            approvalFactState: approvalFactState ?? envelope.approvalFactState,
+            approvalRequests: approvalRequests ?? envelope.approvalRequests
         )
     }
 }

@@ -136,6 +136,8 @@ struct HermesRunTransport: HermesBridgeTransport {
                 nextState.lastSyncedMessageID == assistantMessage.sourceID &&
                 nextState.lastSyncedTimestamp == assistantMessage.timestamp &&
                 nextState.lastImportedRuntimeSessionID == status.sessionID
+            let approvalFacts = resolvedApprovalFacts(status: status, observed: observed)
+            let contextFacts = resolvedContextFacts(status: status, observed: observed)
             return HermesBridgeSendResult(completion: HermesRunCompletionEnvelope(
                 provenance: .hermesRunsAPI,
                 runID: created.runID,
@@ -149,7 +151,11 @@ struct HermesRunTransport: HermesBridgeTransport {
                     reportedTerminalRunID: status.runID,
                     messages: finalMessages
                 ),
-                ciderReferences: status.ciderReferences
+                ciderReferences: status.ciderReferences,
+                contextCheckpointFactState: contextFacts.state,
+                contextCheckpoint: contextFacts.checkpoint,
+                approvalFactState: approvalFacts.state,
+                approvalRequests: approvalFacts.requests
             ))
         case "cancelled":
             await onEvent?(.cancelled)
@@ -190,6 +196,26 @@ struct HermesRunTransport: HermesBridgeTransport {
             assistantSourceSessionID: assistant?.role == .assistant ? assistant?.sourceSessionID : nil
         )
     }
+
+    private func resolvedApprovalFacts(
+        status: HermesRunStatusResponse,
+        observed: HermesRunObservationAccumulator
+    ) -> (state: HermesStructuredFactState, requests: [HermesApprovalRequest]) {
+        if status.approvalFactState != .notReported {
+            return (status.approvalFactState, status.approvalRequests)
+        }
+        return observed.approvalProjection()
+    }
+
+    private func resolvedContextFacts(
+        status: HermesRunStatusResponse,
+        observed: HermesRunObservationAccumulator
+    ) -> (state: HermesStructuredFactState, checkpoint: HermesCiderContextCheckpoint?) {
+        if status.contextCheckpointFactState != .notReported {
+            return (status.contextCheckpointFactState, status.contextCheckpoint)
+        }
+        return observed.contextProjection()
+    }
 }
 
 struct HermesRunObservationAccumulator {
@@ -201,6 +227,14 @@ struct HermesRunObservationAccumulator {
     private(set) var containedPendingEvent = false
     private(set) var containedStreamingEvent = false
     private(set) var runIdentityConsistent = true
+    private var approvalFactState: HermesStructuredFactState = .notReported
+    private var approvalsByID: [String: HermesApprovalRequest] = [:]
+    private var contextCheckpointFactState: HermesStructuredFactState = .notReported
+    private var contextCheckpoint: HermesCiderContextCheckpoint?
+
+    init(runID: String) {
+        self.runID = runID
+    }
 
     mutating func recordInitialStatus(_ status: String) {
         if status == "pending" || status == "queued" { containedPendingEvent = true }
@@ -216,7 +250,13 @@ struct HermesRunObservationAccumulator {
         }
         if event.event.hasPrefix("tool.") { containedToolEvent = true }
         if event.event.hasPrefix("reasoning.") { containedReasoningEvent = true }
-        if event.event.hasPrefix("approval.") { containedApprovalEvent = true }
+        if event.event.hasPrefix("approval.") {
+            containedApprovalEvent = true
+            recordApproval(event)
+        }
+        if event.event.hasPrefix("context.") || event.contextCheckpointFactState != .notReported {
+            recordContext(event)
+        }
         if event.event.contains("attachment") { containedAttachmentEvent = true }
         if event.event.contains("pending") || event.status == "pending" || event.status == "queued" {
             containedPendingEvent = true
@@ -242,5 +282,57 @@ struct HermesRunObservationAccumulator {
             containedStreamingContentOrEvent: containedStreamingEvent || messages.contains { $0.sourceID?.hasPrefix("hermes-live:") == true },
             runIdentityConsistent: runIdentityConsistent && terminalRunID == runID
         )
+    }
+
+    func approvalProjection() -> (state: HermesStructuredFactState, requests: [HermesApprovalRequest]) {
+        let requests = approvalsByID.values.sorted { $0.id < $1.id }
+        return (approvalFactState, approvalFactState == .validated ? requests : [])
+    }
+
+    func contextProjection() -> (state: HermesStructuredFactState, checkpoint: HermesCiderContextCheckpoint?) {
+        (contextCheckpointFactState, contextCheckpointFactState == .validated ? contextCheckpoint : nil)
+    }
+
+    private mutating func recordApproval(_ event: HermesRunSSEEvent) {
+        guard approvalFactState != .rejected,
+              event.approvalFactState == .validated,
+              let request = event.approval
+        else {
+            approvalFactState = .rejected
+            approvalsByID.removeAll()
+            return
+        }
+        if let existing = approvalsByID[request.id], !sameRequest(existing, request) {
+            approvalFactState = .rejected
+            approvalsByID.removeAll()
+            return
+        }
+        guard approvalsByID[request.id] != nil || approvalsByID.count < 8 else {
+            approvalFactState = .rejected
+            approvalsByID.removeAll()
+            return
+        }
+        approvalFactState = .validated
+        approvalsByID[request.id] = request
+    }
+
+    private func sameRequest(_ lhs: HermesApprovalRequest, _ rhs: HermesApprovalRequest) -> Bool {
+        lhs.id == rhs.id && lhs.action == rhs.action && lhs.target == rhs.target &&
+            lhs.risk == rhs.risk && lhs.scope == rhs.scope && lhs.source == rhs.source &&
+            lhs.sourceRef == rhs.sourceRef
+    }
+
+    private mutating func recordContext(_ event: HermesRunSSEEvent) {
+        guard contextCheckpointFactState != .rejected,
+              event.contextCheckpointFactState == .validated,
+              let checkpoint = event.contextCheckpoint,
+              contextCheckpoint == nil || contextCheckpoint == checkpoint
+        else {
+            contextCheckpointFactState = .rejected
+            contextCheckpoint = nil
+            return
+        }
+        contextCheckpointFactState = .validated
+        contextCheckpoint = checkpoint
     }
 }

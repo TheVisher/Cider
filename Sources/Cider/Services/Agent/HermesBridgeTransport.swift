@@ -140,6 +140,43 @@ struct HermesCiderReference: Codable, Equatable, Sendable {
     }
 }
 
+enum HermesStructuredFactState: String, Codable, Equatable, Sendable {
+    case notReported
+    case validated
+    case rejected
+}
+
+struct HermesCiderContextCheckpoint: Codable, Equatable, Sendable {
+    let id: String
+    let selected: [HermesCiderReference]
+    let citations: [HermesCiderReference]
+    let omissionReason: String?
+    let source: String
+    let sourceRef: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, selected, citations, source
+        case omissionReason = "omission_reason"
+        case sourceRef = "source_ref"
+    }
+}
+
+struct HermesApprovalRequest: Codable, Equatable, Sendable {
+    let id: String
+    let action: String
+    let target: HermesCiderReference?
+    let risk: String
+    let scope: String
+    let status: String
+    let source: String
+    let sourceRef: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, action, target, risk, scope, status, source
+        case sourceRef = "source_ref"
+    }
+}
+
 struct HermesRunCompletionEnvelope: Equatable, Sendable {
     let provenance: HermesTransportProvenance
     let runID: String?
@@ -151,6 +188,10 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
     let modelIdentity: String?
     let terminalSourceEvidence: HermesTerminalSourceIdentityEvidence
     let ciderReferences: [HermesCiderReference]
+    let contextCheckpointFactState: HermesStructuredFactState
+    let contextCheckpoint: HermesCiderContextCheckpoint?
+    let approvalFactState: HermesStructuredFactState
+    let approvalRequests: [HermesApprovalRequest]
 
     init(
         provenance: HermesTransportProvenance,
@@ -162,7 +203,11 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
         finalState: HermesConversationState,
         modelIdentity: String?,
         terminalSourceEvidence: HermesTerminalSourceIdentityEvidence,
-        ciderReferences: [HermesCiderReference] = []
+        ciderReferences: [HermesCiderReference] = [],
+        contextCheckpointFactState: HermesStructuredFactState = .notReported,
+        contextCheckpoint: HermesCiderContextCheckpoint? = nil,
+        approvalFactState: HermesStructuredFactState = .notReported,
+        approvalRequests: [HermesApprovalRequest] = []
     ) {
         self.provenance = provenance
         self.runID = runID
@@ -174,6 +219,10 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
         self.modelIdentity = modelIdentity
         self.terminalSourceEvidence = terminalSourceEvidence
         self.ciderReferences = ciderReferences
+        self.contextCheckpointFactState = contextCheckpointFactState
+        self.contextCheckpoint = contextCheckpoint
+        self.approvalFactState = approvalFactState
+        self.approvalRequests = approvalRequests
     }
 
     var isEligibleForFutureShadowPersistence: Bool {
@@ -188,6 +237,10 @@ enum HermesRunCompletionEligibility {
               envelope.finalSessionSynchronizationComplete,
               !envelope.observedFacts.containsExcludedEventOrContent,
               envelope.observedFacts.runIdentityConsistent,
+              envelope.contextCheckpointFactState == .notReported,
+              envelope.contextCheckpoint == nil,
+              envelope.approvalFactState == .notReported,
+              envelope.approvalRequests.isEmpty,
               let runID = nonempty(envelope.runID),
               nonempty(envelope.modelIdentity) != nil,
               envelope.terminalSourceEvidence.reportedTerminalRunID == runID,

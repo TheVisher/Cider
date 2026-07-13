@@ -215,6 +215,164 @@ struct AgentRoomsCanonicalConversationTests {
         #expect(try finalDatabase.integrityCheck().isHealthy)
     }
 
+    @Test("context checkpoint and approval truth stay on the exact turn across reopen and runtime rotation")
+    func contextAndApprovalStayWithExactTurn() async throws {
+        let url = temporaryDatabaseURL()
+        defer { removeDatabase(at: url) }
+        let noteID = UUID(uuidString: "81200000-0000-4000-8000-000000000001")!
+        let bookmarkID = UUID(uuidString: "81200000-0000-4000-8000-000000000002")!
+        let note = HermesCiderReference(
+            kind: "note", id: noteID.uuidString, title: "Trip plan", boardID: nil,
+            projectID: nil, artifactType: nil, source: "cider", sourceRef: "note:\(noteID.uuidString)"
+        )
+        let bookmark = HermesCiderReference(
+            kind: "bookmark", id: bookmarkID.uuidString, title: "Travel source", boardID: nil,
+            projectID: nil, artifactType: nil, source: "cider", sourceRef: "bookmark:\(bookmarkID.uuidString)"
+        )
+        let firstCheckpoint = HermesCiderContextCheckpoint(
+            id: "checkpoint-first", selected: [note, bookmark], citations: [bookmark],
+            omissionReason: nil, source: "cider", sourceRef: "context_checkpoint:checkpoint-first"
+        )
+        let firstApproval = HermesApprovalRequest(
+            id: "approval-first", action: "Update note", target: note, risk: "medium",
+            scope: "write", status: "requested", source: "hermes_runs_api",
+            sourceRef: "approval:approval-first"
+        )
+        let secondCheckpoint = HermesCiderContextCheckpoint(
+            id: "checkpoint-second", selected: [], citations: [], omissionReason: "policy_filtered",
+            source: "cider", sourceRef: "context_checkpoint:checkpoint-second"
+        )
+
+        let firstDatabase = CiderDatabase()
+        try firstDatabase.open(at: url)
+        let firstRepository = ConversationRepository(database: firstDatabase)
+        let room = try AgentRoomsActionService(repository: firstRepository)
+            .createConversation(title: "Context-backed room")
+        let firstModel = makeModel(
+            database: firstDatabase,
+            repository: firstRepository,
+            transport: CanonicalConversationScriptTransport(scripts: [
+                .successWithFacts(
+                    runID: "run-context-one", sessionID: "session-context-one", chunks: ["First answer"],
+                    context: firstCheckpoint, approvals: [firstApproval]
+                ),
+            ])
+        )
+        #expect(firstModel.activateCanonicalRoom(id: room.id))
+        await firstModel.refreshTransportReadiness()
+        await firstModel.send("First context turn", selectedRoomID: room.id.uuidString)
+        let firstReceipt = try #require(firstModel.activeRoom?.transcript.receipt)
+        #expect(firstReceipt.contextCheckpoint?.selectedContext.map(\.openRoute) == [
+            .bookmark(bookmarkID: bookmarkID), .note(noteID: noteID),
+        ])
+        #expect(firstReceipt.contextCheckpoint?.citations.map(\.openRoute) == [.bookmark(bookmarkID: bookmarkID)])
+        #expect(firstReceipt.approvalCheckpoint?.requests.first?.status == .requested)
+        #expect(firstReceipt.approvalCheckpoint?.requests.first?.target == "Trip plan · Note")
+        firstDatabase.close()
+
+        let secondDatabase = CiderDatabase()
+        try secondDatabase.open(at: url)
+        let secondRepository = ConversationRepository(database: secondDatabase)
+        let secondModel = makeModel(
+            database: secondDatabase,
+            repository: secondRepository,
+            transport: CanonicalConversationScriptTransport(scripts: [
+                .successWithFacts(
+                    runID: "run-context-two", sessionID: "session-context-two", chunks: ["Second answer"],
+                    context: secondCheckpoint, approvals: []
+                ),
+            ])
+        )
+        #expect(secondModel.activateCanonicalRoom(id: room.id))
+        #expect(secondModel.activeRoom?.transcript.receipt?.contextCheckpoint?.selectedContext.count == 2)
+        #expect(secondModel.activeRoom?.transcript.receipt?.approvalCheckpoint?.requests.first?.id == "approval-first")
+        await secondModel.refreshTransportReadiness()
+        await secondModel.send("Second context turn", selectedRoomID: room.id.uuidString)
+        #expect(secondModel.activeRoom?.transcript.receipt?.contextCheckpoint?.state == .omitted)
+        #expect(secondModel.activeRoom?.transcript.receipt?.contextCheckpoint?.detail ==
+            "Cider withheld context that did not pass the sharing boundary.")
+        #expect(secondModel.activeRoom?.transcript.receipt?.approvalCheckpoint == nil)
+
+        let turns = try secondRepository.turns(roomID: room.id)
+        #expect(turns.count == 2)
+        #expect(turns[0].metadata["context_checkpoint_fact_state"] == "validated")
+        #expect(turns[0].metadata["approval_fact_state"] == "validated")
+        #expect(turns[1].metadata["context_checkpoint_fact_state"] == "validated")
+        #expect(turns[1].metadata["approval_fact_state"] == "notReported")
+        #expect(try decodeContext(try #require(turns[0].metadata["context_checkpoint_json"])) == firstCheckpoint)
+        #expect(try decodeApprovals(try #require(turns[0].metadata["approval_requests_json"])) == [firstApproval])
+        #expect(try decodeContext(try #require(turns[1].metadata["context_checkpoint_json"])) == secondCheckpoint)
+        secondDatabase.close()
+
+        let finalDatabase = CiderDatabase()
+        try finalDatabase.open(at: url)
+        defer { finalDatabase.close() }
+        let finalRepository = ConversationRepository(database: finalDatabase)
+        let finalModel = makeModel(
+            database: finalDatabase,
+            repository: finalRepository,
+            transport: CanonicalConversationUnavailableTransport()
+        )
+        #expect(finalModel.activateCanonicalRoom(id: room.id))
+        #expect(finalModel.activeRoom?.transcript.receipt?.contextCheckpoint?.state == .omitted)
+        #expect(finalModel.activeRoom?.transcript.receipt?.approvalCheckpoint == nil)
+        #expect(try finalRepository.bindings(roomID: room.id).compactMap(\.externalSessionID) == [
+            "session-context-one", "session-context-two",
+        ])
+        #expect(try finalDatabase.integrityCheck().isHealthy)
+    }
+
+    @Test("private-shaped structured facts persist only a fail-closed state")
+    func privateStructuredFactsPersistOnlyRejectedState() async throws {
+        try await withTemporaryConversationDatabase { database, repository in
+            let room = try AgentRoomsActionService(repository: repository)
+                .createConversation(title: "Fail-closed context room")
+            let noteID = UUID(uuidString: "81300000-0000-4000-8000-000000000001")!
+            let privateTarget = HermesCiderReference(
+                kind: "note", id: noteID.uuidString, title: "/Users/private/.env",
+                boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+                sourceRef: "note:\(noteID.uuidString)"
+            )
+            let context = HermesCiderContextCheckpoint(
+                id: "checkpoint-private", selected: [privateTarget], citations: [], omissionReason: nil,
+                source: "cider", sourceRef: "context_checkpoint:checkpoint-private"
+            )
+            let approval = HermesApprovalRequest(
+                id: "approval-private", action: "Update note", target: privateTarget,
+                risk: "high", scope: "write", status: "requested", source: "hermes_runs_api",
+                sourceRef: "approval:approval-private"
+            )
+            let model = makeModel(
+                database: database,
+                repository: repository,
+                transport: CanonicalConversationScriptTransport(scripts: [
+                    .successWithFacts(
+                        runID: "run-private", sessionID: "session-private", chunks: ["Safe answer"],
+                        context: context, approvals: [approval]
+                    ),
+                ])
+            )
+
+            #expect(model.activateCanonicalRoom(id: room.id))
+            await model.refreshTransportReadiness()
+            await model.send("Private-shaped facts", selectedRoomID: room.id.uuidString)
+
+            let receipt = try #require(model.activeRoom?.transcript.receipt)
+            #expect(receipt.contextCheckpoint?.state == .rejected)
+            #expect(receipt.contextCheckpoint?.detail == "Cider withheld unsupported or malformed context details.")
+            #expect(receipt.approvalCheckpoint?.state == .rejected)
+            #expect(receipt.approvalCheckpoint?.requests.isEmpty == true)
+            #expect(!String(describing: receipt.contextCheckpoint).contains("/Users/private"))
+            #expect(!String(describing: receipt.approvalCheckpoint).contains("/Users/private"))
+
+            let metadata = try #require(repository.turns(roomID: room.id).first?.metadata)
+            #expect(metadata["context_checkpoint_fact_state"] == "rejected")
+            #expect(metadata["approval_fact_state"] == "rejected")
+            #expect(metadata["context_checkpoint_json"] == nil)
+            #expect(metadata["approval_requests_json"] == nil)
+        }
+    }
+
     @Test("accepted cancellation persists one user and partial truth and rejects late completion")
     func cancellationPersistsPartialAndDropsLateOutput() async throws {
         try await withTemporaryConversationDatabase { database, repository in
@@ -567,6 +725,13 @@ private enum CanonicalConversationScript: Sendable {
         chunks: [String],
         references: [HermesCiderReference]
     )
+    case successWithFacts(
+        runID: String,
+        sessionID: String,
+        chunks: [String],
+        context: HermesCiderContextCheckpoint,
+        approvals: [HermesApprovalRequest]
+    )
     case conflictingCompletion(runID: String, conflictingRunID: String, sessionID: String, answer: String)
 }
 
@@ -627,6 +792,21 @@ private actor CanonicalConversationScriptTransport: HermesBridgeTransport {
                 runID: runID,
                 sessionID: sessionID,
                 references: references
+            ))
+        case .successWithFacts(let runID, let sessionID, let chunks, let context, let approvals):
+            await onEvent?(.runStarted(runID))
+            for chunk in chunks { await onEvent?(.messageDelta(chunk)) }
+            let answer = chunks.joined()
+            await onEvent?(.completed(output: answer))
+            return .init(completion: canonicalCompletion(
+                state: state,
+                existingMessages: existingMessages,
+                text: text,
+                answer: answer,
+                runID: runID,
+                sessionID: sessionID,
+                context: context,
+                approvals: approvals
             ))
         case .conflictingCompletion(let runID, let conflictingRunID, let sessionID, let answer):
             await onEvent?(.runStarted(runID))
@@ -722,7 +902,9 @@ private func canonicalCompletion(
     answer: String,
     runID: String,
     sessionID: String,
-    references: [HermesCiderReference] = []
+    references: [HermesCiderReference] = [],
+    context: HermesCiderContextCheckpoint? = nil,
+    approvals: [HermesApprovalRequest] = []
 ) -> HermesRunCompletionEnvelope {
     let timestamp = Date(timeIntervalSince1970: 1_805_000_000 + Double(existingMessages.count))
     let userSourceID = "hermes-run:\(runID):user"
@@ -768,6 +950,18 @@ private func canonicalCompletion(
             userSourceSessionID: sessionID,
             assistantSourceSessionID: sessionID
         ),
-        ciderReferences: references
+        ciderReferences: references,
+        contextCheckpointFactState: context == nil ? .notReported : .validated,
+        contextCheckpoint: context,
+        approvalFactState: approvals.isEmpty ? .notReported : .validated,
+        approvalRequests: approvals
     )
+}
+
+private func decodeContext(_ raw: String) throws -> HermesCiderContextCheckpoint {
+    try JSONDecoder().decode(HermesCiderContextCheckpoint.self, from: Data(raw.utf8))
+}
+
+private func decodeApprovals(_ raw: String) throws -> [HermesApprovalRequest] {
+    try JSONDecoder().decode([HermesApprovalRequest].self, from: Data(raw.utf8))
 }

@@ -922,6 +922,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 completion.ciderReferences,
                 bookmarkThumbnail: savedBookmarkThumbnail
             ) ?? []
+        let contextCheckpoint = projectedContextCheckpoint(
+            factState: completion.contextCheckpointFactState,
+            checkpoint: completion.contextCheckpoint
+        )
+        let approvalCheckpoint = AgentRoomsApprovalProjector.checkpoint(
+            factState: completion.approvalFactState,
+            requests: completion.approvalRequests,
+            bookmarkThumbnail: savedBookmarkThumbnail
+        )
         receipt = .init(
             id: "cider-room-receipt:\(runID)",
             title: "Hermes completed a live turn",
@@ -932,7 +941,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             sourceIdentity: Self.receiptSourceIdentity,
             runIdentity: sanitized(runID, limit: Self.maximumRunIdentityLength),
             activity: liveActivity,
-            objectReceipts: objectReceipts
+            objectReceipts: objectReceipts,
+            contextCheckpoint: contextCheckpoint,
+            approvalCheckpoint: approvalCheckpoint
         )
     }
 
@@ -1027,6 +1038,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 snapshot.latestCiderReferences,
                 bookmarkThumbnail: savedBookmarkThumbnail
             ) ?? []
+        let contextCheckpoint = projectedContextCheckpoint(
+            factState: snapshot.latestContextCheckpointFactState,
+            checkpoint: snapshot.latestContextCheckpoint
+        )
+        let approvalCheckpoint = AgentRoomsApprovalProjector.checkpoint(
+            factState: snapshot.latestApprovalFactState,
+            requests: snapshot.latestApprovalRequests,
+            bookmarkThumbnail: savedBookmarkThumbnail
+        )
         if let status = snapshot.latestTurnStatus, status.isTerminal {
             let presentation: (status: AgentRoomReceiptStatus, title: String, detail: String)
             switch status {
@@ -1084,7 +1104,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     sanitized($0, limit: Self.maximumRunIdentityLength)
                 },
                 activity: snapshot.latestActivity,
-                objectReceipts: status == .completed ? objectReceipts : []
+                objectReceipts: status == .completed ? objectReceipts : [],
+                contextCheckpoint: status == .completed ? contextCheckpoint : nil,
+                approvalCheckpoint: status == .completed ? approvalCheckpoint : nil
             )
             turnState = status == .completed ? .completed : .failed
         } else {
@@ -1106,6 +1128,24 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private func setRecoveredDraft(_ text: String) {
         recoveredDraft = text
         recoveredDraftRoomID = roomID?.uuidString
+    }
+
+    private func projectedContextCheckpoint(
+        factState: HermesStructuredFactState,
+        checkpoint: HermesCiderContextCheckpoint?
+    ) -> AgentRoomsContextCheckpoint {
+        if let projected = AgentRoomsContextCheckpointProjector.project(
+            factState: factState,
+            checkpoint: checkpoint,
+            bookmarkThumbnail: savedBookmarkThumbnail
+        ) {
+            return projected
+        }
+        return AgentRoomsContextCheckpointProjector.project(
+            factState: .rejected,
+            checkpoint: nil,
+            bookmarkThumbnail: savedBookmarkThumbnail
+        )!
     }
 }
 
