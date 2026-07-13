@@ -142,11 +142,11 @@ struct AgentRoomsTestChatPersistenceTests {
         }
     }
 
-    @Test("source-backed Cider receipt survives canonical reload with its Open route")
+    @Test("bounded source-backed Cider receipt collection survives canonical reload with exact Open routes")
     func sourceBackedReceiptSurvivesReload() throws {
         try withPersistence { _, _, persistence in
             let roomID = UUID()
-            let reference = HermesCiderReference(
+            let task = HermesCiderReference(
                 kind: "task",
                 id: "367ec2",
                 title: "Persist Cider Test Chat",
@@ -156,8 +156,19 @@ struct AgentRoomsTestChatPersistenceTests {
                 source: "cider",
                 sourceRef: "kanban_card:2afee0/367ec2"
             )
+            let noteID = UUID(uuidString: "81000000-0000-4000-8000-000000000010")!
+            let note = HermesCiderReference(
+                kind: "note",
+                id: noteID.uuidString,
+                title: "Daily source note",
+                boardID: nil,
+                projectID: nil,
+                artifactType: nil,
+                source: "cider",
+                sourceRef: "note:\(noteID.uuidString)"
+            )
             try persistence.persist(
-                completion(roomID: roomID, references: [reference]),
+                completion(roomID: roomID, references: [task, note, task]),
                 expectedText: "hello",
                 expectedConversationID: roomID
             )
@@ -167,9 +178,12 @@ struct AgentRoomsTestChatPersistenceTests {
                 persistence: persistence
             )
             #expect(model.restoreDurableTestChat())
-            let receipt = try #require(model.testRoom?.transcript.receipt?.objectReceipt)
-            #expect(receipt.title == "Persist Cider Test Chat")
-            #expect(receipt.openRoute == .card(boardID: "2afee0", cardID: "367ec2"))
+            let receipts = try #require(model.testRoom?.transcript.receipt?.objectReceipts)
+            #expect(receipts.map(\.title) == ["Daily source note", "Persist Cider Test Chat"])
+            #expect(receipts.map(\.openRoute) == [
+                .note(noteID: noteID),
+                .card(boardID: "2afee0", cardID: "367ec2"),
+            ])
             #expect(model.testRoom?.transcript.receipt?.sourceIdentity == "Hermes Runs API")
             #expect(model.testRoom?.transcript.receipt?.runIdentity == "run-safety")
         }
@@ -283,7 +297,7 @@ struct AgentRoomsTestChatPersistenceTests {
         )
 
         #expect(restored.restoreDurableTestChat())
-        let receipt = try #require(restored.testRoom?.transcript.receipt?.objectReceipt)
+        let receipt = try #require(restored.testRoom?.transcript.receipt?.objectReceipts.first)
         let reference = try #require(receipt.bookmarkThumbnail)
         #expect(receipt.openRoute == .bookmark(bookmarkID: bookmarkID))
         #expect(reference.bookmarkID == bookmarkID)

@@ -810,8 +810,8 @@ struct AgentRoomsWorkspaceView: View {
 
                     if let receipt = room.transcript.receipt {
                         receiptRow(receipt)
-                        if let objectReceipt = receipt.objectReceipt {
-                            ciderObjectReceiptRow(objectReceipt)
+                        if !receipt.objectReceipts.isEmpty {
+                            ciderSourcesDisclosure(receipt.objectReceipts)
                         }
                     }
 
@@ -1116,6 +1116,41 @@ struct AgentRoomsWorkspaceView: View {
         .accessibilityElement(children: .contain)
     }
 
+    private func ciderSourcesDisclosure(_ receipts: [AgentRoomsCiderObjectReceipt]) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(receipts) { receipt in
+                    ciderObjectReceiptRow(receipt)
+                }
+            }
+            .padding(.top, Spacing.sm)
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: "books.vertical")
+                    .foregroundColor(CiderColors.controlAccent)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(receipts.count == 1 ? "1 Cider source" : "\(receipts.count) Cider sources")
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text("Validated objects · Sources do not verify the assistant response")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                receipts.count == 1
+                    ? "1 validated Cider source. Sources do not verify the assistant response."
+                    : "\(receipts.count) validated Cider sources. Sources do not verify the assistant response."
+            )
+        }
+        .tint(CiderColors.secondary)
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
+    }
+
     @ViewBuilder
     private func ciderObjectReceiptThumbnail(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
         if case .bookmark(let bookmarkID) = receipt.openRoute,
@@ -1153,6 +1188,7 @@ struct AgentRoomsWorkspaceView: View {
     private func ciderObjectSymbol(_ kind: AgentRoomsCiderObjectReceipt.Kind) -> String {
         switch kind {
         case .bookmark: "bookmark"
+        case .note: "note.text"
         case .task: "checklist"
         case .projectArtifact: "doc.text"
         }
@@ -1161,6 +1197,7 @@ struct AgentRoomsWorkspaceView: View {
     private func ciderObjectKindLabel(_ kind: AgentRoomsCiderObjectReceipt.Kind) -> String {
         switch kind {
         case .bookmark: "saved bookmark"
+        case .note: "note"
         case .task: "task"
         case .projectArtifact: "project artifact"
         }

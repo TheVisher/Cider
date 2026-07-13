@@ -80,11 +80,11 @@ struct AgentRoomsLiveChatModelTests {
             source: "cider",
             sourceRef: "kanban_card:2afee0/8d2bd6"
         )
-        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference]))
+        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference])?.first)
 
         #expect(receipt.kind == .task)
         #expect(receipt.title == "Show source-backed task receipts")
-        #expect(receipt.identifier == "Task · 8d2bd6")
+        #expect(receipt.identifier == "Kanban card · 8d2bd6")
         #expect(receipt.provenance == "Cider canonical read")
         #expect(receipt.truthBoundary == "Source-backed object, not transcript truth")
         #expect(receipt.openRoute == .card(boardID: "2afee0", cardID: "8d2bd6"))
@@ -108,7 +108,7 @@ struct AgentRoomsLiveChatModelTests {
             source: "cider",
             sourceRef: "note:\(noteID.uuidString)"
         )
-        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference]))
+        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference])?.first)
 
         #expect(receipt.kind == .projectArtifact)
         #expect(receipt.identifier == "Cider · QA")
@@ -117,6 +117,87 @@ struct AgentRoomsLiveChatModelTests {
             CiderExternalOpenBridge.Key.targetType: "note",
             CiderExternalOpenBridge.Key.targetID: noteID.uuidString,
         ])
+    }
+
+    @Test("validated Cider references project one bounded deduplicated deterministic source collection")
+    func canonicalSourceCollection() throws {
+        let bookmarkID = UUID(uuidString: "80900000-0000-4000-8000-000000000010")!
+        let noteID = UUID(uuidString: "80900000-0000-4000-8000-000000000011")!
+        let artifactID = UUID(uuidString: "80900000-0000-4000-8000-000000000012")!
+        let thumbnail = AgentRoomsBookmarkThumbnailReference(
+            bookmarkID: bookmarkID,
+            relativePath: ".thumbnails/\(bookmarkID.uuidString).png",
+            modifiedAt: 1_805_000_000
+        )
+        let bookmark = HermesCiderReference(
+            kind: "bookmark", id: bookmarkID.uuidString, title: "Cider reference",
+            boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "bookmark:\(bookmarkID.uuidString)"
+        )
+        let note = HermesCiderReference(
+            kind: "note", id: noteID.uuidString, title: "Daily note",
+            boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "note:\(noteID.uuidString)"
+        )
+        let task = HermesCiderReference(
+            kind: "task", id: "8d2bd6", title: "Receipt task", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/8d2bd6"
+        )
+        let artifact = HermesCiderReference(
+            kind: "project_artifact", id: artifactID.uuidString, title: "Receipt QA",
+            boardID: nil, projectID: "cider", artifactType: "qa", source: "cider",
+            sourceRef: "note:\(artifactID.uuidString)"
+        )
+
+        let projected = AgentRoomsCiderReceiptProjector.project(
+            [artifact, task, bookmark, note, task],
+            bookmarkThumbnail: { $0 == bookmarkID ? thumbnail : nil }
+        )
+        let receipts = try #require(projected)
+
+        #expect(AgentRoomsCiderReceiptProjector.maximumReferenceCount > 1)
+        #expect(receipts.map(\.kind) == [.bookmark, .note, .task, .projectArtifact])
+        #expect(receipts.map(\.openRoute) == [
+            .bookmark(bookmarkID: bookmarkID),
+            .note(noteID: noteID),
+            .card(boardID: "2afee0", cardID: "8d2bd6"),
+            .note(noteID: artifactID),
+        ])
+        #expect(receipts.first?.bookmarkThumbnail == thumbnail)
+        #expect(Set(receipts.map(\.id)).count == receipts.count)
+    }
+
+    @Test("one malformed cross-identity unsupported or over-broad reference rejects the whole source collection")
+    func invalidSourceCollectionFailsClosed() {
+        let noteID = UUID(uuidString: "80900000-0000-4000-8000-000000000013")!
+        let note = HermesCiderReference(
+            kind: "note", id: noteID.uuidString, title: "Daily note",
+            boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "note:\(noteID.uuidString)"
+        )
+        let malformed = HermesCiderReference(
+            kind: "task", id: "../escape", title: "Unsafe", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/../escape"
+        )
+        let crossIdentity = HermesCiderReference(
+            kind: "project_artifact", id: noteID.uuidString, title: "Conflicting identity",
+            boardID: nil, projectID: "cider", artifactType: "qa", source: "cider",
+            sourceRef: "note:\(noteID.uuidString)"
+        )
+        let unsupported = HermesCiderReference(
+            kind: "contact", id: noteID.uuidString, title: "Unsupported",
+            boardID: nil, projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "contact:\(noteID.uuidString)"
+        )
+
+        #expect(AgentRoomsCiderReceiptProjector.project([note, malformed]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project([note, crossIdentity]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project([note, unsupported]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project(
+            Array(repeating: note, count: AgentRoomsCiderReceiptProjector.maximumReferenceCount + 1)
+        ) == nil)
     }
 
     @Test("missing malformed ambiguous and non-Cider references fail closed")
@@ -138,7 +219,7 @@ struct AgentRoomsLiveChatModelTests {
         )
 
         #expect(AgentRoomsCiderReceiptProjector.project([]) == nil)
-        #expect(AgentRoomsCiderReceiptProjector.project([valid, valid]) == nil)
+        #expect(AgentRoomsCiderReceiptProjector.project([valid, valid])?.count == 1)
         #expect(AgentRoomsCiderReceiptProjector.project([malformed]) == nil)
         #expect(AgentRoomsCiderReceiptProjector.project([nonCider]) == nil)
     }
@@ -151,10 +232,10 @@ struct AgentRoomsLiveChatModelTests {
             projectID: nil, artifactType: nil, source: "cider",
             sourceRef: "kanban_card:2afee0/8d2bd6"
         )
-        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference]))
+        let receipt = try #require(AgentRoomsCiderReceiptProjector.project([reference])?.first)
 
         #expect(receipt.title.count == AgentRoomsCiderReceiptProjector.maximumTitleLength)
-        #expect(AgentRoomsCiderReceiptProjector.maximumReferenceCount == 1)
+        #expect(AgentRoomsCiderReceiptProjector.maximumReferenceCount > 1)
         #expect(AgentRoomsCiderReceiptProjector.project([
             .init(
                 kind: "prose", id: "CID-809", title: "Open card 8d2bd6", boardID: nil,
@@ -183,7 +264,7 @@ struct AgentRoomsLiveChatModelTests {
 
         await model.send("Open it", selectedRoomID: roomID)
 
-        #expect(model.testRoom?.transcript.receipt?.objectReceipt?.openRoute == .card(boardID: "2afee0", cardID: "8d2bd6"))
+        #expect(model.testRoom?.transcript.receipt?.objectReceipts.first?.openRoute == .card(boardID: "2afee0", cardID: "8d2bd6"))
     }
 
     @Test("current terminal output shape promotes one canonical saved bookmark to a native Open route")
@@ -221,7 +302,7 @@ struct AgentRoomsLiveChatModelTests {
 
         await model.send("Find my Chrome backpack", selectedRoomID: roomID)
 
-        let receipt = try #require(model.testRoom?.transcript.receipt?.objectReceipt)
+        let receipt = try #require(model.testRoom?.transcript.receipt?.objectReceipts.first)
         #expect(receipt.kind == .bookmark)
         #expect(receipt.title == "Chrome Industries Cohesive 35L Backpack")
         #expect(receipt.identifier == "Saved bookmark · chromeindustries.com")
@@ -578,6 +659,9 @@ struct AgentRoomsLiveChatModelTests {
             "Retry failed message",
             "DisclosureGroup",
             "Turn activity receipt",
+            "Cider sources",
+            "Sources do not verify the assistant response",
+            "ForEach(receipts)",
             "Button(\"Open\")",
             "Source-backed Cider",
             "onOpenCiderReference(receipt.openRoute)",
@@ -592,6 +676,8 @@ struct AgentRoomsLiveChatModelTests {
             #expect(view.contains(required))
         }
         #expect(view.components(separatedBy: "Button(\"Open\")").count - 1 == 1)
+        #expect(!view.contains("sourceRef"))
+        #expect(!view.contains("relativePath"))
     }
 
     private func makeModel(

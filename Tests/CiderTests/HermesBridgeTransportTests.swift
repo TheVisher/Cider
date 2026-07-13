@@ -38,7 +38,7 @@ struct HermesBridgeTransportTests {
         let roomID = try #require(session.selectedRoomID)
         await session.liveChat.send("what's the backpack bookmark I saved?", selectedRoomID: roomID)
 
-        let receipt = try #require(session.liveChat.testRoom?.transcript.receipt?.objectReceipt)
+        let receipt = try #require(session.liveChat.testRoom?.transcript.receipt?.objectReceipts.first)
         #expect(receipt.kind == .bookmark)
         #expect(receipt.title == "Cohesive 2.0 38L Pack")
         #expect(receipt.openRoute == .bookmark(bookmarkID: saved.id))

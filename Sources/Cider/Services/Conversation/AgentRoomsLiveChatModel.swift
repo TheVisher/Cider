@@ -28,6 +28,17 @@ enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
     case card(boardID: String, cardID: String)
     case note(noteID: UUID)
 
+    var stableIdentity: String {
+        switch self {
+        case .bookmark(let bookmarkID):
+            "bookmark:\(bookmarkID.uuidString)"
+        case .card(let boardID, let cardID):
+            "kanban_card:\(boardID)/\(cardID)"
+        case .note(let noteID):
+            "note:\(noteID.uuidString)"
+        }
+    }
+
     var userInfo: [String: String] {
         switch self {
         case .bookmark(let bookmarkID):
@@ -50,9 +61,10 @@ enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
     }
 }
 
-struct AgentRoomsCiderObjectReceipt: Equatable, Sendable {
-    enum Kind: String, Equatable, Sendable { case bookmark, task, projectArtifact }
+struct AgentRoomsCiderObjectReceipt: Identifiable, Equatable, Sendable {
+    enum Kind: String, Equatable, Sendable { case bookmark, note, task, projectArtifact }
 
+    let id: String
     let kind: Kind
     let title: String
     let identifier: String
@@ -86,10 +98,17 @@ enum AgentRoomsCanonicalSavedBookmarkResolver {
             )
         }
     }
+
+    static func thumbnail(bookmarkID: UUID) -> AgentRoomsBookmarkThumbnailReference? {
+        guard let bookmark = VaultBookmarkService.shared.bookmarks.first(where: { $0.id == bookmarkID }) else {
+            return nil
+        }
+        return AgentRoomsBookmarkReceiptThumbnail.reference(for: bookmark)
+    }
 }
 
 enum AgentRoomsCiderReceiptProjector {
-    static let maximumReferenceCount = 1
+    static let maximumReferenceCount = 8
     static let maximumTitleLength = 160
     static let maximumIdentifierLength = 120
     static let maximumURLLength = 2_048
@@ -142,6 +161,7 @@ enum AgentRoomsCiderReceiptProjector {
 
         let displayHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         return AgentRoomsCiderObjectReceipt(
+            id: AgentRoomsCiderOpenRoute.bookmark(bookmarkID: bookmark.id).stableIdentity,
             kind: .bookmark,
             title: title,
             identifier: "Saved bookmark · \(displayHost)",
@@ -152,28 +172,93 @@ enum AgentRoomsCiderReceiptProjector {
         )
     }
 
-    static func project(_ references: [HermesCiderReference]) -> AgentRoomsCiderObjectReceipt? {
-        guard references.count == maximumReferenceCount,
-              let reference = references.first,
-              reference.source == "cider",
+    @MainActor
+    static func project(
+        _ references: [HermesCiderReference],
+        bookmarkThumbnail: @MainActor (UUID) -> AgentRoomsBookmarkThumbnailReference? = {
+            AgentRoomsCanonicalSavedBookmarkResolver.thumbnail(bookmarkID: $0)
+        }
+    ) -> [AgentRoomsCiderObjectReceipt]? {
+        guard !references.isEmpty, references.count <= maximumReferenceCount else { return nil }
+
+        var byIdentity: [String: AgentRoomsCiderObjectReceipt] = [:]
+        for reference in references {
+            guard let receipt = project(reference, bookmarkThumbnail: bookmarkThumbnail) else { return nil }
+            if let existing = byIdentity[receipt.openRoute.stableIdentity] {
+                guard existing == receipt else { return nil }
+            } else {
+                byIdentity[receipt.openRoute.stableIdentity] = receipt
+            }
+        }
+        return byIdentity.values.sorted { lhs, rhs in
+            let left = sortKey(lhs)
+            let right = sortKey(rhs)
+            return left == right ? lhs.id < rhs.id : left < right
+        }
+    }
+
+    @MainActor
+    private static func project(
+        _ reference: HermesCiderReference,
+        bookmarkThumbnail: @MainActor (UUID) -> AgentRoomsBookmarkThumbnailReference?
+    ) -> AgentRoomsCiderObjectReceipt? {
+        guard reference.source == "cider",
               let id = identifier(reference.id),
               let title = boundedTitle(reference.title)
         else { return nil }
 
         switch reference.kind {
-        case "task":
+        case "bookmark":
+            guard reference.boardID == nil,
+                  reference.projectID == nil,
+                  reference.artifactType == nil,
+                  let bookmarkID = UUID(uuidString: id),
+                  reference.sourceRef == "bookmark:\(id)"
+            else { return nil }
+            let route = AgentRoomsCiderOpenRoute.bookmark(bookmarkID: bookmarkID)
+            let thumbnail = bookmarkThumbnail(bookmarkID)
+            return AgentRoomsCiderObjectReceipt(
+                id: route.stableIdentity,
+                kind: .bookmark,
+                title: title,
+                identifier: "Saved bookmark",
+                provenance: provenance,
+                truthBoundary: truthBoundary,
+                openRoute: route,
+                bookmarkThumbnail: thumbnail?.bookmarkID == bookmarkID ? thumbnail : nil
+            )
+        case "note":
+            guard reference.boardID == nil,
+                  reference.projectID == nil,
+                  reference.artifactType == nil,
+                  let noteID = UUID(uuidString: id),
+                  reference.sourceRef == "note:\(id)"
+            else { return nil }
+            let route = AgentRoomsCiderOpenRoute.note(noteID: noteID)
+            return AgentRoomsCiderObjectReceipt(
+                id: route.stableIdentity,
+                kind: .note,
+                title: title,
+                identifier: "Note",
+                provenance: provenance,
+                truthBoundary: truthBoundary,
+                openRoute: route
+            )
+        case "task", "card", "kanban_card":
             guard reference.projectID == nil,
                   reference.artifactType == nil,
                   let boardID = identifier(reference.boardID),
                   reference.sourceRef == "kanban_card:\(boardID)/\(id)"
             else { return nil }
+            let route = AgentRoomsCiderOpenRoute.card(boardID: boardID, cardID: id)
             return AgentRoomsCiderObjectReceipt(
+                id: route.stableIdentity,
                 kind: .task,
                 title: title,
-                identifier: "Task · \(id)",
+                identifier: "Kanban card · \(id)",
                 provenance: provenance,
                 truthBoundary: truthBoundary,
-                openRoute: .card(boardID: boardID, cardID: id)
+                openRoute: route
             )
         case "project_artifact":
             guard reference.boardID == nil,
@@ -182,16 +267,27 @@ enum AgentRoomsCiderReceiptProjector {
                   let artifactType = identifier(reference.artifactType),
                   reference.sourceRef == "note:\(id)"
             else { return nil }
+            let route = AgentRoomsCiderOpenRoute.note(noteID: noteID)
             return AgentRoomsCiderObjectReceipt(
+                id: route.stableIdentity,
                 kind: .projectArtifact,
                 title: title,
                 identifier: "\(displayName(projectID)) · \(displayName(artifactType))",
                 provenance: provenance,
                 truthBoundary: truthBoundary,
-                openRoute: .note(noteID: noteID)
+                openRoute: route
             )
         default:
             return nil
+        }
+    }
+
+    private static func sortKey(_ receipt: AgentRoomsCiderObjectReceipt) -> Int {
+        switch receipt.kind {
+        case .bookmark: 0
+        case .note: 1
+        case .task: 2
+        case .projectArtifact: 3
         }
     }
 
@@ -258,6 +354,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private let transport: any HermesBridgeTransport
     private let turnCoordinator: HermesTurnCoordinator
     private let savedBookmarkMatches: @MainActor (URL) -> [AgentRoomsSavedBookmarkReference]
+    private let savedBookmarkThumbnail: @MainActor (UUID) -> AgentRoomsBookmarkThumbnailReference?
     private let makeID: @MainActor () -> UUID
     private let now: @MainActor () -> Date
     private let persistence: (any AgentRoomsConversationPersisting)?
@@ -289,6 +386,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         savedBookmarkMatches: @escaping @MainActor (URL) -> [AgentRoomsSavedBookmarkReference] = {
             AgentRoomsCanonicalSavedBookmarkResolver.matches($0)
         },
+        savedBookmarkThumbnail: @escaping @MainActor (UUID) -> AgentRoomsBookmarkThumbnailReference? = {
+            AgentRoomsCanonicalSavedBookmarkResolver.thumbnail(bookmarkID: $0)
+        },
         makeID: @escaping @MainActor () -> UUID = UUID.init,
         now: @escaping @MainActor () -> Date = Date.init,
         persistence: (any AgentRoomsConversationPersisting)? = nil
@@ -296,6 +396,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         self.transport = transport
         self.turnCoordinator = turnCoordinator
         self.savedBookmarkMatches = savedBookmarkMatches
+        self.savedBookmarkThumbnail = savedBookmarkThumbnail
         self.makeID = makeID
         self.now = now
         self.persistence = persistence
@@ -812,12 +913,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         }
         transportMessages = completion.finalMessages
         conversationState = completion.finalState
-        let objectReceipt = completion.ciderReferences.isEmpty
+        let objectReceipts = completion.ciderReferences.isEmpty
             ? AgentRoomsCiderReceiptProjector.projectSavedBookmark(
                 terminalOutput: assistant.content,
                 matching: savedBookmarkMatches
-            )
-            : AgentRoomsCiderReceiptProjector.project(completion.ciderReferences)
+            ).map { [$0] } ?? []
+            : AgentRoomsCiderReceiptProjector.project(
+                completion.ciderReferences,
+                bookmarkThumbnail: savedBookmarkThumbnail
+            ) ?? []
         receipt = .init(
             id: "cider-room-receipt:\(runID)",
             title: "Hermes completed a live turn",
@@ -828,7 +932,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             sourceIdentity: Self.receiptSourceIdentity,
             runIdentity: sanitized(runID, limit: Self.maximumRunIdentityLength),
             activity: liveActivity,
-            objectReceipt: objectReceipt
+            objectReceipts: objectReceipts
         )
     }
 
@@ -912,14 +1016,17 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         recoveredDraftRoomID = recoveredDraft == nil ? nil : snapshot.room.id.uuidString
 
         let lastAssistant = snapshot.transportMessages.last(where: { $0.role == .assistant })
-        let objectReceipt = snapshot.latestCiderReferences.isEmpty
+        let objectReceipts = snapshot.latestCiderReferences.isEmpty
             ? lastAssistant.flatMap {
                 AgentRoomsCiderReceiptProjector.projectSavedBookmark(
                     terminalOutput: $0.content,
                     matching: savedBookmarkMatches
                 )
-            }
-            : AgentRoomsCiderReceiptProjector.project(snapshot.latestCiderReferences)
+            }.map { [$0] } ?? []
+            : AgentRoomsCiderReceiptProjector.project(
+                snapshot.latestCiderReferences,
+                bookmarkThumbnail: savedBookmarkThumbnail
+            ) ?? []
         if let status = snapshot.latestTurnStatus, status.isTerminal {
             let presentation: (status: AgentRoomReceiptStatus, title: String, detail: String)
             switch status {
@@ -977,7 +1084,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     sanitized($0, limit: Self.maximumRunIdentityLength)
                 },
                 activity: snapshot.latestActivity,
-                objectReceipt: status == .completed ? objectReceipt : nil
+                objectReceipts: status == .completed ? objectReceipts : []
             )
             turnState = status == .completed ? .completed : .failed
         } else {

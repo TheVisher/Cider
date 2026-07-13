@@ -99,6 +99,122 @@ struct AgentRoomsCanonicalConversationTests {
         #expect(try reopenedDatabase.integrityCheck().isHealthy)
     }
 
+    @Test("each terminal turn keeps its exact bounded Cider source set across close reopen and runtime rotation")
+    func sourceSetsStayWithTheirTerminalTurns() async throws {
+        let url = temporaryDatabaseURL()
+        defer { removeDatabase(at: url) }
+        let noteID = UUID(uuidString: "81100000-0000-4000-8000-000000000001")!
+        let bookmarkID = UUID(uuidString: "81100000-0000-4000-8000-000000000002")!
+        let artifactID = UUID(uuidString: "81100000-0000-4000-8000-000000000003")!
+        let task = HermesCiderReference(
+            kind: "task", id: "826abc", title: "Source receipt checkpoint", boardID: "2afee0",
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "kanban_card:2afee0/826abc"
+        )
+        let note = HermesCiderReference(
+            kind: "note", id: noteID.uuidString, title: "Daily context", boardID: nil,
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "note:\(noteID.uuidString)"
+        )
+        let bookmark = HermesCiderReference(
+            kind: "bookmark", id: bookmarkID.uuidString, title: "Saved source", boardID: nil,
+            projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "bookmark:\(bookmarkID.uuidString)"
+        )
+        let artifact = HermesCiderReference(
+            kind: "project_artifact", id: artifactID.uuidString, title: "Receipt plan", boardID: nil,
+            projectID: "cider", artifactType: "plan", source: "cider",
+            sourceRef: "note:\(artifactID.uuidString)"
+        )
+        let firstReferences = [task, note, task]
+        let secondReferences = [artifact, bookmark]
+
+        let firstDatabase = CiderDatabase()
+        try firstDatabase.open(at: url)
+        let firstRepository = ConversationRepository(database: firstDatabase)
+        let room = try AgentRoomsActionService(repository: firstRepository)
+            .createConversation(title: "Source-backed room")
+        let firstModel = makeModel(
+            database: firstDatabase,
+            repository: firstRepository,
+            transport: CanonicalConversationScriptTransport(scripts: [
+                .successWithReferences(
+                    runID: "run-source-one",
+                    sessionID: "session-source-one",
+                    chunks: ["First answer"],
+                    references: firstReferences
+                ),
+            ])
+        )
+        #expect(firstModel.activateCanonicalRoom(id: room.id))
+        await firstModel.refreshTransportReadiness()
+        await firstModel.send("First source turn", selectedRoomID: room.id.uuidString)
+        #expect(firstModel.activeRoom?.transcript.receipt?.objectReceipts.map(\.openRoute) == [
+            .note(noteID: noteID),
+            .card(boardID: "2afee0", cardID: "826abc"),
+        ])
+        #expect(try decodeReferences(try #require(
+            firstRepository.turns(roomID: room.id).first?.metadata["cider_references_json"]
+        )) == firstReferences)
+        firstDatabase.close()
+
+        let secondDatabase = CiderDatabase()
+        try secondDatabase.open(at: url)
+        let secondRepository = ConversationRepository(database: secondDatabase)
+        let secondModel = makeModel(
+            database: secondDatabase,
+            repository: secondRepository,
+            transport: CanonicalConversationScriptTransport(scripts: [
+                .successWithReferences(
+                    runID: "run-source-two",
+                    sessionID: "session-source-two",
+                    chunks: ["Second answer"],
+                    references: secondReferences
+                ),
+            ])
+        )
+        #expect(secondModel.activateCanonicalRoom(id: room.id))
+        #expect(secondModel.activeRoom?.transcript.receipt?.objectReceipts.map(\.openRoute) == [
+            .note(noteID: noteID),
+            .card(boardID: "2afee0", cardID: "826abc"),
+        ])
+        await secondModel.refreshTransportReadiness()
+        await secondModel.send("Second source turn", selectedRoomID: room.id.uuidString)
+        #expect(secondModel.activeRoom?.transcript.receipt?.objectReceipts.map(\.openRoute) == [
+            .bookmark(bookmarkID: bookmarkID),
+            .note(noteID: artifactID),
+        ])
+        let durableTurns = try secondRepository.turns(roomID: room.id)
+        #expect(durableTurns.count == 2)
+        #expect(try decodeReferences(try #require(
+            durableTurns[0].metadata["cider_references_json"]
+        )) == firstReferences)
+        #expect(try decodeReferences(try #require(
+            durableTurns[1].metadata["cider_references_json"]
+        )) == secondReferences)
+        secondDatabase.close()
+
+        let finalDatabase = CiderDatabase()
+        try finalDatabase.open(at: url)
+        defer { finalDatabase.close() }
+        let finalRepository = ConversationRepository(database: finalDatabase)
+        let finalModel = makeModel(
+            database: finalDatabase,
+            repository: finalRepository,
+            transport: CanonicalConversationUnavailableTransport()
+        )
+        #expect(finalModel.activateCanonicalRoom(id: room.id))
+        #expect(finalModel.activeRoom?.id == room.id.uuidString)
+        #expect(finalModel.activeRoom?.transcript.receipt?.objectReceipts.map(\.openRoute) == [
+            .bookmark(bookmarkID: bookmarkID),
+            .note(noteID: artifactID),
+        ])
+        #expect(try finalRepository.bindings(roomID: room.id).compactMap(\.externalSessionID) == [
+            "session-source-one", "session-source-two",
+        ])
+        #expect(try finalDatabase.integrityCheck().isHealthy)
+    }
+
     @Test("accepted cancellation persists one user and partial truth and rejects late completion")
     func cancellationPersistsPartialAndDropsLateOutput() async throws {
         try await withTemporaryConversationDatabase { database, repository in
@@ -421,6 +537,10 @@ struct AgentRoomsCanonicalConversationTests {
         try? FileManager.default.removeItem(atPath: url.path + "-wal")
         try? FileManager.default.removeItem(atPath: url.path + "-shm")
     }
+
+    private func decodeReferences(_ raw: String) throws -> [HermesCiderReference] {
+        try JSONDecoder().decode([HermesCiderReference].self, from: Data(raw.utf8))
+    }
 }
 
 private actor CanonicalConversationUnavailableTransport: HermesBridgeTransport {
@@ -441,6 +561,12 @@ private actor CanonicalConversationUnavailableTransport: HermesBridgeTransport {
 private enum CanonicalConversationScript: Sendable {
     case preAcceptFailure
     case success(runID: String, sessionID: String, chunks: [String])
+    case successWithReferences(
+        runID: String,
+        sessionID: String,
+        chunks: [String],
+        references: [HermesCiderReference]
+    )
     case conflictingCompletion(runID: String, conflictingRunID: String, sessionID: String, answer: String)
 }
 
@@ -487,6 +613,20 @@ private actor CanonicalConversationScriptTransport: HermesBridgeTransport {
                 answer: answer,
                 runID: runID,
                 sessionID: sessionID
+            ))
+        case .successWithReferences(let runID, let sessionID, let chunks, let references):
+            await onEvent?(.runStarted(runID))
+            for chunk in chunks { await onEvent?(.messageDelta(chunk)) }
+            let answer = chunks.joined()
+            await onEvent?(.completed(output: answer))
+            return .init(completion: canonicalCompletion(
+                state: state,
+                existingMessages: existingMessages,
+                text: text,
+                answer: answer,
+                runID: runID,
+                sessionID: sessionID,
+                references: references
             ))
         case .conflictingCompletion(let runID, let conflictingRunID, let sessionID, let answer):
             await onEvent?(.runStarted(runID))
@@ -581,7 +721,8 @@ private func canonicalCompletion(
     text: String,
     answer: String,
     runID: String,
-    sessionID: String
+    sessionID: String,
+    references: [HermesCiderReference] = []
 ) -> HermesRunCompletionEnvelope {
     let timestamp = Date(timeIntervalSince1970: 1_805_000_000 + Double(existingMessages.count))
     let userSourceID = "hermes-run:\(runID):user"
@@ -626,6 +767,7 @@ private func canonicalCompletion(
             assistantSourceID: assistantSourceID,
             userSourceSessionID: sessionID,
             assistantSourceSessionID: sessionID
-        )
+        ),
+        ciderReferences: references
     )
 }
