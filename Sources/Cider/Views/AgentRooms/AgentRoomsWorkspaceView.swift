@@ -6,6 +6,7 @@ struct AgentRoomsWorkspaceView: View {
     let roomActions: (any AgentRoomsActionServicing)?
     let onOpenLiveChat: () -> Void
     let onOpenCiderReference: (AgentRoomsCiderOpenRoute) -> Void
+    let onExportRoom: ((UUID, String) -> Void)?
 
     @ObservedObject private var session: AgentRoomsSessionModel
     @ObservedObject private var liveChat: AgentRoomsLiveChatModel
@@ -30,12 +31,14 @@ struct AgentRoomsWorkspaceView: View {
         roomActions: any AgentRoomsActionServicing,
         session: AgentRoomsSessionModel,
         onOpenLiveChat: @escaping () -> Void,
-        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
+        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in },
+        onExportRoom: ((UUID, String) -> Void)? = nil
     ) {
         self.loadWorkspace = loadWorkspace
         self.roomActions = roomActions
         self.onOpenLiveChat = onOpenLiveChat
         self.onOpenCiderReference = onOpenCiderReference
+        self.onExportRoom = onExportRoom
         _session = ObservedObject(wrappedValue: session)
         _liveChat = ObservedObject(wrappedValue: session.liveChat)
         _state = State(initialValue: .loading(authority: .canonicalIncomplete))
@@ -46,12 +49,14 @@ struct AgentRoomsWorkspaceView: View {
         state: AgentRoomsWorkspaceState,
         session: AgentRoomsSessionModel,
         onOpenLiveChat: @escaping () -> Void,
-        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
+        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in },
+        onExportRoom: ((UUID, String) -> Void)? = nil
     ) {
         self.loadWorkspace = { _ in state }
         self.roomActions = nil
         self.onOpenLiveChat = onOpenLiveChat
         self.onOpenCiderReference = onOpenCiderReference
+        self.onExportRoom = onExportRoom
         _session = ObservedObject(wrappedValue: session)
         _liveChat = ObservedObject(wrappedValue: session.liveChat)
         _state = State(initialValue: state)
@@ -62,7 +67,8 @@ struct AgentRoomsWorkspaceView: View {
         state: AgentRoomsWorkspaceState,
         liveChat: AgentRoomsLiveChatModel = AgentRoomsLiveChatModel(transport: HermesRunTransport()),
         onOpenLiveChat: @escaping () -> Void,
-        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
+        onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in },
+        onExportRoom: ((UUID, String) -> Void)? = nil
     ) {
         let session = AgentRoomsSessionModel(liveChat: liveChat)
         if case .loaded(_, _, let selectedRoomID) = state {
@@ -74,7 +80,8 @@ struct AgentRoomsWorkspaceView: View {
             state: state,
             session: session,
             onOpenLiveChat: onOpenLiveChat,
-            onOpenCiderReference: onOpenCiderReference
+            onOpenCiderReference: onOpenCiderReference,
+            onExportRoom: onExportRoom
         )
     }
 
@@ -819,6 +826,12 @@ struct AgentRoomsWorkspaceView: View {
                         if let checkpoint = receipt.approvalCheckpoint {
                             approvalCheckpointDisclosure(checkpoint)
                         }
+                        if let attachments = receipt.attachments {
+                            assetDisclosure(attachments, kind: .attachment)
+                        }
+                        if let artifacts = receipt.generatedArtifacts {
+                            assetDisclosure(artifacts, kind: .generatedArtifact)
+                        }
                     }
 
                     if let artifact = room.transcript.futureArtifact {
@@ -895,7 +908,7 @@ struct AgentRoomsWorkspaceView: View {
                     .font(CiderFont.titleMedium)
                     .foregroundColor(CiderColors.primary)
                 Spacer(minLength: Spacing.sm)
-                if canManage(room) {
+                if canManage(room) || exportableRoomID(room) != nil {
                     Menu {
                         roomManagementMenu(room)
                     } label: {
@@ -903,7 +916,7 @@ struct AgentRoomsWorkspaceView: View {
                             .accessibilityLabel("Manage \(room.title)")
                     }
                     .menuStyle(.borderlessButton)
-                    .help("Rename, archive, or restore this conversation")
+                    .help("Export or manage this conversation")
                 }
             }
             HStack(spacing: Spacing.xs) {
@@ -1296,6 +1309,109 @@ struct AgentRoomsWorkspaceView: View {
         }
     }
 
+    private func assetDisclosure(
+        _ collection: AgentRoomsAssetCollection,
+        kind: AgentRoomsAssetReceipt.Kind
+    ) -> some View {
+        let title: String = switch kind {
+        case .attachment:
+            collection.rows.count == 1 ? "Attachment" : "Attachments"
+        case .generatedArtifact:
+            collection.rows.count == 1 ? "Generated artifact" : "Generated artifacts"
+        }
+        let symbol = kind == .attachment ? "paperclip" : "doc.badge.gearshape"
+        return DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if collection.rows.isEmpty {
+                    Text(collection.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                } else {
+                    ForEach(collection.rows) { row in
+                        assetReceiptRow(row)
+                    }
+                }
+            }
+            .padding(.top, Spacing.sm)
+        } label: {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: collection.state == .available ? symbol : "eye.slash")
+                    .foregroundColor(collection.state == .available ? CiderColors.controlAccent : CiderColors.warning)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(title)
+                        .font(CiderFont.bodySemibold)
+                        .foregroundColor(CiderColors.primary)
+                    Text(collection.detail)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title). \(collection.detail). Cider-native open only when available.")
+        }
+        .tint(CiderColors.secondary)
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderDefault, lineWidth: Spacing.hairline))
+    }
+
+    private func assetReceiptRow(_ row: AgentRoomsAssetReceipt) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Spacing.md) {
+                assetReceiptIdentity(row)
+                Spacer(minLength: Spacing.sm)
+                assetOpenControl(row)
+            }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                assetReceiptIdentity(row)
+                assetOpenControl(row)
+            }
+        }
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceSubtle))
+        .overlay(RoundedRectangle(cornerRadius: Radius.sm).stroke(CiderColors.borderSubtle, lineWidth: Spacing.hairline))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func assetReceiptIdentity(_ row: AgentRoomsAssetReceipt) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: row.kind == .attachment ? "paperclip" : "doc.badge.gearshape")
+                .foregroundColor(CiderColors.controlAccent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(row.title)
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+                Text("\(row.contentType) · \(row.sizeLabel)")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                Text("\(row.provenance) · \(row.truthBoundary)")
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(2)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(row.title), \(row.contentType), \(row.sizeLabel), \(row.provenance), \(row.availability)")
+    }
+
+    @ViewBuilder
+    private func assetOpenControl(_ row: AgentRoomsAssetReceipt) -> some View {
+        if let route = row.openRoute {
+            Button("Open") { onOpenCiderReference(route) }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Open \(row.title) in Cider")
+                .help("Open this proven Cider-owned item")
+        } else {
+            Text("Unavailable")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.tertiary)
+                .accessibilityLabel("Open unavailable for \(row.title)")
+        }
+    }
+
     @ViewBuilder
     private func ciderObjectReceiptThumbnail(_ receipt: AgentRoomsCiderObjectReceipt) -> some View {
         if case .bookmark(let bookmarkID) = receipt.openRoute,
@@ -1516,6 +1632,17 @@ struct AgentRoomsWorkspaceView: View {
 
     @ViewBuilder
     private func roomManagementMenu(_ room: AgentRoom) -> some View {
+        if let roomID = exportableRoomID(room) {
+            Button("Export Conversation…") {
+                onExportRoom?(roomID, room.title)
+            }
+            .accessibilityLabel("Export Conversation \(room.title)")
+
+            if canManage(room) {
+                Divider()
+            }
+        }
+
         if canManage(room) {
             Button("Rename Conversation") {
                 renameText = room.title
@@ -1535,6 +1662,14 @@ struct AgentRoomsWorkspaceView: View {
                 .accessibilityLabel("Restore Conversation \(room.title)")
             }
         }
+    }
+
+    private func exportableRoomID(_ room: AgentRoom) -> UUID? {
+        guard onExportRoom != nil,
+              state.authority == .canonicalIncomplete,
+              room.lifecycleState != .trashed
+        else { return nil }
+        return UUID(uuidString: room.id)
     }
 
     private func canManage(_ room: AgentRoom) -> Bool {

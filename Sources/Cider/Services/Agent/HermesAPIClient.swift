@@ -55,6 +55,10 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
     let contextCheckpoint: HermesCiderContextCheckpoint?
     let approvalFactState: HermesStructuredFactState
     let approvalRequests: [HermesApprovalRequest]
+    let attachmentFactState: HermesStructuredFactState
+    let attachments: [HermesCiderAttachment]
+    let generatedArtifactFactState: HermesStructuredFactState
+    let generatedArtifacts: [HermesCiderGeneratedArtifact]
 
     enum CodingKeys: String, CodingKey {
         case object
@@ -66,6 +70,8 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
         case ciderReferences = "cider_references"
         case contextCheckpoint = "cider_context_checkpoint"
         case approvalRequests = "approval_requests"
+        case attachments = "cider_attachments"
+        case generatedArtifacts = "generated_artifacts"
     }
 
     init(from decoder: Decoder) throws {
@@ -89,6 +95,26 @@ struct HermesRunStatusResponse: Decodable, Equatable, Sendable {
         )
         approvalFactState = approvalFact.0
         approvalRequests = approvalFact.1 ?? []
+        let attachmentFact: (HermesStructuredFactState, [HermesCiderAttachment]?) = Self.decodeStructuredFact(
+            [HermesCiderAttachment].self,
+            forKey: .attachments,
+            from: container
+        )
+        let normalizedAttachments = attachmentFact.1.map(HermesCiderAssetFactContract.normalizedAttachments)
+        attachmentFactState = attachmentFact.0 == .rejected
+            ? .rejected
+            : normalizedAttachments?.state ?? .notReported
+        attachments = attachmentFactState == .validated ? normalizedAttachments?.values ?? [] : []
+        let artifactFact: (HermesStructuredFactState, [HermesCiderGeneratedArtifact]?) = Self.decodeStructuredFact(
+            [HermesCiderGeneratedArtifact].self,
+            forKey: .generatedArtifacts,
+            from: container
+        )
+        let normalizedArtifacts = artifactFact.1.map(HermesCiderAssetFactContract.normalizedGeneratedArtifacts)
+        generatedArtifactFactState = artifactFact.0 == .rejected
+            ? .rejected
+            : normalizedArtifacts?.state ?? .notReported
+        generatedArtifacts = generatedArtifactFactState == .validated ? normalizedArtifacts?.values ?? [] : []
     }
 
     private static func decodeStructuredFact<T: Decodable>(
@@ -115,6 +141,10 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
     let approvalFactState: HermesStructuredFactState
     let contextCheckpoint: HermesCiderContextCheckpoint?
     let contextCheckpointFactState: HermesStructuredFactState
+    let attachment: HermesCiderAttachment?
+    let attachmentFactState: HermesStructuredFactState
+    let generatedArtifact: HermesCiderGeneratedArtifact?
+    let generatedArtifactFactState: HermesStructuredFactState
 
     enum CodingKeys: String, CodingKey {
         case event
@@ -127,6 +157,8 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
         case status
         case approval
         case contextCheckpoint = "cider_context_checkpoint"
+        case attachment = "cider_attachment"
+        case generatedArtifact = "generated_artifact"
     }
 
     init(
@@ -141,7 +173,11 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
         approval: HermesApprovalRequest? = nil,
         approvalFactState: HermesStructuredFactState = .notReported,
         contextCheckpoint: HermesCiderContextCheckpoint? = nil,
-        contextCheckpointFactState: HermesStructuredFactState = .notReported
+        contextCheckpointFactState: HermesStructuredFactState = .notReported,
+        attachment: HermesCiderAttachment? = nil,
+        attachmentFactState: HermesStructuredFactState = .notReported,
+        generatedArtifact: HermesCiderGeneratedArtifact? = nil,
+        generatedArtifactFactState: HermesStructuredFactState = .notReported
     ) {
         self.event = event
         self.runID = runID
@@ -155,6 +191,10 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
         self.approvalFactState = approvalFactState
         self.contextCheckpoint = contextCheckpoint
         self.contextCheckpointFactState = contextCheckpointFactState
+        self.attachment = attachment
+        self.attachmentFactState = attachmentFactState
+        self.generatedArtifact = generatedArtifact
+        self.generatedArtifactFactState = generatedArtifactFactState
     }
 
     init(from decoder: Decoder) throws {
@@ -180,6 +220,24 @@ struct HermesRunSSEEvent: Decodable, Equatable, Sendable {
         } else {
             contextCheckpoint = nil
             contextCheckpointFactState = event.hasPrefix("context.") ? .rejected : .notReported
+        }
+        if container.contains(.attachment) {
+            let decoded = try? container.decode(HermesCiderAttachment.self, forKey: .attachment)
+            let normalized = decoded.map { HermesCiderAssetFactContract.normalizedAttachments([$0]) }
+            attachmentFactState = normalized?.state == .validated ? .validated : .rejected
+            attachment = attachmentFactState == .validated ? normalized?.values.first : nil
+        } else {
+            attachment = nil
+            attachmentFactState = event.hasPrefix("attachment.") ? .rejected : .notReported
+        }
+        if container.contains(.generatedArtifact) {
+            let decoded = try? container.decode(HermesCiderGeneratedArtifact.self, forKey: .generatedArtifact)
+            let normalized = decoded.map { HermesCiderAssetFactContract.normalizedGeneratedArtifacts([$0]) }
+            generatedArtifactFactState = normalized?.state == .validated ? .validated : .rejected
+            generatedArtifact = generatedArtifactFactState == .validated ? normalized?.values.first : nil
+        } else {
+            generatedArtifact = nil
+            generatedArtifactFactState = event.hasPrefix("artifact.") ? .rejected : .notReported
         }
     }
 

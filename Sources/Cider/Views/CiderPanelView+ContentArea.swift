@@ -442,6 +442,13 @@ extension CiderPanelView {
                     },
                     onOpenCiderReference: { route in
                         handleExternalOpenTarget(route.userInfo)
+                    },
+                    onExportRoom: { roomID, roomTitle in
+                        AgentRoomsRoomExportPresenter.requestExport(
+                            roomID: roomID,
+                            roomTitle: roomTitle,
+                            exporter: AgentRoomsRoomExportService(repository: repository)
+                        )
                     }
                 )
             case .aiAssistant:

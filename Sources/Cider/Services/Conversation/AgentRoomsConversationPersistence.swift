@@ -14,6 +14,10 @@ struct AgentRoomsConversationSnapshot: Sendable {
     let latestContextCheckpoint: HermesCiderContextCheckpoint?
     let latestApprovalFactState: HermesStructuredFactState
     let latestApprovalRequests: [HermesApprovalRequest]
+    let latestAttachmentFactState: HermesStructuredFactState
+    let latestAttachments: [HermesCiderAttachment]
+    let latestGeneratedArtifactFactState: HermesStructuredFactState
+    let latestGeneratedArtifacts: [HermesCiderGeneratedArtifact]
 }
 
 struct AgentRoomsConversationAttempt: Equatable, Sendable {
@@ -291,6 +295,10 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 contextCheckpoint: structuredFacts.context,
                 approvalFactState: structuredFacts.approvalState,
                 approvalRequests: structuredFacts.approvals,
+                attachmentFactState: structuredFacts.attachmentState,
+                attachments: structuredFacts.attachments,
+                generatedArtifactFactState: structuredFacts.generatedArtifactState,
+                generatedArtifacts: structuredFacts.generatedArtifacts,
                 activity: activity,
                 userSourceID: terminal.userSourceID,
                 assistantSourceID: terminal.assistantSourceID
@@ -642,6 +650,18 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             ),
             latestApprovalRequests: try decodeApprovalRequests(
                 latestTurn?.metadata["approval_requests_json"]
+            ),
+            latestAttachmentFactState: try decodeFactState(
+                latestTurn?.metadata["attachment_fact_state"]
+            ),
+            latestAttachments: try decodeAttachments(
+                latestTurn?.metadata["attachments_json"]
+            ),
+            latestGeneratedArtifactFactState: try decodeFactState(
+                latestTurn?.metadata["generated_artifact_fact_state"]
+            ),
+            latestGeneratedArtifacts: try decodeGeneratedArtifacts(
+                latestTurn?.metadata["generated_artifacts_json"]
             )
         )
     }
@@ -707,6 +727,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     throw AgentRoomsConversationPersistenceError.corruptHistory
                 }
             }
+            try validateStructuredFactMetadata(turn.metadata)
         }
 
         for (index, message) in messages.enumerated() {
@@ -845,6 +866,10 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         contextCheckpoint: HermesCiderContextCheckpoint?,
         approvalFactState: HermesStructuredFactState,
         approvalRequests: [HermesApprovalRequest],
+        attachmentFactState: HermesStructuredFactState,
+        attachments: [HermesCiderAttachment],
+        generatedArtifactFactState: HermesStructuredFactState,
+        generatedArtifacts: [HermesCiderGeneratedArtifact],
         activity: [AgentRoomsLiveActivity],
         userSourceID: String,
         assistantSourceID: String
@@ -859,11 +884,19 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         metadata["cider_references_json"] = encodeReferences(references)
         metadata["context_checkpoint_fact_state"] = contextCheckpointFactState.rawValue
         metadata["approval_fact_state"] = approvalFactState.rawValue
+        metadata["attachment_fact_state"] = attachmentFactState.rawValue
+        metadata["generated_artifact_fact_state"] = generatedArtifactFactState.rawValue
         if let contextCheckpoint {
             metadata["context_checkpoint_json"] = encode(contextCheckpoint)
         }
         if !approvalRequests.isEmpty {
             metadata["approval_requests_json"] = encode(approvalRequests)
+        }
+        if !attachments.isEmpty {
+            metadata["attachments_json"] = encode(attachments)
+        }
+        if !generatedArtifacts.isEmpty {
+            metadata["generated_artifacts_json"] = encode(generatedArtifacts)
         }
         metadata["terminal_user_source_id"] = userSourceID
         metadata["terminal_assistant_source_id"] = assistantSourceID
@@ -937,6 +970,10 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         let context: HermesCiderContextCheckpoint?
         let approvalState: HermesStructuredFactState
         let approvals: [HermesApprovalRequest]
+        let attachmentState: HermesStructuredFactState
+        let attachments: [HermesCiderAttachment]
+        let generatedArtifactState: HermesStructuredFactState
+        let generatedArtifacts: [HermesCiderGeneratedArtifact]
     }
 
     private func normalizedStructuredFacts(
@@ -961,11 +998,49 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             : approvalCheckpoint?.state == .available
         let approvalState = approvalValid ? completion.approvalFactState : .rejected
         let approvals = approvalState == .validated ? completion.approvalRequests : []
+
+        let normalizedAttachments = HermesCiderAssetFactContract.normalizedAttachments(
+            completion.attachments
+        )
+        let attachmentValid: Bool
+        switch completion.attachmentFactState {
+        case .notReported:
+            attachmentValid = completion.attachments.isEmpty
+        case .rejected:
+            attachmentValid = completion.attachments.isEmpty
+        case .validated:
+            attachmentValid = normalizedAttachments.state == .validated
+        }
+        let attachmentState = attachmentValid ? completion.attachmentFactState : .rejected
+        let attachments = attachmentState == .validated ? normalizedAttachments.values : []
+
+        let normalizedArtifacts = HermesCiderAssetFactContract.normalizedGeneratedArtifacts(
+            completion.generatedArtifacts
+        )
+        let generatedArtifactValid: Bool
+        switch completion.generatedArtifactFactState {
+        case .notReported:
+            generatedArtifactValid = completion.generatedArtifacts.isEmpty
+        case .rejected:
+            generatedArtifactValid = completion.generatedArtifacts.isEmpty
+        case .validated:
+            generatedArtifactValid = normalizedArtifacts.state == .validated
+        }
+        let generatedArtifactState = generatedArtifactValid
+            ? completion.generatedArtifactFactState
+            : .rejected
+        let generatedArtifacts = generatedArtifactState == .validated
+            ? normalizedArtifacts.values
+            : []
         return NormalizedStructuredFacts(
             contextState: contextState,
             context: context,
             approvalState: approvalState,
-            approvals: approvals
+            approvals: approvals,
+            attachmentState: attachmentState,
+            attachments: attachments,
+            generatedArtifactState: generatedArtifactState,
+            generatedArtifacts: generatedArtifacts
         )
     }
 
@@ -999,6 +1074,48 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
               values.count <= AgentRoomsApprovalProjector.maximumApprovalCount
         else { throw AgentRoomsConversationPersistenceError.corruptHistory }
         return values
+    }
+
+    private func decodeAttachments(_ raw: String?) throws -> [HermesCiderAttachment] {
+        guard let raw else { return [] }
+        guard let data = raw.data(using: .utf8),
+              let values = try? JSONDecoder().decode([HermesCiderAttachment].self, from: data),
+              values.count <= AgentRoomsAssetProjector.maximumFactCount
+        else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+        return values
+    }
+
+    private func decodeGeneratedArtifacts(_ raw: String?) throws -> [HermesCiderGeneratedArtifact] {
+        guard let raw else { return [] }
+        guard let data = raw.data(using: .utf8),
+              let values = try? JSONDecoder().decode([HermesCiderGeneratedArtifact].self, from: data),
+              values.count <= AgentRoomsAssetProjector.maximumFactCount
+        else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+        return values
+    }
+
+    private func validateStructuredFactMetadata(_ metadata: [String: String]) throws {
+        let attachmentState = try decodeFactState(metadata["attachment_fact_state"])
+        let attachments = try decodeAttachments(metadata["attachments_json"])
+        switch attachmentState {
+        case .notReported, .rejected:
+            guard attachments.isEmpty else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+        case .validated:
+            guard HermesCiderAssetFactContract.normalizedAttachments(attachments).state == .validated else {
+                throw AgentRoomsConversationPersistenceError.corruptHistory
+            }
+        }
+
+        let artifactState = try decodeFactState(metadata["generated_artifact_fact_state"])
+        let artifacts = try decodeGeneratedArtifacts(metadata["generated_artifacts_json"])
+        switch artifactState {
+        case .notReported, .rejected:
+            guard artifacts.isEmpty else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+        case .validated:
+            guard HermesCiderAssetFactContract.normalizedGeneratedArtifacts(artifacts).state == .validated else {
+                throw AgentRoomsConversationPersistenceError.corruptHistory
+            }
+        }
     }
 
     private func requiredRoom(id: UUID) throws -> ConversationRoom {

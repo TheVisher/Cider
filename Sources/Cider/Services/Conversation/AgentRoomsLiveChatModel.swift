@@ -27,6 +27,7 @@ enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
     case bookmark(bookmarkID: UUID)
     case card(boardID: String, cardID: String)
     case note(noteID: UUID)
+    case vaultFile(fileID: UUID)
 
     var stableIdentity: String {
         switch self {
@@ -36,6 +37,8 @@ enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
             "kanban_card:\(boardID)/\(cardID)"
         case .note(let noteID):
             "note:\(noteID.uuidString)"
+        case .vaultFile(let fileID):
+            "vaultFile:\(fileID.uuidString)"
         }
     }
 
@@ -56,6 +59,11 @@ enum AgentRoomsCiderOpenRoute: Equatable, Sendable {
             return [
                 CiderExternalOpenBridge.Key.targetType: "note",
                 CiderExternalOpenBridge.Key.targetID: noteID.uuidString,
+            ]
+        case .vaultFile(let fileID):
+            return [
+                CiderExternalOpenBridge.Key.targetType: "vaultFile",
+                CiderExternalOpenBridge.Key.targetID: fileID.uuidString,
             ]
         }
     }
@@ -303,6 +311,7 @@ enum AgentRoomsCiderReceiptProjector {
     }
 
     private static func boundedTitle(_ raw: String) -> String? {
+        guard AgentRoomsTurnFactPrivacyPolicy.isSafeDisplayText(raw) else { return nil }
         let scalars = raw.unicodeScalars.filter {
             $0 == "\n" || $0 == "\t" || !CharacterSet.controlCharacters.contains($0)
         }
@@ -355,6 +364,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private let turnCoordinator: HermesTurnCoordinator
     private let savedBookmarkMatches: @MainActor (URL) -> [AgentRoomsSavedBookmarkReference]
     private let savedBookmarkThumbnail: @MainActor (UUID) -> AgentRoomsBookmarkThumbnailReference?
+    private let canonicalAssetOpenRoute: @MainActor (HermesCiderAssetReference) -> AgentRoomsCiderOpenRoute?
     private let makeID: @MainActor () -> UUID
     private let now: @MainActor () -> Date
     private let persistence: (any AgentRoomsConversationPersisting)?
@@ -389,6 +399,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         savedBookmarkThumbnail: @escaping @MainActor (UUID) -> AgentRoomsBookmarkThumbnailReference? = {
             AgentRoomsCanonicalSavedBookmarkResolver.thumbnail(bookmarkID: $0)
         },
+        canonicalAssetOpenRoute: @escaping @MainActor (HermesCiderAssetReference) -> AgentRoomsCiderOpenRoute? = {
+            AgentRoomsCanonicalAssetResolver.openRoute(for: $0)
+        },
         makeID: @escaping @MainActor () -> UUID = UUID.init,
         now: @escaping @MainActor () -> Date = Date.init,
         persistence: (any AgentRoomsConversationPersisting)? = nil
@@ -397,6 +410,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         self.turnCoordinator = turnCoordinator
         self.savedBookmarkMatches = savedBookmarkMatches
         self.savedBookmarkThumbnail = savedBookmarkThumbnail
+        self.canonicalAssetOpenRoute = canonicalAssetOpenRoute
         self.makeID = makeID
         self.now = now
         self.persistence = persistence
@@ -931,6 +945,16 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             requests: completion.approvalRequests,
             bookmarkThumbnail: savedBookmarkThumbnail
         )
+        let attachments = AgentRoomsAssetProjector.attachments(
+            factState: completion.attachmentFactState,
+            facts: completion.attachments,
+            canonicalOpenRoute: canonicalAssetOpenRoute
+        )
+        let generatedArtifacts = AgentRoomsAssetProjector.generatedArtifacts(
+            factState: completion.generatedArtifactFactState,
+            facts: completion.generatedArtifacts,
+            canonicalOpenRoute: canonicalAssetOpenRoute
+        )
         receipt = .init(
             id: "cider-room-receipt:\(runID)",
             title: "Hermes completed a live turn",
@@ -943,7 +967,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             activity: liveActivity,
             objectReceipts: objectReceipts,
             contextCheckpoint: contextCheckpoint,
-            approvalCheckpoint: approvalCheckpoint
+            approvalCheckpoint: approvalCheckpoint,
+            attachments: attachments,
+            generatedArtifacts: generatedArtifacts
         )
     }
 
@@ -1047,6 +1073,16 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             requests: snapshot.latestApprovalRequests,
             bookmarkThumbnail: savedBookmarkThumbnail
         )
+        let attachments = AgentRoomsAssetProjector.attachments(
+            factState: snapshot.latestAttachmentFactState,
+            facts: snapshot.latestAttachments,
+            canonicalOpenRoute: canonicalAssetOpenRoute
+        )
+        let generatedArtifacts = AgentRoomsAssetProjector.generatedArtifacts(
+            factState: snapshot.latestGeneratedArtifactFactState,
+            facts: snapshot.latestGeneratedArtifacts,
+            canonicalOpenRoute: canonicalAssetOpenRoute
+        )
         if let status = snapshot.latestTurnStatus, status.isTerminal {
             let presentation: (status: AgentRoomReceiptStatus, title: String, detail: String)
             switch status {
@@ -1106,7 +1142,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 activity: snapshot.latestActivity,
                 objectReceipts: status == .completed ? objectReceipts : [],
                 contextCheckpoint: status == .completed ? contextCheckpoint : nil,
-                approvalCheckpoint: status == .completed ? approvalCheckpoint : nil
+                approvalCheckpoint: status == .completed ? approvalCheckpoint : nil,
+                attachments: status == .completed ? attachments : nil,
+                generatedArtifacts: status == .completed ? generatedArtifacts : nil
             )
             turnState = status == .completed ? .completed : .failed
         } else {

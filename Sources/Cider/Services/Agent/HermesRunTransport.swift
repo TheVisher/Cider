@@ -138,6 +138,8 @@ struct HermesRunTransport: HermesBridgeTransport {
                 nextState.lastImportedRuntimeSessionID == status.sessionID
             let approvalFacts = resolvedApprovalFacts(status: status, observed: observed)
             let contextFacts = resolvedContextFacts(status: status, observed: observed)
+            let attachmentFacts = resolvedAttachmentFacts(status: status, observed: observed)
+            let artifactFacts = resolvedGeneratedArtifactFacts(status: status, observed: observed)
             return HermesBridgeSendResult(completion: HermesRunCompletionEnvelope(
                 provenance: .hermesRunsAPI,
                 runID: created.runID,
@@ -155,7 +157,11 @@ struct HermesRunTransport: HermesBridgeTransport {
                 contextCheckpointFactState: contextFacts.state,
                 contextCheckpoint: contextFacts.checkpoint,
                 approvalFactState: approvalFacts.state,
-                approvalRequests: approvalFacts.requests
+                approvalRequests: approvalFacts.requests,
+                attachmentFactState: attachmentFacts.state,
+                attachments: attachmentFacts.values,
+                generatedArtifactFactState: artifactFacts.state,
+                generatedArtifacts: artifactFacts.values
             ))
         case "cancelled":
             await onEvent?(.cancelled)
@@ -216,6 +222,26 @@ struct HermesRunTransport: HermesBridgeTransport {
         }
         return observed.contextProjection()
     }
+
+    private func resolvedAttachmentFacts(
+        status: HermesRunStatusResponse,
+        observed: HermesRunObservationAccumulator
+    ) -> (state: HermesStructuredFactState, values: [HermesCiderAttachment]) {
+        if status.attachmentFactState != .notReported {
+            return (status.attachmentFactState, status.attachments)
+        }
+        return observed.attachmentProjection()
+    }
+
+    private func resolvedGeneratedArtifactFacts(
+        status: HermesRunStatusResponse,
+        observed: HermesRunObservationAccumulator
+    ) -> (state: HermesStructuredFactState, values: [HermesCiderGeneratedArtifact]) {
+        if status.generatedArtifactFactState != .notReported {
+            return (status.generatedArtifactFactState, status.generatedArtifacts)
+        }
+        return observed.generatedArtifactProjection()
+    }
 }
 
 struct HermesRunObservationAccumulator {
@@ -231,6 +257,10 @@ struct HermesRunObservationAccumulator {
     private var approvalsByID: [String: HermesApprovalRequest] = [:]
     private var contextCheckpointFactState: HermesStructuredFactState = .notReported
     private var contextCheckpoint: HermesCiderContextCheckpoint?
+    private var attachmentFactState: HermesStructuredFactState = .notReported
+    private var attachmentsByID: [String: HermesCiderAttachment] = [:]
+    private var generatedArtifactFactState: HermesStructuredFactState = .notReported
+    private var generatedArtifactsByID: [String: HermesCiderGeneratedArtifact] = [:]
 
     init(runID: String) {
         self.runID = runID
@@ -257,7 +287,15 @@ struct HermesRunObservationAccumulator {
         if event.event.hasPrefix("context.") || event.contextCheckpointFactState != .notReported {
             recordContext(event)
         }
-        if event.event.contains("attachment") { containedAttachmentEvent = true }
+        if event.event.hasPrefix("attachment.") || event.attachmentFactState != .notReported {
+            recordAttachment(event)
+        }
+        if event.event.hasPrefix("artifact.") || event.generatedArtifactFactState != .notReported {
+            recordGeneratedArtifact(event)
+        }
+        if event.event.contains("attachment") && event.attachmentFactState == .notReported {
+            containedAttachmentEvent = true
+        }
         if event.event.contains("pending") || event.status == "pending" || event.status == "queued" {
             containedPendingEvent = true
         }
@@ -291,6 +329,16 @@ struct HermesRunObservationAccumulator {
 
     func contextProjection() -> (state: HermesStructuredFactState, checkpoint: HermesCiderContextCheckpoint?) {
         (contextCheckpointFactState, contextCheckpointFactState == .validated ? contextCheckpoint : nil)
+    }
+
+    func attachmentProjection() -> (state: HermesStructuredFactState, values: [HermesCiderAttachment]) {
+        let values = attachmentsByID.values.sorted { $0.id < $1.id }
+        return (attachmentFactState, attachmentFactState == .validated ? values : [])
+    }
+
+    func generatedArtifactProjection() -> (state: HermesStructuredFactState, values: [HermesCiderGeneratedArtifact]) {
+        let values = generatedArtifactsByID.values.sorted { $0.id < $1.id }
+        return (generatedArtifactFactState, generatedArtifactFactState == .validated ? values : [])
     }
 
     private mutating func recordApproval(_ event: HermesRunSSEEvent) {
@@ -334,5 +382,55 @@ struct HermesRunObservationAccumulator {
         }
         contextCheckpointFactState = .validated
         contextCheckpoint = checkpoint
+    }
+
+    private mutating func recordAttachment(_ event: HermesRunSSEEvent) {
+        guard attachmentFactState != .rejected,
+              event.attachmentFactState == .validated,
+              let fact = event.attachment
+        else {
+            attachmentFactState = .rejected
+            attachmentsByID.removeAll()
+            return
+        }
+        if let existing = attachmentsByID[fact.id], existing != fact {
+            attachmentFactState = .rejected
+            attachmentsByID.removeAll()
+            return
+        }
+        guard attachmentsByID[fact.id] != nil
+                || attachmentsByID.count < HermesCiderAssetFactContract.maximumCount
+        else {
+            attachmentFactState = .rejected
+            attachmentsByID.removeAll()
+            return
+        }
+        attachmentFactState = .validated
+        attachmentsByID[fact.id] = fact
+    }
+
+    private mutating func recordGeneratedArtifact(_ event: HermesRunSSEEvent) {
+        guard generatedArtifactFactState != .rejected,
+              event.generatedArtifactFactState == .validated,
+              let fact = event.generatedArtifact
+        else {
+            generatedArtifactFactState = .rejected
+            generatedArtifactsByID.removeAll()
+            return
+        }
+        if let existing = generatedArtifactsByID[fact.id], existing != fact {
+            generatedArtifactFactState = .rejected
+            generatedArtifactsByID.removeAll()
+            return
+        }
+        guard generatedArtifactsByID[fact.id] != nil
+                || generatedArtifactsByID.count < HermesCiderAssetFactContract.maximumCount
+        else {
+            generatedArtifactFactState = .rejected
+            generatedArtifactsByID.removeAll()
+            return
+        }
+        generatedArtifactFactState = .validated
+        generatedArtifactsByID[fact.id] = fact
     }
 }

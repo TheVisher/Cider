@@ -153,6 +153,79 @@ struct HermesAPIClientTests {
         #expect(decoded.approvalRequests.first?.status == "requested")
     }
 
+    @Test("terminal status normalizes strict attachment and generated-artifact facts")
+    func statusDecodesStructuredAssetFacts() throws {
+        let json = #"""
+        {
+          "run_id":"run-assets", "status":"completed",
+          "cider_attachments":[{
+            "id":"A8260000-0000-4000-8000-000000000001",
+            "target":{"kind":"vault_file","id":"A8260000-0000-4000-8000-000000000002","title":"roadmap.pdf","source":"cider","source_ref":"vaultFile:A8260000-0000-4000-8000-000000000002"},
+            "display_name":"roadmap.pdf","content_type":"application/pdf","byte_size":24576,
+            "provenance":"user_attachment","source":"cider","source_ref":"attachment:A8260000-0000-4000-8000-000000000001"
+          }],
+          "generated_artifacts":[{
+            "id":"A8260000-0000-4000-8000-000000000003",
+            "target":{"kind":"project_artifact","id":"A8260000-0000-4000-8000-000000000004","title":"Export plan","project_id":"cider","artifact_type":"plan","source":"cider","source_ref":"note:A8260000-0000-4000-8000-000000000004"},
+            "display_name":"Export plan.md","content_type":"text/markdown","byte_size":4096,
+            "provenance":"cider_generated","source":"cider","source_ref":"generated_artifact:A8260000-0000-4000-8000-000000000003"
+          }]
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+        #expect(decoded.attachmentFactState == .validated)
+        #expect(decoded.attachments.first?.displayName == "roadmap.pdf")
+        #expect(decoded.generatedArtifactFactState == .validated)
+        #expect(decoded.generatedArtifacts.first?.target.projectID == "cider")
+    }
+
+    @Test("terminal boundary rejects private and conflicting asset identities without partial facts")
+    func statusRejectsUnsafeAssetFacts() throws {
+        let json = #"""
+        {
+          "run_id":"run-assets", "status":"completed",
+          "cider_attachments":[
+            {
+              "id":"A8260000-0000-4000-8000-000000000001",
+              "target":{"kind":"vault_file","id":"A8260000-0000-4000-8000-000000000002","title":"roadmap.pdf","source":"cider","source_ref":"vaultFile:A8260000-0000-4000-8000-000000000002"},
+              "display_name":"roadmap.pdf","content_type":"application/pdf","provenance":"user_attachment","source":"cider","source_ref":"attachment:A8260000-0000-4000-8000-000000000001"
+            },
+            {
+              "id":"A8260000-0000-4000-8000-000000000001",
+              "target":{"kind":"vault_file","id":"A8260000-0000-4000-8000-000000000002","title":"roadmap.pdf","source":"cider","source_ref":"vaultFile:A8260000-0000-4000-8000-000000000002"},
+              "display_name":"/Users/private/.env","content_type":"text/plain","provenance":"user_attachment","source":"cider","source_ref":"attachment:A8260000-0000-4000-8000-000000000001"
+            }
+          ]
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(HermesRunStatusResponse.self, from: Data(json.utf8))
+        #expect(decoded.attachmentFactState == .rejected)
+        #expect(decoded.attachments.isEmpty)
+    }
+
+    @Test("SSE parser keeps strict asset facts and rejects raw transport-shaped facts")
+    func sseParserNormalizesAssetFacts() throws {
+        let sse = #"""
+        data: {"event":"attachment.available","run_id":"run-assets","cider_attachment":{"id":"A8260000-0000-4000-8000-000000000001","target":{"kind":"vault_file","id":"A8260000-0000-4000-8000-000000000002","title":"roadmap.pdf","source":"cider","source_ref":"vaultFile:A8260000-0000-4000-8000-000000000002"},"display_name":"roadmap.pdf","content_type":"application/pdf","byte_size":24576,"provenance":"user_attachment","source":"cider","source_ref":"attachment:A8260000-0000-4000-8000-000000000001"}}
+
+        data: {"event":"artifact.available","run_id":"run-assets","generated_artifact":{"id":"A8260000-0000-4000-8000-000000000003","target":{"kind":"project_artifact","id":"A8260000-0000-4000-8000-000000000004","title":"Export plan","project_id":"cider","artifact_type":"plan","source":"cider","source_ref":"note:A8260000-0000-4000-8000-000000000004"},"display_name":"Export plan.md","content_type":"text/markdown","provenance":"cider_generated","source":"cider","source_ref":"generated_artifact:A8260000-0000-4000-8000-000000000003"}}
+
+        data: {"event":"attachment.available","run_id":"run-assets","cider_attachment":{"id":"A8260000-0000-4000-8000-000000000001","target":{"kind":"vault_file","id":"A8260000-0000-4000-8000-000000000002","title":"roadmap.pdf","source":"cider","source_ref":"vaultFile:A8260000-0000-4000-8000-000000000002"},"display_name":"roadmap.pdf","content_type":"application/pdf","provenance":"user_attachment","source":"cider","source_ref":"attachment:A8260000-0000-4000-8000-000000000001","raw_jsonrpc":{"path":"/Users/private/.env"}}}
+
+        """#
+
+        let events = try HermesSSEParser.events(from: Data(sse.utf8))
+        #expect(events.count == 3)
+        #expect(events[0].attachmentFactState == .validated)
+        #expect(events[0].attachment?.byteSize == 24_576)
+        #expect(events[1].generatedArtifactFactState == .validated)
+        #expect(events[1].generatedArtifact?.displayName == "Export plan.md")
+        #expect(events[2].attachmentFactState == .rejected)
+        #expect(events[2].attachment == nil)
+    }
+
     @Test("malformed structured turn facts are rejected without preserving raw payload")
     func malformedStructuredTurnFactsAreRejected() throws {
         let json = #"""

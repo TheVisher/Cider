@@ -280,7 +280,7 @@ enum AgentRoomsApprovalProjector {
     }
 }
 
-private enum AgentRoomsTurnFactPrivacyPolicy {
+enum AgentRoomsTurnFactPrivacyPolicy {
     static func isSafeDisplayText(_ raw: String) -> Bool {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = value.lowercased()
@@ -293,10 +293,18 @@ private enum AgentRoomsTurnFactPrivacyPolicy {
               !lower.contains(".ssh"),
               !lower.contains(".env"),
               !lower.contains("api_key"),
+              !lower.contains("access_key"),
               !lower.contains("password"),
               !lower.contains("bearer "),
               !lower.contains("token="),
-              !lower.contains("secret=")
+              !lower.contains("secret="),
+              !lower.contains("sk-proj-"),
+              !lower.contains("sk_live_"),
+              !lower.contains("rk_live_"),
+              !lower.contains("ghp_"),
+              !lower.contains("github_pat_"),
+              !lower.contains("xoxb-"),
+              !lower.contains("private key")
         else { return false }
         return true
     }

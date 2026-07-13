@@ -177,6 +177,353 @@ struct HermesApprovalRequest: Codable, Equatable, Sendable {
     }
 }
 
+private struct HermesStrictCodingKey: CodingKey, Hashable {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
+private enum HermesStrictStructuredFactDecoder {
+    static func rejectUnknownKeys(
+        from decoder: Decoder,
+        allowed: Set<String>
+    ) throws {
+        let container = try decoder.container(keyedBy: HermesStrictCodingKey.self)
+        let actual = Set(container.allKeys.map(\.stringValue))
+        guard actual.isSubset(of: allowed) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Unsupported structured fact keys"
+            ))
+        }
+    }
+}
+
+/// Strict Cider-owned target identity used only by attachment and generated-artifact
+/// facts. Unknown transport keys reject the containing fact instead of being ignored.
+struct HermesCiderAssetReference: Codable, Equatable, Sendable {
+    let kind: String
+    let id: String
+    let title: String
+    let projectID: String?
+    let artifactType: String?
+    let source: String
+    let sourceRef: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case kind, id, title, source
+        case projectID = "project_id"
+        case artifactType = "artifact_type"
+        case sourceRef = "source_ref"
+    }
+
+    init(
+        kind: String,
+        id: String,
+        title: String,
+        projectID: String?,
+        artifactType: String?,
+        source: String,
+        sourceRef: String
+    ) {
+        self.kind = kind
+        self.id = id
+        self.title = title
+        self.projectID = projectID
+        self.artifactType = artifactType
+        self.source = source
+        self.sourceRef = sourceRef
+    }
+
+    init(from decoder: Decoder) throws {
+        try HermesStrictStructuredFactDecoder.rejectUnknownKeys(
+            from: decoder,
+            allowed: Set(CodingKeys.allCases.map(\.rawValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(String.self, forKey: .kind)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
+        artifactType = try container.decodeIfPresent(String.self, forKey: .artifactType)
+        source = try container.decode(String.self, forKey: .source)
+        sourceRef = try container.decode(String.self, forKey: .sourceRef)
+    }
+}
+
+struct HermesCiderAttachment: Codable, Equatable, Sendable {
+    let id: String
+    let target: HermesCiderAssetReference
+    let displayName: String
+    let contentType: String
+    let byteSize: Int64?
+    let provenance: String
+    let source: String
+    let sourceRef: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, target, provenance, source
+        case displayName = "display_name"
+        case contentType = "content_type"
+        case byteSize = "byte_size"
+        case sourceRef = "source_ref"
+    }
+
+    init(
+        id: String,
+        target: HermesCiderAssetReference,
+        displayName: String,
+        contentType: String,
+        byteSize: Int64?,
+        provenance: String,
+        source: String,
+        sourceRef: String
+    ) {
+        self.id = id
+        self.target = target
+        self.displayName = displayName
+        self.contentType = contentType
+        self.byteSize = byteSize
+        self.provenance = provenance
+        self.source = source
+        self.sourceRef = sourceRef
+    }
+
+    init(from decoder: Decoder) throws {
+        try HermesStrictStructuredFactDecoder.rejectUnknownKeys(
+            from: decoder,
+            allowed: Set(CodingKeys.allCases.map(\.rawValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        target = try container.decode(HermesCiderAssetReference.self, forKey: .target)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        contentType = try container.decode(String.self, forKey: .contentType)
+        byteSize = try container.decodeIfPresent(Int64.self, forKey: .byteSize)
+        provenance = try container.decode(String.self, forKey: .provenance)
+        source = try container.decode(String.self, forKey: .source)
+        sourceRef = try container.decode(String.self, forKey: .sourceRef)
+    }
+}
+
+struct HermesCiderGeneratedArtifact: Codable, Equatable, Sendable {
+    let id: String
+    let target: HermesCiderAssetReference
+    let displayName: String
+    let contentType: String
+    let byteSize: Int64?
+    let provenance: String
+    let source: String
+    let sourceRef: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, target, provenance, source
+        case displayName = "display_name"
+        case contentType = "content_type"
+        case byteSize = "byte_size"
+        case sourceRef = "source_ref"
+    }
+
+    init(
+        id: String,
+        target: HermesCiderAssetReference,
+        displayName: String,
+        contentType: String,
+        byteSize: Int64?,
+        provenance: String,
+        source: String,
+        sourceRef: String
+    ) {
+        self.id = id
+        self.target = target
+        self.displayName = displayName
+        self.contentType = contentType
+        self.byteSize = byteSize
+        self.provenance = provenance
+        self.source = source
+        self.sourceRef = sourceRef
+    }
+
+    init(from decoder: Decoder) throws {
+        try HermesStrictStructuredFactDecoder.rejectUnknownKeys(
+            from: decoder,
+            allowed: Set(CodingKeys.allCases.map(\.rawValue))
+        )
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        target = try container.decode(HermesCiderAssetReference.self, forKey: .target)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        contentType = try container.decode(String.self, forKey: .contentType)
+        byteSize = try container.decodeIfPresent(Int64.self, forKey: .byteSize)
+        provenance = try container.decode(String.self, forKey: .provenance)
+        source = try container.decode(String.self, forKey: .source)
+        sourceRef = try container.decode(String.self, forKey: .sourceRef)
+    }
+}
+
+enum HermesCiderAssetFactContract {
+    static let maximumCount = 8
+    static let maximumDisplayLength = 160
+    static let maximumContentTypeLength = 127
+    static let maximumIdentifierLength = 120
+    static let maximumByteSize: Int64 = 1_125_899_906_842_624 // 1 PiB
+
+    static func normalizedAttachments(
+        _ values: [HermesCiderAttachment]
+    ) -> (state: HermesStructuredFactState, values: [HermesCiderAttachment]) {
+        normalized(
+            values,
+            id: \.id,
+            target: \.target,
+            displayName: \.displayName,
+            contentType: \.contentType,
+            byteSize: \.byteSize,
+            provenance: \.provenance,
+            source: \.source,
+            sourceRef: \.sourceRef,
+            sourcePrefix: "attachment",
+            allowedProvenance: ["user_attachment", "source_attachment"],
+            allowsProjectArtifact: false
+        )
+    }
+
+    static func normalizedGeneratedArtifacts(
+        _ values: [HermesCiderGeneratedArtifact]
+    ) -> (state: HermesStructuredFactState, values: [HermesCiderGeneratedArtifact]) {
+        normalized(
+            values,
+            id: \.id,
+            target: \.target,
+            displayName: \.displayName,
+            contentType: \.contentType,
+            byteSize: \.byteSize,
+            provenance: \.provenance,
+            source: \.source,
+            sourceRef: \.sourceRef,
+            sourcePrefix: "generated_artifact",
+            allowedProvenance: ["cider_generated"],
+            allowsProjectArtifact: true
+        )
+    }
+
+    private static func normalized<Value: Equatable>(
+        _ values: [Value],
+        id: KeyPath<Value, String>,
+        target: KeyPath<Value, HermesCiderAssetReference>,
+        displayName: KeyPath<Value, String>,
+        contentType: KeyPath<Value, String>,
+        byteSize: KeyPath<Value, Int64?>,
+        provenance: KeyPath<Value, String>,
+        source: KeyPath<Value, String>,
+        sourceRef: KeyPath<Value, String>,
+        sourcePrefix: String,
+        allowedProvenance: Set<String>,
+        allowsProjectArtifact: Bool
+    ) -> (state: HermesStructuredFactState, values: [Value]) {
+        guard !values.isEmpty else { return (.notReported, []) }
+        guard values.count <= maximumCount else { return (.rejected, []) }
+        var byID: [String: Value] = [:]
+        var byTarget: [String: Value] = [:]
+        for value in values {
+            let valueID = value[keyPath: id]
+            let valueTarget = value[keyPath: target]
+            guard canonicalUUID(valueID),
+                  value[keyPath: source] == "cider",
+                  value[keyPath: sourceRef] == "\(sourcePrefix):\(valueID)",
+                  allowedProvenance.contains(value[keyPath: provenance]),
+                  safeDisplayText(value[keyPath: displayName]),
+                  safeContentType(value[keyPath: contentType]),
+                  value[keyPath: byteSize].map({ $0 >= 0 && $0 <= maximumByteSize }) ?? true,
+                  validTarget(valueTarget, allowsProjectArtifact: allowsProjectArtifact)
+            else { return (.rejected, []) }
+            if let existing = byID[valueID], existing != value { return (.rejected, []) }
+            if let existing = byTarget[valueTarget.sourceRef], existing != value { return (.rejected, []) }
+            byID[valueID] = value
+            byTarget[valueTarget.sourceRef] = value
+        }
+        return (.validated, byID.keys.sorted().compactMap { byID[$0] })
+    }
+
+    private static func validTarget(
+        _ target: HermesCiderAssetReference,
+        allowsProjectArtifact: Bool
+    ) -> Bool {
+        guard target.source == "cider",
+              canonicalUUID(target.id),
+              safeDisplayText(target.title)
+        else { return false }
+        switch target.kind {
+        case "vault_file":
+            return target.projectID == nil
+                && target.artifactType == nil
+                && target.sourceRef == "vaultFile:\(target.id)"
+        case "project_artifact" where allowsProjectArtifact:
+            return safeIdentifier(target.projectID)
+                && safeIdentifier(target.artifactType)
+                && target.sourceRef == "note:\(target.id)"
+        default:
+            return false
+        }
+    }
+
+    private static func canonicalUUID(_ raw: String) -> Bool {
+        UUID(uuidString: raw)?.uuidString == raw
+    }
+
+    private static func safeIdentifier(_ raw: String?) -> Bool {
+        guard let raw, !raw.isEmpty, raw.count <= maximumIdentifierLength else { return false }
+        let lower = raw.lowercased()
+        guard !lower.contains("api_key"),
+              !lower.contains("password"),
+              !lower.contains("secret"),
+              !lower.contains("token")
+        else { return false }
+        return raw.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+        }
+    }
+
+    private static func safeDisplayText(_ raw: String) -> Bool {
+        let lower = raw.lowercased()
+        return !raw.isEmpty
+            && raw == raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            && raw.count <= maximumDisplayLength
+            && !raw.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            && !raw.contains("/")
+            && !raw.contains("\\")
+            && !lower.contains("file://")
+            && !lower.contains(".ssh")
+            && !lower.contains(".env")
+            && !lower.contains("api_key")
+            && !lower.contains("access_key")
+            && !lower.contains("password")
+            && !lower.contains("bearer ")
+            && !lower.contains("token=")
+            && !lower.contains("secret=")
+            && !lower.contains("sk-proj-")
+            && !lower.contains("sk_live_")
+            && !lower.contains("rk_live_")
+            && !lower.contains("ghp_")
+            && !lower.contains("github_pat_")
+            && !lower.contains("xoxb-")
+            && !lower.contains("private key")
+    }
+
+    private static func safeContentType(_ raw: String) -> Bool {
+        guard raw.count <= maximumContentTypeLength,
+              raw == raw.lowercased(),
+              let slash = raw.firstIndex(of: "/"),
+              slash != raw.startIndex,
+              raw.index(after: slash) != raw.endIndex,
+              !raw[raw.index(after: slash)...].contains("/")
+        else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789!#$&^_.+-/")
+        return raw.unicodeScalars.allSatisfy(allowed.contains)
+    }
+}
+
 struct HermesRunCompletionEnvelope: Equatable, Sendable {
     let provenance: HermesTransportProvenance
     let runID: String?
@@ -192,6 +539,10 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
     let contextCheckpoint: HermesCiderContextCheckpoint?
     let approvalFactState: HermesStructuredFactState
     let approvalRequests: [HermesApprovalRequest]
+    let attachmentFactState: HermesStructuredFactState
+    let attachments: [HermesCiderAttachment]
+    let generatedArtifactFactState: HermesStructuredFactState
+    let generatedArtifacts: [HermesCiderGeneratedArtifact]
 
     init(
         provenance: HermesTransportProvenance,
@@ -207,7 +558,11 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
         contextCheckpointFactState: HermesStructuredFactState = .notReported,
         contextCheckpoint: HermesCiderContextCheckpoint? = nil,
         approvalFactState: HermesStructuredFactState = .notReported,
-        approvalRequests: [HermesApprovalRequest] = []
+        approvalRequests: [HermesApprovalRequest] = [],
+        attachmentFactState: HermesStructuredFactState = .notReported,
+        attachments: [HermesCiderAttachment] = [],
+        generatedArtifactFactState: HermesStructuredFactState = .notReported,
+        generatedArtifacts: [HermesCiderGeneratedArtifact] = []
     ) {
         self.provenance = provenance
         self.runID = runID
@@ -223,6 +578,10 @@ struct HermesRunCompletionEnvelope: Equatable, Sendable {
         self.contextCheckpoint = contextCheckpoint
         self.approvalFactState = approvalFactState
         self.approvalRequests = approvalRequests
+        self.attachmentFactState = attachmentFactState
+        self.attachments = attachments
+        self.generatedArtifactFactState = generatedArtifactFactState
+        self.generatedArtifacts = generatedArtifacts
     }
 
     var isEligibleForFutureShadowPersistence: Bool {
@@ -241,6 +600,10 @@ enum HermesRunCompletionEligibility {
               envelope.contextCheckpoint == nil,
               envelope.approvalFactState == .notReported,
               envelope.approvalRequests.isEmpty,
+              envelope.attachmentFactState == .notReported,
+              envelope.attachments.isEmpty,
+              envelope.generatedArtifactFactState == .notReported,
+              envelope.generatedArtifacts.isEmpty,
               let runID = nonempty(envelope.runID),
               nonempty(envelope.modelIdentity) != nil,
               envelope.terminalSourceEvidence.reportedTerminalRunID == runID,

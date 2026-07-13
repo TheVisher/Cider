@@ -104,6 +104,34 @@ struct HermesBridgeTransportTests {
         ])
     }
 
+    @Test("Runs transport returns normalized terminal attachment and artifact facts")
+    func runsTransportReturnsAssetFacts() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HermesRunTransportURLProtocol.self]
+        let transport = HermesRunTransport(
+            apiClient: HermesAPIClient(
+                baseURL: URL(string: "https://assets.invalid")!,
+                apiKey: nil,
+                session: URLSession(configuration: configuration)
+            ),
+            fallbackService: HermesSessionService()
+        )
+
+        let result = try await transport.send(
+            text: "Use the roadmap",
+            state: HermesConversationState(activeRuntimeSessionID: "parent-session"),
+            existingMessages: []
+        )
+
+        #expect(result.completion.attachmentFactState == .validated)
+        #expect(result.completion.attachments.count == 1)
+        #expect(result.completion.attachments[0].provenance == "user_attachment")
+        #expect(result.completion.generatedArtifactFactState == .validated)
+        #expect(result.completion.generatedArtifacts.count == 1)
+        #expect(result.completion.generatedArtifacts[0].provenance == "cider_generated")
+        #expect(!result.completion.isEligibleForFutureShadowPersistence)
+    }
+
     @Test("Runs transport preserves cancellation callback and thrown cancellation behavior")
     func runsTransportPreservesCancellation() async throws {
         let configuration = URLSessionConfiguration.ephemeral
@@ -408,6 +436,54 @@ struct HermesBridgeTransportTests {
         #expect(projection.checkpoint == checkpoint)
     }
 
+    @Test("asset event accumulator keeps separate bounded facts and rejects conflicting identity")
+    func assetEventAccumulatorKeepsSeparateFacts() {
+        let target = HermesCiderAssetReference(
+            kind: "vault_file", id: "A8260000-0000-4000-8000-000000000002",
+            title: "roadmap.pdf", projectID: nil, artifactType: nil, source: "cider",
+            sourceRef: "vaultFile:A8260000-0000-4000-8000-000000000002"
+        )
+        let attachment = HermesCiderAttachment(
+            id: "A8260000-0000-4000-8000-000000000001", target: target,
+            displayName: "roadmap.pdf", contentType: "application/pdf", byteSize: 24_576,
+            provenance: "user_attachment", source: "cider",
+            sourceRef: "attachment:A8260000-0000-4000-8000-000000000001"
+        )
+        let artifact = HermesCiderGeneratedArtifact(
+            id: "A8260000-0000-4000-8000-000000000003", target: target,
+            displayName: "roadmap-summary.md", contentType: "text/markdown", byteSize: nil,
+            provenance: "cider_generated", source: "cider",
+            sourceRef: "generated_artifact:A8260000-0000-4000-8000-000000000003"
+        )
+        var accumulator = HermesRunObservationAccumulator(runID: "run-assets")
+        accumulator.record(.init(
+            event: "attachment.available", runID: "run-assets", delta: nil, output: nil,
+            error: nil, tool: nil, preview: nil, status: nil,
+            attachment: attachment, attachmentFactState: .validated
+        ))
+        accumulator.record(.init(
+            event: "artifact.available", runID: "run-assets", delta: nil, output: nil,
+            error: nil, tool: nil, preview: nil, status: nil,
+            generatedArtifact: artifact, generatedArtifactFactState: .validated
+        ))
+        #expect(accumulator.attachmentProjection().values == [attachment])
+        #expect(accumulator.generatedArtifactProjection().values == [artifact])
+
+        let conflict = HermesCiderAttachment(
+            id: attachment.id, target: target, displayName: "different.pdf",
+            contentType: attachment.contentType, byteSize: attachment.byteSize,
+            provenance: attachment.provenance, source: attachment.source, sourceRef: attachment.sourceRef
+        )
+        accumulator.record(.init(
+            event: "attachment.available", runID: "run-assets", delta: nil, output: nil,
+            error: nil, tool: nil, preview: nil, status: nil,
+            attachment: conflict, attachmentFactState: .validated
+        ))
+        #expect(accumulator.attachmentProjection().state == .rejected)
+        #expect(accumulator.attachmentProjection().values.isEmpty)
+        #expect(accumulator.generatedArtifactProjection().values == [artifact])
+    }
+
     @Test("raw approval preview never becomes structured approval authority")
     func rawApprovalPreviewFailsClosed() {
         var accumulator = HermesRunObservationAccumulator(runID: "run-826")
@@ -593,6 +669,11 @@ private final class HermesRunTransportURLProtocol: URLProtocol, @unchecked Senda
                 data: {"event":"run.completed","run_id":"run-780","output":"You saved the Chrome Industries “Cohesive 2.0 38L Pack.”\\n\\nIt’s a 38-liter backpack with dual main compartments, a padded laptop sleeve, recycled/PFAS-free materials, and a lifetime warranty.\\n\\nhttps://chromeindustries.com/products/cohesive-2-0-38l-pack?variant=43962733953084"}
 
                 """
+            } else if url.host == "assets.invalid" {
+                body = """
+                data: {"event":"run.completed","run_id":"run-780","output":"Hi"}
+
+                """
             } else {
                 body = """
                 data: {"event":"run.completed","run_id":"run-780","output":"Hi"}
@@ -606,6 +687,8 @@ private final class HermesRunTransportURLProtocol: URLProtocol, @unchecked Senda
                 body = #"{"object":"run","run_id":"run-780","status":"cancelled","session_id":"session-780"}"#
             } else if url.host == "backpack.invalid" {
                 body = #"{"object":"hermes.run","run_id":"run-780","status":"completed","session_id":"session-780","output":"You saved the Chrome Industries “Cohesive 2.0 38L Pack.”\n\nIt’s a 38-liter backpack with dual main compartments, a padded laptop sleeve, recycled/PFAS-free materials, and a lifetime warranty.\n\nhttps://chromeindustries.com/products/cohesive-2-0-38l-pack?variant=43962733953084","usage":{"input_tokens":126640,"output_tokens":383,"total_tokens":127023},"last_event":"run.completed"}"#
+            } else if url.host == "assets.invalid" {
+                body = #"{"object":"run","run_id":"run-780","status":"completed","session_id":"session-780","output":"Hi","cider_attachments":[{"id":"A8260000-0000-4000-8000-000000000001","target":{"kind":"vault_file","id":"A8260000-0000-4000-8000-000000000002","title":"roadmap.pdf","source":"cider","source_ref":"vaultFile:A8260000-0000-4000-8000-000000000002"},"display_name":"roadmap.pdf","content_type":"application/pdf","byte_size":24576,"provenance":"user_attachment","source":"cider","source_ref":"attachment:A8260000-0000-4000-8000-000000000001"}],"generated_artifacts":[{"id":"A8260000-0000-4000-8000-000000000003","target":{"kind":"project_artifact","id":"A8260000-0000-4000-8000-000000000004","title":"Export plan","project_id":"cider","artifact_type":"plan","source":"cider","source_ref":"note:A8260000-0000-4000-8000-000000000004"},"display_name":"Export plan.md","content_type":"text/markdown","byte_size":4096,"provenance":"cider_generated","source":"cider","source_ref":"generated_artifact:A8260000-0000-4000-8000-000000000003"}]}"#
             } else {
                 body = #"{"object":"run","run_id":"run-780","status":"completed","session_id":"session-780","output":"Hi","cider_references":[{"kind":"task","id":"card-780","title":"Transport-backed task","board_id":"board-780","source":"cider","source_ref":"kanban_card:board-780/card-780"}]}"#
             }

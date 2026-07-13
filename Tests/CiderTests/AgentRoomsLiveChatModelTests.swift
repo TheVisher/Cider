@@ -665,6 +665,7 @@ struct AgentRoomsLiveChatModelTests {
             "Button(\"Open\")",
             "Source-backed Cider",
             "onOpenCiderReference(receipt.openRoute)",
+            "onOpenCiderReference(route)",
             "AgentRoomsBookmarkReceiptThumbnailView(",
             "AgentRoomsBookmarkReceiptThumbnailLoader()",
             "await loader.load(",
@@ -675,7 +676,7 @@ struct AgentRoomsLiveChatModelTests {
         ] {
             #expect(view.contains(required))
         }
-        #expect(view.components(separatedBy: "Button(\"Open\")").count - 1 == 1)
+        #expect(view.components(separatedBy: "Button(\"Open\")").count - 1 == 2)
         #expect(!view.contains("sourceRef"))
         #expect(!view.contains("relativePath"))
     }
