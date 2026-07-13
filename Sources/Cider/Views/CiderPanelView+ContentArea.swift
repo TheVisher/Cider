@@ -411,7 +411,12 @@ extension CiderPanelView {
                 )
             case .agentRooms:
                 let repository = ConversationRepository(database: CiderDatabase.shared)
-                let canonical = AgentRoomsReadService(repository: repository)
+                let assignments = agentRoomsSession.agentAssignments
+                    ?? AgentRoomsAgentAssignmentService(repository: repository)
+                let canonical = AgentRoomsReadService(
+                    repository: repository,
+                    agentAssignments: assignments
+                )
                 AgentRoomsWorkspaceView(
                     loadWorkspace: { request in
                         guard request.scope == .active,
@@ -435,7 +440,10 @@ extension CiderPanelView {
                             loadLegacy: eligibleAdapter.loadWorkspace
                         ).loadWorkspace()
                     },
-                    roomActions: AgentRoomsActionService(repository: repository),
+                    roomActions: AgentRoomsActionService(
+                        repository: repository,
+                        agentAssignments: assignments
+                    ),
                     session: agentRoomsSession,
                     onOpenLiveChat: {
                         requestFloat(.aiAssistant)

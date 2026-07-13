@@ -373,6 +373,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private let makeID: @MainActor () -> UUID
     private let now: @MainActor () -> Date
     private let persistence: (any AgentRoomsConversationPersisting)?
+    private let agentAssignments: (any AgentRoomsAgentAssignmentReading)?
 
     private var roomID: UUID?
     private var activeRoomTitle = AgentRoomsLiveChatModel.roomTitle
@@ -391,6 +392,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var recoveredDraftRoomID: String?
     private var persistentAttempt: AgentRoomsConversationAttempt?
     private var activeSendTask: Task<Void, Never>?
+    private var assignmentAllowsSend = true
+    private var activeAgent: AgentRoomActingAgent?
 
     private struct AcceptedSubmission {
         let text: String
@@ -417,7 +420,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         },
         makeID: @escaping @MainActor () -> UUID = UUID.init,
         now: @escaping @MainActor () -> Date = Date.init,
-        persistence: (any AgentRoomsConversationPersisting)? = nil
+        persistence: (any AgentRoomsConversationPersisting)? = nil,
+        agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil
     ) {
         self.transport = transport
         self.turnCoordinator = turnCoordinator
@@ -427,6 +431,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         self.makeID = makeID
         self.now = now
         self.persistence = persistence
+        self.agentAssignments = agentAssignments
     }
 
     @discardableResult
@@ -470,6 +475,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         turnState = .idle
         liveActivity = []
         completedAssistantSourceIDs = []
+        assignmentAllowsSend = agentAssignments == nil
+        activeAgent = nil
     }
 
     func startTestChat() async {
@@ -492,6 +499,16 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 }
             }
             let id = makeID()
+            if let persistence {
+                do {
+                    if let snapshot = try persistence.prepareReservedTestChat(id: id, at: now()) {
+                        apply(snapshot, reservedTestChat: true)
+                        return
+                    }
+                } catch {
+                    composerMessage = "Cider could not safely prepare Test Chat. Nothing was sent."
+                }
+            }
             roomID = id
             activeRoomTitle = Self.roomTitle
             isReservedTestChat = true
@@ -511,6 +528,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     func refreshTransportReadiness() async {
         guard roomID != nil, activeAttemptID == nil else { return }
+        guard refreshAssignedAgentEligibility() else {
+            transportState = .blocked
+            rebuildRoom()
+            return
+        }
         transportState = .checking
         switch await transport.availability() {
         case .apiRuns:
@@ -524,7 +546,10 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     func isComposerEnabled(selectedRoomID: String?) -> Bool {
         guard let roomID else { return false }
-        return selectedRoomID == roomID.uuidString && transportState == .ready && activeAttemptID == nil
+        return selectedRoomID == roomID.uuidString
+            && assignmentAllowsSend
+            && transportState == .ready
+            && activeAttemptID == nil
     }
 
     @discardableResult
@@ -544,6 +569,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     private func acceptSubmission(_ text: String, selectedRoomID: String?) -> AcceptedSubmission? {
+        guard refreshAssignedAgentEligibility() else {
+            transportState = .blocked
+            rebuildRoom()
+            return nil
+        }
         guard isComposerEnabled(selectedRoomID: selectedRoomID) else {
             if activeAttemptID == nil, transportState == .ready {
                 surfacePreAcceptFailure(
@@ -1099,12 +1129,51 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         rebuildRoom()
     }
 
+    @discardableResult
+    private func refreshAssignedAgentEligibility() -> Bool {
+        guard let roomID else {
+            assignmentAllowsSend = false
+            activeAgent = nil
+            return false
+        }
+        guard let agentAssignments else {
+            assignmentAllowsSend = true
+            activeAgent = nil
+            return true
+        }
+        do {
+            activeAgent = try agentAssignments.presentation(roomID: roomID)
+            switch try agentAssignments.sendEligibility(roomID: roomID) {
+            case .eligible(let profile):
+                guard profile.runtimeBinding.providerID == "hermes",
+                      profile.runtimeBinding.runtimeID == "hermes"
+                else {
+                    assignmentAllowsSend = false
+                    composerMessage = "\(profile.displayName) is assigned to this room, but its runtime is not connected to this composer. Nothing was sent."
+                    return false
+                }
+                assignmentAllowsSend = true
+                return true
+            case .ineligible(_, _, let reason):
+                assignmentAllowsSend = false
+                composerMessage = reason
+                return false
+            }
+        } catch {
+            assignmentAllowsSend = false
+            activeAgent = nil
+            composerMessage = "Cider could not verify this room’s acting agent. Nothing was sent."
+            return false
+        }
+    }
+
     private func rebuildRoom() {
         guard let roomID else {
             activeRoom = nil
             return
         }
-        let preview = roomMessages.last?.body ?? "New live conversation with Hermes"
+        let displayName = activeAgent?.displayName ?? "Hermes"
+        let preview = roomMessages.last?.body ?? "New live conversation with \(displayName)"
         activeRoom = AgentRoom(
             id: roomID.uuidString,
             title: activeRoomTitle,
@@ -1112,12 +1181,13 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             updatedAt: now(),
             relativeTime: "Now",
             transcript: .init(
-                runtimeLabel: "Hermes",
+                runtimeLabel: displayName,
                 messages: roomMessages,
                 link: nil,
                 receipt: receipt,
                 futureArtifact: nil
             ),
+            actingAgent: activeAgent,
             continuity: .liveContinuation
         )
     }
@@ -1135,6 +1205,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         liveActivity = snapshot.latestActivity
         recoveredDraft = snapshot.presentationMessages.last(where: { $0.canRetry })?.body
         recoveredDraftRoomID = recoveredDraft == nil ? nil : snapshot.room.id.uuidString
+        _ = refreshAssignedAgentEligibility()
 
         let lastAssistant = snapshot.transportMessages.last(where: { $0.role == .assistant })
         let objectReceipts = snapshot.latestCiderReferences.isEmpty

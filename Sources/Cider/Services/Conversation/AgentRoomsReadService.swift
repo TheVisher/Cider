@@ -16,14 +16,22 @@ final class AgentRoomsReadService {
     private let loadRecentMessages: (UUID, Int) throws -> [ConversationMessage]
     private let loadRuntimeBindings: (UUID, Int) throws -> [ConversationRuntimeBinding]
     private let loadRecentTurns: (UUID, Int) throws -> [ConversationTurn]
+    private let loadActingAgent: (UUID) throws -> AgentRoomActingAgent?
     private let now: () -> Date
 
-    init(repository: ConversationRepository, now: @escaping () -> Date = Date.init) {
+    init(
+        repository: ConversationRepository,
+        agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
+        let assignments = agentAssignments
+            ?? AgentRoomsAgentAssignmentService(repository: repository, now: now)
         self.loadRooms = repository.rooms(lifecycle:limit:)
         self.searchRooms = repository.searchRooms(query:lifecycle:limit:)
         self.loadRecentMessages = repository.recentMessages(roomID:limit:)
         self.loadRuntimeBindings = repository.runtimeBindings(roomID:limit:)
         self.loadRecentTurns = repository.recentTurns(roomID:limit:)
+        self.loadActingAgent = assignments.presentation(roomID:)
         self.now = now
     }
 
@@ -34,6 +42,7 @@ final class AgentRoomsReadService {
         loadRecentMessages: @escaping (UUID, Int) throws -> [ConversationMessage],
         loadRuntimeBindings: @escaping (UUID, Int) throws -> [ConversationRuntimeBinding],
         loadRecentTurns: @escaping (UUID, Int) throws -> [ConversationTurn],
+        loadActingAgent: @escaping (UUID) throws -> AgentRoomActingAgent? = { _ in nil },
         now: @escaping () -> Date = Date.init
     ) {
         self.loadRooms = loadRooms
@@ -46,6 +55,7 @@ final class AgentRoomsReadService {
         self.loadRecentMessages = loadRecentMessages
         self.loadRuntimeBindings = loadRuntimeBindings
         self.loadRecentTurns = loadRecentTurns
+        self.loadActingAgent = loadActingAgent
         self.now = now
     }
 
@@ -68,7 +78,7 @@ final class AgentRoomsReadService {
                 let messages = try loadRecentMessages(room.id, Self.messageLimit)
                 let bindings = try loadRuntimeBindings(room.id, Self.runtimeBindingLimit)
                 let newestTurn = try loadRecentTurns(room.id, Self.turnLimit).first
-                return mapRoom(room, messages: messages, bindings: bindings, newestTurn: newestTurn)
+                return try mapRoom(room, messages: messages, bindings: bindings, newestTurn: newestTurn)
             }
             guard let selectedRoomID = rooms.first?.id else { return .empty(authority: .canonicalIncomplete) }
             return .loaded(
@@ -86,9 +96,12 @@ final class AgentRoomsReadService {
         messages: [ConversationMessage],
         bindings: [ConversationRuntimeBinding],
         newestTurn: ConversationTurn?
-    ) -> AgentRoom {
+    ) throws -> AgentRoom {
+        let actingAgent = try loadActingAgent(room.id)
         let binding = bindings.first(where: { $0.state == .active }) ?? bindings.first
-        let runtimeLabel = binding.map { displayRuntime($0.runtimeID) } ?? "Unknown"
+        let runtimeLabel = actingAgent?.displayName
+            ?? binding.map { displayRuntime($0.runtimeID) }
+            ?? "Unassigned"
         let supportedMessages = messages.compactMap { message -> AgentRoomMessage? in
             switch message.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             case "user":
@@ -128,6 +141,7 @@ final class AgentRoomsReadService {
                 receipt: receipt,
                 futureArtifact: nil
             ),
+            actingAgent: actingAgent,
             lifecycleState: room.lifecycleState
         )
     }

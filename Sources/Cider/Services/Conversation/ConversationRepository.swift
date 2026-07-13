@@ -19,6 +19,7 @@ enum ConversationRepositoryError: Error, Equatable, LocalizedError {
 @MainActor
 final class ConversationRepository {
     private static let maximumBoundedReadLimit = 500
+    static let agentAssignmentMetadataKey = "cider.rooms.acting-agent.v1"
     private let database: CiderDatabase
 
     init(database: CiderDatabase = .shared) {
@@ -29,7 +30,22 @@ final class ConversationRepository {
         try database.withTransaction {
             try requireNonempty(draft.title, field: "room title")
             try requireNonempty(draft.kind, field: "room kind")
-            let metadata = DatabaseHelpers.encodeJSON(draft.metadata) ?? "{}"
+            guard draft.metadata[Self.agentAssignmentMetadataKey] == nil else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation room agent assignment metadata must use the typed assignment field."
+                )
+            }
+            var roomMetadata = draft.metadata
+            if let assignment = draft.agentAssignment {
+                try assignment.validate()
+                guard let encoded = DatabaseHelpers.encodeJSON(assignment) else {
+                    throw ConversationRepositoryError.invalidDraft(
+                        "Conversation room agent assignment could not be encoded."
+                    )
+                }
+                roomMetadata[Self.agentAssignmentMetadataKey] = encoded
+            }
+            let metadata = DatabaseHelpers.encodeJSON(roomMetadata) ?? "{}"
             let createdAt = DatabaseHelpers.encode(draft.createdAt)
             let updatedAt = DatabaseHelpers.encode(draft.updatedAt ?? draft.createdAt)
             let statement = try database.prepare("""
@@ -72,6 +88,62 @@ final class ConversationRepository {
             """)
         statement.bind(stableKey, at: 1)
         return try statement.step() ? try decodeRoom(statement) : nil
+    }
+
+    func agentAssignment(roomID: UUID) throws -> ConversationRoomAgentAssignment? {
+        let room = try requiredRoom(id: roomID)
+        guard let encoded = room.metadata[Self.agentAssignmentMetadataKey] else { return nil }
+        guard let assignment = DatabaseHelpers.decodeJSON(
+            ConversationRoomAgentAssignment.self,
+            from: encoded
+        ) else {
+            throw ConversationRepositoryError.integrity(
+                "Conversation room contains an invalid acting-agent assignment."
+            )
+        }
+        do {
+            try assignment.validate()
+        } catch {
+            throw ConversationRepositoryError.integrity(
+                "Conversation room contains an invalid acting-agent assignment."
+            )
+        }
+        return assignment
+    }
+
+    @discardableResult
+    func setAgentAssignment(
+        roomID: UUID,
+        assignment: ConversationRoomAgentAssignment,
+        at date: Date
+    ) throws -> ConversationRoomAgentAssignment {
+        try database.withTransaction {
+            let room = try requiredRoom(id: roomID)
+            try assignment.validate()
+            guard let encoded = DatabaseHelpers.encodeJSON(assignment) else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation room agent assignment could not be encoded."
+                )
+            }
+            var metadata = room.metadata
+            metadata[Self.agentAssignmentMetadataKey] = encoded
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET metadata_json = ?, updated_at = MAX(updated_at, ?)
+                WHERE id = ?;
+                """)
+            statement.bind(DatabaseHelpers.encodeJSON(metadata) ?? "{}", at: 1)
+                .bind(DatabaseHelpers.encode(date), at: 2)
+                .bind(roomID.uuidString, at: 3)
+            try statement.step()
+            return try agentAssignment(roomID: roomID) ?? assignment
+        }
+    }
+
+    static func metadataWithoutAgentAssignment(_ metadata: [String: String]) -> [String: String] {
+        var result = metadata
+        result.removeValue(forKey: agentAssignmentMetadataKey)
+        return result
     }
 
     /// Returns a bounded lifecycle projection ordered newest first with stable UUID ties.

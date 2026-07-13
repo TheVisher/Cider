@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class AgentRoomsSessionModel: ObservableObject {
     let liveChat: AgentRoomsLiveChatModel
+    let agentAssignments: (any AgentRoomsAgentAssignmentActing)?
     let messagePresentationStore = AgentRoomsMessagePresentationStore()
 
     @Published var selectedRoomID: String?
@@ -21,9 +22,11 @@ final class AgentRoomsSessionModel: ObservableObject {
     init(
         liveChat: AgentRoomsLiveChatModel,
         selectionStore: (any AgentRoomsSelectionPersisting)? = nil,
-        draftStore: (any AgentRoomsDraftPersisting)? = nil
+        draftStore: (any AgentRoomsDraftPersisting)? = nil,
+        agentAssignments: (any AgentRoomsAgentAssignmentActing)? = nil
     ) {
         self.liveChat = liveChat
+        self.agentAssignments = agentAssignments
         self.selectionStore = selectionStore
         self.draftStore = draftStore ?? makeAgentRoomsMemoryDraftStore()
         let restoredSelection = selectionStore?.loadSelectedRoomID()
@@ -33,10 +36,18 @@ final class AgentRoomsSessionModel: ObservableObject {
     }
 
     convenience init(transport: any HermesBridgeTransport) {
+        let repository = ConversationRepository(database: CiderDatabase.shared)
+        let assignments = AgentRoomsAgentAssignmentService(repository: repository)
         self.init(liveChat: AgentRoomsLiveChatModel(
             transport: transport,
-            persistence: AgentRoomsConversationPersistence()
-        ), selectionStore: AgentRoomsSelectionStore.application, draftStore: AgentRoomsDraftStore.application)
+            persistence: AgentRoomsConversationPersistence(
+                repository: repository,
+                defaultAgentProfile: assignments.defaultProfile
+            ),
+            agentAssignments: assignments
+        ), selectionStore: AgentRoomsSelectionStore.application,
+           draftStore: AgentRoomsDraftStore.application,
+           agentAssignments: assignments)
     }
 
     func selectRoom(id: String?, persistIfCanonical: Bool) {

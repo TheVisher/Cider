@@ -31,6 +31,7 @@ struct AgentRoomsConversationAttempt: Equatable, Sendable {
 
 @MainActor
 protocol AgentRoomsConversationPersisting: AnyObject {
+    func prepareReservedTestChat(id: UUID, at date: Date) throws -> AgentRoomsConversationSnapshot?
     func restoreCanonicalRoom(id: UUID) throws -> AgentRoomsConversationSnapshot?
     func restoreReservedTestChat() throws -> AgentRoomsConversationSnapshot?
     func beginAttempt(
@@ -66,6 +67,10 @@ protocol AgentRoomsConversationPersisting: AnyObject {
     ) throws
 }
 
+extension AgentRoomsConversationPersisting {
+    func prepareReservedTestChat(id: UUID, at date: Date) throws -> AgentRoomsConversationSnapshot? { nil }
+}
+
 enum AgentRoomsConversationPersistenceError: Error, Equatable {
     case ineligibleRoom
     case ineligibleCompletion
@@ -83,7 +88,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
     private static let schemaVersion = "1"
     private static let nativeRoomKind = "chat"
     private static let testRoomKind = "cider-test-chat"
-    private static let testRoomAuthority = "cider-test-chat.hermes-runs.v1"
+    static let testRoomAuthority = "cider-test-chat.hermes-runs.v1"
     private static let source = "cider-rooms-live-continuation"
     private static let sourceNamespace = "hermes.runs.v1"
     private static let clientSourceNamespace = "cider.rooms.client.v1"
@@ -92,10 +97,26 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
 
     private let database: CiderDatabase
     private let repository: ConversationRepository
+    private let defaultAgentProfile: ConversationAgentProfile
 
-    init(database: CiderDatabase = .shared, repository: ConversationRepository? = nil) {
+    init(
+        database: CiderDatabase = .shared,
+        repository: ConversationRepository? = nil,
+        defaultAgentProfile: ConversationAgentProfile = AgentRoomsProductionAgentProfiles.catalog.defaultProfile
+    ) {
         self.database = database
         self.repository = repository ?? ConversationRepository(database: database)
+        self.defaultAgentProfile = defaultAgentProfile
+    }
+
+    func prepareReservedTestChat(id: UUID, at date: Date) throws -> AgentRoomsConversationSnapshot? {
+        let room = try requireOrCreateRoom(
+            id: id,
+            title: AgentRoomsLiveChatModel.roomTitle,
+            reserved: true,
+            at: date
+        )
+        return try snapshot(room: room)
     }
 
     func restoreCanonicalRoom(id: UUID) throws -> AgentRoomsConversationSnapshot? {
@@ -503,6 +524,10 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             title: AgentRoomsLiveChatModel.roomTitle,
             kind: Self.testRoomKind,
             metadata: testRoomMetadata,
+            agentAssignment: ConversationRoomAgentAssignment(
+                profile: defaultAgentProfile,
+                assignedAt: date
+            ),
             createdAt: date,
             updatedAt: date
         ))
@@ -513,16 +538,20 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
               room.archivedAt == nil,
               room.trashedAt == nil
         else { throw AgentRoomsConversationPersistenceError.ineligibleRoom }
+        let baseMetadata = ConversationRepository.metadataWithoutAgentAssignment(room.metadata)
+        if room.metadata[ConversationRepository.agentAssignmentMetadataKey] != nil {
+            _ = try repository.agentAssignment(roomID: room.id)
+        }
         if reserved {
             guard room.stableKey == AgentRoomsTestChatPersistence.stableRoomKey,
                   room.title == AgentRoomsLiveChatModel.roomTitle,
                   room.kind == Self.testRoomKind,
-                  room.metadata == testRoomMetadata
+                  baseMetadata == testRoomMetadata
             else { throw AgentRoomsConversationPersistenceError.authorityMismatch }
         } else {
             guard room.stableKey == nil,
                   room.kind == Self.nativeRoomKind,
-                  room.metadata.isEmpty || room.metadata == nativeRoomMetadata
+                  baseMetadata.isEmpty || baseMetadata == nativeRoomMetadata
             else { throw AgentRoomsConversationPersistenceError.ineligibleRoom }
         }
     }

@@ -16,10 +16,17 @@ final class AgentRoomsActionService: AgentRoomsActionServicing {
     static let maximumTitleLength = 120
 
     private let repository: ConversationRepository
+    private let agentAssignments: any AgentRoomsAgentAssignmentReading
     private let now: () -> Date
 
-    init(repository: ConversationRepository, now: @escaping () -> Date = Date.init) {
+    init(
+        repository: ConversationRepository,
+        agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.repository = repository
+        self.agentAssignments = agentAssignments
+            ?? AgentRoomsAgentAssignmentService(repository: repository, now: now)
         self.now = now
     }
 
@@ -31,6 +38,10 @@ final class AgentRoomsActionService: AgentRoomsActionServicing {
                 "authority": AgentRoomsConversationPersistence.nativeRoomAuthority,
                 "schema_version": "1",
             ],
+            agentAssignment: ConversationRoomAgentAssignment(
+                profile: agentAssignments.defaultProfile,
+                assignedAt: timestamp
+            ),
             createdAt: timestamp,
             updatedAt: timestamp
         ))

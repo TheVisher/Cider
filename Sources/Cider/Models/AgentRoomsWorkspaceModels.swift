@@ -68,6 +68,16 @@ struct AgentRoomTranscript: Equatable, Sendable {
     let futureArtifact: AgentRoomFutureArtifact?
 }
 
+struct AgentRoomActingAgent: Equatable, Sendable {
+    let profileID: String
+    let displayName: String
+    let providerID: String
+    let runtimeID: String
+    let capabilities: [String]
+    let sendEligible: Bool
+    let unavailableReason: String?
+}
+
 struct AgentRoom: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
@@ -75,6 +85,7 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let updatedAt: Date
     let relativeTime: String
     let transcript: AgentRoomTranscript
+    var actingAgent: AgentRoomActingAgent? = nil
     var messageLimitNotice: String? = nil
     var continuity: AgentRoomContinuity = .historicalReplay
     var lifecycleState: ConversationRoomLifecycle = .active

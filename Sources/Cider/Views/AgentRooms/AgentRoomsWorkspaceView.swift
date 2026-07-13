@@ -970,6 +970,56 @@ struct AgentRoomsWorkspaceView: View {
             .accessibilityLabel(room.continuity == .liveContinuation
                 ? "\(room.transcript.runtimeLabel) runtime, live continuation"
                 : "\(room.transcript.runtimeLabel) runtime, \(presentation.transcriptAccessibility)")
+            actingAgentControl(room)
+        }
+    }
+
+    @ViewBuilder
+    private func actingAgentControl(_ room: AgentRoom) -> some View {
+        if canAssignAgent(room), let assignments = session.agentAssignments {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text("Acting agent")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                Menu {
+                    ForEach(assignments.profiles, id: \.id) { profile in
+                        Button {
+                            assignAgent(profileID: profile.id, room: room)
+                        } label: {
+                            let suffix = profile.availability.isAvailable ? "" : " · Unavailable"
+                            Text("\(profile.displayName)\(suffix)")
+                        }
+                    }
+                } label: {
+                    Text(room.actingAgent?.displayName ?? "Choose agent")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Acting agent, \(room.actingAgent?.displayName ?? "not assigned")")
+
+            if let reason = room.actingAgent?.unavailableReason {
+                Text(reason)
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.destructive)
+                    .accessibilityLabel("Acting agent unavailable. \(reason)")
+            } else if let agent = room.actingAgent {
+                Text("\(agent.providerID) · \(agent.runtimeID) · \(agent.capabilities.joined(separator: ", "))")
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.tertiary)
+                    .lineLimit(2)
+                    .accessibilityLabel(
+                        "Provider \(agent.providerID), runtime \(agent.runtimeID), capabilities \(agent.capabilities.joined(separator: ", "))"
+                    )
+            }
+        } else if state.authority == .canonicalIncomplete {
+            Text("Acting agent: \(room.actingAgent?.displayName ?? "Not assigned")")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(room.actingAgent?.sendEligible == false
+                    ? CiderColors.destructive
+                    : CiderColors.tertiary)
         }
     }
 
@@ -1606,7 +1656,7 @@ struct AgentRoomsWorkspaceView: View {
                         Task { await liveChat.refreshTransportReadiness() }
                     }
                     .buttonStyle(.link)
-                    .accessibilityLabel("Reconnect to Hermes")
+                    .accessibilityLabel("Reconnect acting agent runtime")
                 }
             }
             if let detail = status.detail {
@@ -1647,7 +1697,7 @@ struct AgentRoomsWorkspaceView: View {
                 Button("Send") { submitComposer(roomID: roomID) }
                     .buttonStyle(.borderedProminent)
                     .disabled(!enabled || !validDraft)
-                    .accessibilityLabel("Send message to Hermes")
+                    .accessibilityLabel("Send message to \(activeAgentDisplayName)")
             }
             Text("Return sends · Shift-Return adds a line · \(composerText.count)/\(AgentRoomsLiveChatModel.maximumMessageLength)")
                 .font(CiderFont.micro)
@@ -1661,8 +1711,15 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private func composerPlaceholder(roomID: String) -> String {
-        if roomID == liveChat.testRoom?.id { return "Message Hermes in Cider Test Chat" }
-        return "Message Hermes in \(liveChat.activeRoom?.title ?? "this conversation")"
+        let agent = activeAgentDisplayName
+        if roomID == liveChat.testRoom?.id { return "Message \(agent) in Cider Test Chat" }
+        return "Message \(agent) in \(liveChat.activeRoom?.title ?? "this conversation")"
+    }
+
+    private var activeAgentDisplayName: String {
+        liveChat.activeRoom?.actingAgent?.displayName
+            ?? liveChat.activeRoom?.transcript.runtimeLabel
+            ?? "Hermes"
     }
 
     private func submitComposer(roomID: String) {
@@ -1727,6 +1784,31 @@ struct AgentRoomsWorkspaceView: View {
             && state.authority == .canonicalIncomplete
             && UUID(uuidString: room.id) != nil
             && room.id != liveChat.testRoom?.id
+    }
+
+    private func canAssignAgent(_ room: AgentRoom) -> Bool {
+        guard session.agentAssignments != nil,
+              room.lifecycleState == .active,
+              UUID(uuidString: room.id) != nil
+        else { return false }
+        return state.authority == .canonicalIncomplete || room.id == liveChat.testRoom?.id
+    }
+
+    private func assignAgent(profileID: String, room: AgentRoom) {
+        guard let assignments = session.agentAssignments,
+              let roomID = UUID(uuidString: room.id)
+        else { return }
+        do {
+            _ = try assignments.assign(profileID: profileID, roomID: roomID)
+            Task {
+                if liveChat.activeRoom?.id == room.id {
+                    await liveChat.refreshTransportReadiness()
+                }
+                await reload()
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     private func applySearch() {

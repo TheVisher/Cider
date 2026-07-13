@@ -71,6 +71,7 @@ struct ConversationRoomDraft: Codable, Equatable, Sendable {
     var title: String
     var kind: String = "chat"
     var metadata: [String: String] = [:]
+    var agentAssignment: ConversationRoomAgentAssignment?
     var createdAt: Date = Date()
     var updatedAt: Date?
 }
