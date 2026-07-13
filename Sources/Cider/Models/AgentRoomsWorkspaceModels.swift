@@ -97,6 +97,23 @@ struct AgentRoomsWorkspaceRequest: Equatable, Sendable {
     var searchText = ""
 }
 
+enum AgentRoomsWorkspaceLayoutMode: Equatable, Sendable {
+    case sideBySide
+    case stacked
+}
+
+enum AgentRoomsWorkspaceLayoutPolicy {
+    static let sideBySideMinimumWidth: CGFloat = 660
+
+    static func mode(width: CGFloat, usesAccessibilityText: Bool) -> AgentRoomsWorkspaceLayoutMode {
+        width >= sideBySideMinimumWidth && !usesAccessibilityText ? .sideBySide : .stacked
+    }
+}
+
+enum AgentRoomsTranscriptMotionPolicy {
+    static func disablesScrollAnimations(reduceMotion: Bool) -> Bool { reduceMotion }
+}
+
 struct AgentRoomsEligibleNotice: Equatable, Sendable {
     enum Kind: Equatable, Sendable { case loaded, empty }
 

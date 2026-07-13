@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 
 struct AgentRoomsWorkspaceView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let loadWorkspace: @MainActor (AgentRoomsWorkspaceRequest) async -> AgentRoomsWorkspaceState
     let roomActions: (any AgentRoomsActionServicing)?
     let onOpenLiveChat: () -> Void
@@ -196,10 +199,17 @@ struct AgentRoomsWorkspaceView: View {
 
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     headerTitle
-                    HStack(spacing: Spacing.sm) {
-                        newConversationButton
-                        newTestChatButton
-                        openLiveChatButton
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Spacing.sm) {
+                            newConversationButton
+                            newTestChatButton
+                            openLiveChatButton
+                        }
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            newConversationButton
+                            newTestChatButton
+                            openLiveChatButton
+                        }
                     }
                 }
             }
@@ -288,7 +298,8 @@ struct AgentRoomsWorkspaceView: View {
             Text(authorityPresentation.subtitle)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -309,6 +320,8 @@ struct AgentRoomsWorkspaceView: View {
             session.createTestChat()
             Task {
                 await liveChat.refreshTransportReadiness()
+                await Task.yield()
+                focusedRegion = .composer
             }
         } label: {
             Label(
@@ -319,7 +332,9 @@ struct AgentRoomsWorkspaceView: View {
         }
         .buttonStyle(.bordered)
         .disabled(liveChat.transportState == .checking)
+        .keyboardShortcut("n", modifiers: [.command, .shift])
         .accessibilityLabel(liveChat.testRoom == nil ? "Start Cider Test Chat" : "Open Cider Test Chat")
+        .help("Start or open Cider Test Chat (Command-Shift-N)")
     }
 
     @ViewBuilder
@@ -436,7 +451,10 @@ struct AgentRoomsWorkspaceView: View {
         VStack(spacing: 0) {
             if let notice { eligibleNotice(notice) }
             GeometryReader { proxy in
-                if proxy.size.width >= 660 {
+                if AgentRoomsWorkspaceLayoutPolicy.mode(
+                    width: proxy.size.width,
+                    usesAccessibilityText: dynamicTypeSize.isAccessibilitySize
+                ) == .sideBySide {
                     HStack(spacing: 0) {
                         roomRail(rooms: rooms, selectedRoom: selectedRoom)
                             .frame(width: 252)
@@ -446,7 +464,7 @@ struct AgentRoomsWorkspaceView: View {
                 } else {
                     VStack(spacing: 0) {
                         roomRail(rooms: rooms, selectedRoom: selectedRoom)
-                            .frame(maxHeight: 216)
+                            .frame(minHeight: 112, maxHeight: 216)
                         Divider().overlay(CiderColors.borderSubtle)
                         transcriptPane(room: selectedRoom, authority: authority)
                     }
@@ -865,7 +883,13 @@ struct AgentRoomsWorkspaceView: View {
                 }
                 .onChange(of: room.transcript.messages.last?.body) { _, _ in
                     guard transcriptFollowPolicy.shouldAutoScrollForNewContent else { return }
-                    proxy.scrollTo("agent-rooms-transcript-bottom", anchor: .bottom)
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = AgentRoomsTranscriptMotionPolicy.disablesScrollAnimations(
+                        reduceMotion: reduceMotion
+                    )
+                    withTransaction(transaction) {
+                        proxy.scrollTo("agent-rooms-transcript-bottom", anchor: .bottom)
+                    }
                 }
                 .accessibilityLabel(room.continuity == .liveContinuation
                     ? "Live continuation transcript for \(room.title)"
@@ -907,8 +931,20 @@ struct AgentRoomsWorkspaceView: View {
                 Text(room.title)
                     .font(CiderFont.titleMedium)
                     .foregroundColor(CiderColors.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: Spacing.sm)
-                if canManage(room) || exportableRoomID(room) != nil {
+                if let roomID = exportableRoomID(room) {
+                    Button("Export") {
+                        onExportRoom?(roomID, room.title)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .accessibilityLabel("Export Conversation \(room.title)")
+                    .help("Export a local open-data copy of this conversation")
+                }
+                if canManage(room) {
                     Menu {
                         roomManagementMenu(room)
                     } label: {
@@ -1152,7 +1188,7 @@ struct AgentRoomsWorkspaceView: View {
                     Text(receipts.count == 1 ? "1 Cider source" : "\(receipts.count) Cider sources")
                         .font(CiderFont.bodySemibold)
                         .foregroundColor(CiderColors.primary)
-                    Text("Validated objects · Sources do not verify the assistant response")
+                    Text("Validated objects · Expand for Open actions · Sources do not verify the assistant response")
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                 }
@@ -1160,8 +1196,8 @@ struct AgentRoomsWorkspaceView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(
                 receipts.count == 1
-                    ? "1 validated Cider source. Sources do not verify the assistant response."
-                    : "\(receipts.count) validated Cider sources. Sources do not verify the assistant response."
+                    ? "1 validated Cider source. Expand for Open actions. Sources do not verify the assistant response."
+                    : "\(receipts.count) validated Cider sources. Expand for Open actions. Sources do not verify the assistant response."
             )
         }
         .tint(CiderColors.secondary)
@@ -1320,6 +1356,7 @@ struct AgentRoomsWorkspaceView: View {
             collection.rows.count == 1 ? "Generated artifact" : "Generated artifacts"
         }
         let symbol = kind == .attachment ? "paperclip" : "doc.badge.gearshape"
+        let disclosureDetail = AgentRoomsAssetDisclosurePresentation.detail(for: collection)
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 if collection.rows.isEmpty {
@@ -1342,13 +1379,13 @@ struct AgentRoomsWorkspaceView: View {
                     Text(title)
                         .font(CiderFont.bodySemibold)
                         .foregroundColor(CiderColors.primary)
-                    Text(collection.detail)
+                    Text(disclosureDetail)
                         .font(CiderFont.caption)
                         .foregroundColor(CiderColors.tertiary)
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(title). \(collection.detail). Cider-native open only when available.")
+            .accessibilityLabel("\(title). \(disclosureDetail). Cider-native open only when available.")
         }
         .tint(CiderColors.secondary)
         .padding(Spacing.md)
@@ -1584,7 +1621,18 @@ struct AgentRoomsWorkspaceView: View {
                     .lineLimit(1...5)
                     .focused($focusedRegion, equals: .composer)
                     .disabled(!enabled)
-                    .onSubmit { submitComposer(roomID: roomID) }
+                    .onKeyPress(.return, phases: .down) { press in
+                        if press.modifiers.contains(.shift) {
+                            if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
+                                editor.insertNewlineIgnoringFieldEditor(nil)
+                            } else {
+                                composerText += "\n"
+                            }
+                            return .handled
+                        }
+                        submitComposer(roomID: roomID)
+                        return .handled
+                    }
                     .accessibilityLabel(composerPlaceholder(roomID: roomID))
                     .background(AgentRoomsComposerDraftBridge { session.composerText = $0 })
 
@@ -1694,6 +1742,7 @@ struct AgentRoomsWorkspaceView: View {
             Task {
                 await liveChat.refreshTransportReadiness()
                 await reload()
+                focusedRegion = .composer
             }
         } catch {
             actionError = error.localizedDescription
@@ -1734,7 +1783,10 @@ struct AgentRoomsWorkspaceView: View {
             request = .init(scope: .active)
             searchText = ""
             session.selectRoom(id: restored.id.uuidString, persistIfCanonical: true)
-            Task { await reload() }
+            Task {
+                await reload()
+                focusedRegion = .composer
+            }
         } catch {
             actionError = error.localizedDescription
         }

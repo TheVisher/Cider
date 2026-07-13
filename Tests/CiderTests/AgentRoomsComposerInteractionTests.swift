@@ -127,6 +127,93 @@ final class AgentRoomsComposerInteractionTests: XCTestCase {
     }
 
     @MainActor
+    func testShiftReturnAddsLineAndPlainReturnSendsFromNativeEditor() async throws {
+        let transport = ComposerReadyTransport()
+        let model = AgentRoomsLiveChatModel(
+            transport: transport,
+            turnCoordinator: HermesTurnCoordinator()
+        )
+        await model.startTestChat()
+        let roomID = try XCTUnwrap(model.testRoom?.id)
+        let view = AgentRoomsWorkspaceView(
+            state: .loaded(authority: .canonicalIncomplete, rooms: [], selectedRoomID: roomID),
+            liveChat: model,
+            onOpenLiveChat: {}
+        )
+        .frame(width: 1_000, height: 700)
+
+        let window = CiderMainWindow()
+        window.setFrame(NSRect(x: 100, y: 100, width: 1_000, height: 700), display: false)
+        window.contentView = CiderMainWindowHostingView(rootView: view)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        await settleUI()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let field = try XCTUnwrap(findComposerField(in: window.contentView))
+        try focus(field, in: window)
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        editor.insertText("first", replacementRange: editor.selectedRange())
+
+        window.sendEvent(try keyEvent(in: window, modifiers: [.shift]))
+        await settleUI()
+        XCTAssertEqual(field.stringValue, "first\n")
+        let textsAfterShiftReturn = await transport.sentTexts()
+        XCTAssertEqual(textsAfterShiftReturn, [])
+
+        let multilineEditor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        multilineEditor.insertText("second", replacementRange: multilineEditor.selectedRange())
+        window.sendEvent(try keyEvent(in: window))
+        await settleUI()
+
+        let sentTexts = await transport.sentTexts()
+        XCTAssertEqual(sentTexts, ["first\nsecond"])
+    }
+
+    @MainActor
+    func testStartingTestChatMovesFocusIntoComposer() async throws {
+        let model = AgentRoomsLiveChatModel(
+            transport: ComposerReadyTransport(),
+            turnCoordinator: HermesTurnCoordinator()
+        )
+        let view = AgentRoomsWorkspaceView(
+            state: .empty(authority: .canonicalIncomplete),
+            liveChat: model,
+            onOpenLiveChat: {}
+        )
+        .frame(width: 720, height: 700)
+
+        let window = CiderMainWindow()
+        window.setFrame(NSRect(x: 100, y: 100, width: 720, height: 700), display: false)
+        window.contentView = CiderMainWindowHostingView(rootView: view)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        await settleUI()
+        let shortcut = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.command, .shift],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "N",
+            charactersIgnoringModifiers: "n",
+            isARepeat: false,
+            keyCode: 45
+        ))
+        window.sendEvent(shortcut)
+        await settleUI()
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let field = try XCTUnwrap(findComposerField(in: window.contentView))
+        XCTAssertTrue(
+            window.firstResponder === field.currentEditor(),
+            "An explicitly started chat should be immediately ready for keyboard input"
+        )
+    }
+
+    @MainActor
     private func settleUI() async {
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(50))
@@ -143,6 +230,44 @@ final class AgentRoomsComposerInteractionTests: XCTestCase {
             if let match = findComposerField(in: subview) { return match }
         }
         return nil
+    }
+
+    @MainActor
+    private func focus(_ field: NSTextField, in window: NSWindow) throws {
+        let centerInWindow = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(
+                with: type,
+                location: centerInWindow,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: type == .leftMouseDown ? 1 : 0
+            ))
+            window.sendEvent(event)
+        }
+    }
+
+    @MainActor
+    private func keyEvent(
+        in window: NSWindow,
+        modifiers: NSEvent.ModifierFlags = []
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
     }
 
 }

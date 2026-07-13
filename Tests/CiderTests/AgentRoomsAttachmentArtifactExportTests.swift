@@ -32,6 +32,10 @@ struct AgentRoomsAttachmentArtifactExportTests {
         #expect(attachmentCollection.rows[0].sizeLabel == "24 KB")
         #expect(attachmentCollection.rows[0].provenance == "User attachment · Cider-owned")
         #expect(attachmentCollection.rows[0].openRoute == .vaultFile(fileID: attachmentFileID))
+        #expect(
+            AgentRoomsAssetDisclosurePresentation.detail(for: attachmentCollection)
+                == "1 source-backed item · Expand for Open actions"
+        )
 
         let projectedArtifact = AgentRoomsAssetProjector.generatedArtifacts(
             factState: .validated,
@@ -44,6 +48,10 @@ struct AgentRoomsAttachmentArtifactExportTests {
         #expect(artifactCollection.rows[0].title == "Export plan.md")
         #expect(artifactCollection.rows[0].openRoute == nil)
         #expect(artifactCollection.rows[0].availability == "Open unavailable")
+        #expect(
+            AgentRoomsAssetDisclosurePresentation.detail(for: artifactCollection)
+                == "1 source-backed item"
+        )
         #expect(!String(describing: artifactCollection).contains("/Users/"))
         #expect(!String(describing: artifactCollection).contains("file://"))
     }
@@ -245,7 +253,7 @@ struct AgentRoomsAttachmentArtifactExportTests {
     }
 
     @Test("room export is deterministic readable machine-readable non-overwriting and path-free")
-    func deterministicPortableExport() throws {
+    func deterministicPortableExport() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-room-export-\(UUID().uuidString).sqlite")
         let exportRoot = FileManager.default.temporaryDirectory
@@ -333,6 +341,23 @@ struct AgentRoomsAttachmentArtifactExportTests {
         #expect(throws: AgentRoomsRoomExportError.destinationExists) {
             try exporter.export(roomID: room.id, to: destination)
         }
+
+        let recorder = ExportThreadRecorder()
+        let presentationExporter = AgentRoomsRoomExportService(
+            repository: repository,
+            beforeDiskWrite: { recorder.recordCurrentThread() }
+        )
+        let presentationDestination = exportRoot.appendingPathComponent(
+            "Portable Presentation.cider-room",
+            isDirectory: true
+        )
+        let presentationResult = try await presentationExporter.exportForPresentation(
+            roomID: room.id,
+            to: presentationDestination
+        )
+        #expect(presentationResult.packageURL == presentationDestination)
+        #expect(recorder.didWrite)
+        #expect(!recorder.wroteOnMainThread)
 
         let privateRoom = try AgentRoomsActionService(repository: repository)
             .createConversation(title: "Private source guard")
@@ -530,6 +555,18 @@ struct AgentRoomsAttachmentArtifactExportTests {
         try? fileManager.removeItem(at: url)
         try? fileManager.removeItem(atPath: url.path + "-wal")
         try? fileManager.removeItem(atPath: url.path + "-shm")
+    }
+}
+
+private final class ExportThreadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var observations: [Bool] = []
+
+    var didWrite: Bool { lock.withLock { !observations.isEmpty } }
+    var wroteOnMainThread: Bool { lock.withLock { observations.contains(true) } }
+
+    func recordCurrentThread() {
+        lock.withLock { observations.append(Thread.isMainThread) }
     }
 }
 

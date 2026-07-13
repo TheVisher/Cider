@@ -22,6 +22,14 @@ struct AgentRoomsAssetCollection: Equatable, Sendable {
     let detail: String
 }
 
+enum AgentRoomsAssetDisclosurePresentation {
+    static func detail(for collection: AgentRoomsAssetCollection) -> String {
+        collection.rows.contains(where: { $0.openRoute != nil })
+            ? "\(collection.detail) · Expand for Open actions"
+            : collection.detail
+    }
+}
+
 @MainActor
 enum AgentRoomsCanonicalAssetResolver {
     static func openRoute(for target: HermesCiderAssetReference) -> AgentRoomsCiderOpenRoute? {

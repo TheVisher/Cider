@@ -1,5 +1,9 @@
 import Foundation
 
+private struct AgentRoomsSendableFileManager: @unchecked Sendable {
+    let value: FileManager
+}
+
 struct AgentRoomsRoomExportFactCollection<Value: Codable & Equatable & Sendable>: Codable, Equatable, Sendable {
     let state: HermesStructuredFactState
     let values: [Value]
@@ -93,21 +97,34 @@ enum AgentRoomsRoomExportError: Error, Equatable {
 protocol AgentRoomsRoomExporting: AnyObject {
     func render(roomID: UUID) throws -> AgentRoomsRoomExportPackage
     func export(roomID: UUID, to destination: URL) throws -> AgentRoomsRoomExportResult
+    func exportForPresentation(roomID: UUID, to destination: URL) async throws -> AgentRoomsRoomExportResult
+}
+
+extension AgentRoomsRoomExporting {
+    func exportForPresentation(roomID: UUID, to destination: URL) async throws -> AgentRoomsRoomExportResult {
+        try export(roomID: roomID, to: destination)
+    }
 }
 
 /// Provider-neutral, Conversation Core-backed open-data export. It reads only
 /// canonical Cider rows and writes only to a caller-supplied new destination.
 @MainActor
 final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
-    static let markdownFileName = "conversation.md"
-    static let manifestFileName = "manifest.json"
+    nonisolated static let markdownFileName = "conversation.md"
+    nonisolated static let manifestFileName = "manifest.json"
 
     private let repository: ConversationRepository
-    private let fileManager: FileManager
+    private let fileManager: AgentRoomsSendableFileManager
+    private let beforeDiskWrite: @Sendable () -> Void
 
-    init(repository: ConversationRepository, fileManager: FileManager = .default) {
+    init(
+        repository: ConversationRepository,
+        fileManager: FileManager = .default,
+        beforeDiskWrite: @escaping @Sendable () -> Void = {}
+    ) {
         self.repository = repository
-        self.fileManager = fileManager
+        self.fileManager = AgentRoomsSendableFileManager(value: fileManager)
+        self.beforeDiskWrite = beforeDiskWrite
     }
 
     func render(roomID: UUID) throws -> AgentRoomsRoomExportPackage {
@@ -173,6 +190,36 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
     }
 
     func export(roomID: UUID, to destination: URL) throws -> AgentRoomsRoomExportResult {
+        let package = try render(roomID: roomID)
+        return try Self.write(
+            package: package,
+            to: destination,
+            fileManager: fileManager.value,
+            beforeDiskWrite: beforeDiskWrite
+        )
+    }
+
+    func exportForPresentation(roomID: UUID, to destination: URL) async throws -> AgentRoomsRoomExportResult {
+        let package = try render(roomID: roomID)
+        let fileManager = fileManager
+        let beforeDiskWrite = beforeDiskWrite
+        return try await Task.detached(priority: .utility) {
+            try Self.write(
+                package: package,
+                to: destination,
+                fileManager: fileManager.value,
+                beforeDiskWrite: beforeDiskWrite
+            )
+        }.value
+    }
+
+    nonisolated private static func write(
+        package: AgentRoomsRoomExportPackage,
+        to destination: URL,
+        fileManager: FileManager,
+        beforeDiskWrite: @Sendable () -> Void
+    ) throws -> AgentRoomsRoomExportResult {
+        beforeDiskWrite()
         guard destination.isFileURL,
               !destination.lastPathComponent.isEmpty,
               destination.standardizedFileURL == destination.resolvingSymlinksInPath().standardizedFileURL
@@ -189,7 +236,6 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             throw AgentRoomsRoomExportError.invalidDestination
         }
 
-        let package = try render(roomID: roomID)
         let markdownURL = destination.appendingPathComponent(Self.markdownFileName)
         let manifestURL = destination.appendingPathComponent(Self.manifestFileName)
         var createdDestination = false

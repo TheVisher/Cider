@@ -8,6 +8,11 @@ import os
 enum AgentRoomsRoomExportPresenter {
     private static let logger = Logger(subsystem: "com.cider.app", category: "RoomExport")
 
+    struct FailurePresentation: Equatable, Sendable {
+        let title: String
+        let detail: String
+    }
+
     static func requestExport(
         roomID: UUID,
         roomTitle: String,
@@ -20,19 +25,29 @@ enum AgentRoomsRoomExportPresenter {
         panel.message = "Creates a local folder with readable Markdown and a JSON manifest. Nothing is uploaded or shared."
 
         guard panel.runModal() == .OK, let destination = panel.url else { return }
-        do {
-            _ = try exporter.export(roomID: roomID, to: destination)
-        } catch {
-            logger.error("Room export failed: \(String(describing: error), privacy: .public)")
-            let exportError = error as? AgentRoomsRoomExportError
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "Cider couldn’t export this conversation"
-            alert.informativeText = exportError == .destinationExists
-                ? "Choose a new export name. Cider does not overwrite existing files or folders."
-                : "The conversation was not changed. Choose a new local destination and try again."
-            alert.runModal()
+        Task {
+            do {
+                _ = try await exporter.exportForPresentation(roomID: roomID, to: destination)
+            } catch {
+                let presentation = failurePresentation(for: error)
+                logger.error("Room export failed with a bounded local export error.")
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = presentation.title
+                alert.informativeText = presentation.detail
+                alert.runModal()
+            }
         }
+    }
+
+    nonisolated static func failurePresentation(for error: Error) -> FailurePresentation {
+        let detail = (error as? AgentRoomsRoomExportError) == .destinationExists
+            ? "Choose a new export name. Cider does not overwrite existing files or folders."
+            : "The conversation was not changed. Choose a new local destination and try again."
+        return FailurePresentation(
+            title: "Cider couldn’t export this conversation",
+            detail: detail
+        )
     }
 
     private static func safeFileName(_ title: String) -> String {
