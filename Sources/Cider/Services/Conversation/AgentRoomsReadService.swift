@@ -12,6 +12,7 @@ final class AgentRoomsReadService {
     private static let turnLimit = 1
 
     private let loadRooms: (ConversationRoomLifecycle, Int) throws -> [ConversationRoom]
+    private let searchRooms: (String, ConversationRoomLifecycle, Int) throws -> [ConversationRoom]
     private let loadRecentMessages: (UUID, Int) throws -> [ConversationMessage]
     private let loadRuntimeBindings: (UUID, Int) throws -> [ConversationRuntimeBinding]
     private let loadRecentTurns: (UUID, Int) throws -> [ConversationTurn]
@@ -19,6 +20,7 @@ final class AgentRoomsReadService {
 
     init(repository: ConversationRepository, now: @escaping () -> Date = Date.init) {
         self.loadRooms = repository.rooms(lifecycle:limit:)
+        self.searchRooms = repository.searchRooms(query:lifecycle:limit:)
         self.loadRecentMessages = repository.recentMessages(roomID:limit:)
         self.loadRuntimeBindings = repository.runtimeBindings(roomID:limit:)
         self.loadRecentTurns = repository.recentTurns(roomID:limit:)
@@ -28,12 +30,19 @@ final class AgentRoomsReadService {
     /// Internal injection keeps tests temporary and failure paths deterministic without exposing writes.
     init(
         loadRooms: @escaping (ConversationRoomLifecycle, Int) throws -> [ConversationRoom],
+        searchRooms: ((String, ConversationRoomLifecycle, Int) throws -> [ConversationRoom])? = nil,
         loadRecentMessages: @escaping (UUID, Int) throws -> [ConversationMessage],
         loadRuntimeBindings: @escaping (UUID, Int) throws -> [ConversationRuntimeBinding],
         loadRecentTurns: @escaping (UUID, Int) throws -> [ConversationTurn],
         now: @escaping () -> Date = Date.init
     ) {
         self.loadRooms = loadRooms
+        self.searchRooms = searchRooms ?? { query, lifecycle, limit in
+            let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            return try loadRooms(lifecycle, limit).filter {
+                normalized.isEmpty || $0.title.localizedCaseInsensitiveContains(normalized)
+            }
+        }
         self.loadRecentMessages = loadRecentMessages
         self.loadRuntimeBindings = loadRuntimeBindings
         self.loadRecentTurns = loadRecentTurns
@@ -41,13 +50,21 @@ final class AgentRoomsReadService {
     }
 
     func loadWorkspace() -> AgentRoomsWorkspaceState {
+        loadWorkspace(request: .init())
+    }
+
+    func loadWorkspace(request: AgentRoomsWorkspaceRequest) -> AgentRoomsWorkspaceState {
         do {
-            let canonicalRooms = try loadRooms(.active, Self.roomLimit).filter {
+            let query = request.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let canonicalRooms = query.isEmpty
+                ? try loadRooms(request.scope.lifecycle, Self.roomLimit)
+                : try searchRooms(query, request.scope.lifecycle, Self.roomLimit)
+            let visibleRooms = canonicalRooms.filter {
                 $0.stableKey != AgentRoomsTestChatPersistence.stableRoomKey
             }
-            guard !canonicalRooms.isEmpty else { return .empty(authority: .canonicalIncomplete) }
+            guard !visibleRooms.isEmpty else { return .empty(authority: .canonicalIncomplete) }
 
-            let rooms = try canonicalRooms.map { room in
+            let rooms = try visibleRooms.map { room in
                 let messages = try loadRecentMessages(room.id, Self.messageLimit)
                 let bindings = try loadRuntimeBindings(room.id, Self.runtimeBindingLimit)
                 let newestTurn = try loadRecentTurns(room.id, Self.turnLimit).first
@@ -110,7 +127,8 @@ final class AgentRoomsReadService {
                 link: nil,
                 receipt: receipt,
                 futureArtifact: nil
-            )
+            ),
+            lifecycleState: room.lifecycleState
         )
     }
 

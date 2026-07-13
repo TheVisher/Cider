@@ -410,10 +410,15 @@ extension CiderPanelView {
                     onOpenSpace: openSpace
                 )
             case .agentRooms:
+                let repository = ConversationRepository(database: CiderDatabase.shared)
+                let canonical = AgentRoomsReadService(repository: repository)
                 AgentRoomsWorkspaceView(
-                    loadWorkspace: {
-                        let repository = ConversationRepository(database: CiderDatabase.shared)
-                        let canonical = AgentRoomsReadService(repository: repository)
+                    loadWorkspace: { request in
+                        guard request.scope == .active,
+                              request.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        else {
+                            return canonical.loadWorkspace(request: request)
+                        }
                         let paths = StoragePaths.legacyConversationPreviewDirectories()
                         let parityReader = ConversationRepositoryParityReader(repository: repository)
                         let eligible = LegacyConversationEligiblePreviewService(
@@ -430,6 +435,7 @@ extension CiderPanelView {
                             loadLegacy: eligibleAdapter.loadWorkspace
                         ).loadWorkspace()
                     },
+                    roomActions: AgentRoomsActionService(repository: repository),
                     session: agentRoomsSession,
                     onOpenLiveChat: {
                         requestFloat(.aiAssistant)

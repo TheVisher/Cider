@@ -115,6 +115,106 @@ struct ConversationRepositoryTests {
         }
     }
 
+    @Test("Room rename and lifecycle changes preserve canonical identity and durable history")
+    func roomManagementPreservesIdentityAndHistory() throws {
+        try withRepository { _, repository in
+            let createdAt = Date(timeIntervalSince1970: 1_000)
+            let changedAt = Date(timeIntervalSince1970: 2_000)
+            let room = try repository.createRoom(.init(
+                stableKey: "cider.room.management-test",
+                title: "Planning",
+                createdAt: createdAt
+            ))
+            let binding = try repository.upsertRuntimeBinding(.init(
+                roomID: room.id,
+                runtimeID: "hermes",
+                transportID: "runs-api",
+                sourceNamespace: "hermes.runs.v1",
+                externalSessionID: "rotating-runtime-session"
+            ))
+            let message = try repository.upsertMessage(.init(
+                roomID: room.id,
+                runtimeBindingID: binding.id,
+                role: "user",
+                contentText: "Keep this durable transcript"
+            ), intent: .historicalReplay).message
+
+            let renamed = try repository.renameRoom(
+                roomID: room.id,
+                title: "Launch Planning",
+                at: changedAt
+            )
+            try repository.setLifecycle(roomID: room.id, state: .archived, at: changedAt)
+            let archived = try #require(try repository.room(id: room.id))
+            try repository.setLifecycle(roomID: room.id, state: .active, at: changedAt.addingTimeInterval(1))
+            let restored = try #require(try repository.room(id: room.id))
+
+            #expect(renamed.id == room.id)
+            #expect(renamed.stableKey == room.stableKey)
+            #expect(renamed.title == "Launch Planning")
+            #expect(archived.id == room.id)
+            #expect(archived.lifecycleState == .archived)
+            #expect(restored.id == room.id)
+            #expect(restored.lifecycleState == .active)
+            #expect(restored.archivedAt == nil)
+            #expect(try repository.messages(roomID: room.id).map(\.id) == [message.id])
+            #expect(try repository.bindings(roomID: room.id).map(\.id) == [binding.id])
+        }
+    }
+
+    @Test("Room search is lifecycle scoped, history aware, literal, and deterministic")
+    func roomSearch() throws {
+        try withRepository { _, repository in
+            let timestamp = Date(timeIntervalSince1970: 1_000)
+            let titleMatch = try repository.createRoom(.init(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                title: "Summer Plans 100%",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            ))
+            let transcriptMatch = try repository.createRoom(.init(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                title: "Ideas",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            ))
+            let archived = try repository.createRoom(.init(
+                title: "Archived Summer Plans",
+                createdAt: timestamp.addingTimeInterval(1),
+                updatedAt: timestamp.addingTimeInterval(1)
+            ))
+            _ = try repository.upsertMessage(.init(
+                roomID: transcriptMatch.id,
+                role: "assistant",
+                contentText: "The summer itinerary is ready"
+            ), intent: .historicalReplay)
+            try repository.setLifecycle(roomID: archived.id, state: .archived, at: timestamp.addingTimeInterval(2))
+
+            let activeSummer = try repository.searchRooms(
+                query: "summer",
+                lifecycle: .active,
+                limit: 20
+            )
+            let archivedSummer = try repository.searchRooms(
+                query: "summer",
+                lifecycle: .archived,
+                limit: 20
+            )
+            let literalPercent = try repository.searchRooms(
+                query: "%",
+                lifecycle: .active,
+                limit: 20
+            )
+
+            #expect(activeSummer.map(\.id) == [transcriptMatch.id, titleMatch.id])
+            #expect(archivedSummer.map(\.id) == [archived.id])
+            #expect(literalPercent.map(\.id) == [titleMatch.id])
+            #expect(throws: ConversationRepositoryError.self) {
+                try repository.searchRooms(query: "summer", lifecycle: .active, limit: 0)
+            }
+        }
+    }
+
     @Test("Bounded recent messages select newest and return ascending sequence")
     func boundedRecentMessages() throws {
         try withRepository { _, repository in

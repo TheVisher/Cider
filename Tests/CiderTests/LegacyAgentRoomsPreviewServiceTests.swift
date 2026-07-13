@@ -274,9 +274,9 @@ final class LegacyAgentRoomsPreviewServiceTests: XCTestCase {
             encoding: .utf8
         )
         for required in [
-            "Read-only · Canonical incomplete",
-            "A secondary, incomplete view of durable agent threads.",
-            "read-only incomplete canonical transcript",
+            "Cider-owned",
+            "Durable local conversations with calm room controls.",
+            "Cider-owned canonical transcript",
             "Read-only · Legacy authoritative",
             "Noncanonical preview of current legacy conversation history",
             "Legacy-authoritative preview · Not imported",

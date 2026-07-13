@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 struct AgentRoomsWorkspaceView: View {
-    let loadWorkspace: @MainActor () async -> AgentRoomsWorkspaceState
+    let loadWorkspace: @MainActor (AgentRoomsWorkspaceRequest) async -> AgentRoomsWorkspaceState
+    let roomActions: (any AgentRoomsActionServicing)?
     let onOpenLiveChat: () -> Void
     let onOpenCiderReference: (AgentRoomsCiderOpenRoute) -> Void
 
@@ -11,20 +12,28 @@ struct AgentRoomsWorkspaceView: View {
     @State private var state: AgentRoomsWorkspaceState
     @State private var transcriptFollowPolicy = AgentRoomsTranscriptFollowPolicy()
     @State private var transcriptViewportHeight: CGFloat = 0
+    @State private var request = AgentRoomsWorkspaceRequest()
+    @State private var searchText = ""
+    @State private var renameRoom: AgentRoom?
+    @State private var renameText = ""
+    @State private var actionError: String?
     @FocusState private var focusedRegion: FocusRegion?
 
     private enum FocusRegion: Hashable {
         case roomList
         case composer
+        case search
     }
 
     init(
-        loadWorkspace: @escaping @MainActor () async -> AgentRoomsWorkspaceState,
+        loadWorkspace: @escaping @MainActor (AgentRoomsWorkspaceRequest) async -> AgentRoomsWorkspaceState,
+        roomActions: any AgentRoomsActionServicing,
         session: AgentRoomsSessionModel,
         onOpenLiveChat: @escaping () -> Void,
         onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
     ) {
         self.loadWorkspace = loadWorkspace
+        self.roomActions = roomActions
         self.onOpenLiveChat = onOpenLiveChat
         self.onOpenCiderReference = onOpenCiderReference
         _session = ObservedObject(wrappedValue: session)
@@ -39,7 +48,8 @@ struct AgentRoomsWorkspaceView: View {
         onOpenLiveChat: @escaping () -> Void,
         onOpenCiderReference: @escaping (AgentRoomsCiderOpenRoute) -> Void = { _ in }
     ) {
-        self.loadWorkspace = { state }
+        self.loadWorkspace = { _ in state }
+        self.roomActions = nil
         self.onOpenLiveChat = onOpenLiveChat
         self.onOpenCiderReference = onOpenCiderReference
         _session = ObservedObject(wrappedValue: session)
@@ -97,47 +107,139 @@ struct AgentRoomsWorkspaceView: View {
             }
         }
         .onChange(of: state) { _, newState in
-            if let testRoomID = liveChat.testRoom?.id, selectedRoomID == testRoomID {
+            if let testRoomID = visibleTestRoom?.id, selectedRoomID == testRoomID {
                 return
             }
             if case .loaded(_, let rooms, let storedSelection) = newState {
-                selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
-                    ? storedSelection
-                    : rooms.first?.id
+                let preferred = request.scope == .active ? session.preferredCanonicalRoomID : nil
+                let resolvedSelection = rooms.first(where: { $0.id == selectedRoomID })?.id
+                    ?? rooms.first(where: { $0.id == preferred })?.id
+                    ?? rooms.first(where: { $0.id == storedSelection })?.id
+                    ?? rooms.first?.id
+                session.selectRoom(
+                    id: resolvedSelection,
+                    persistIfCanonical: request.scope == .active
+                        && request.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             } else if case .eligibleLoaded(_, let rooms, let storedSelection, _) = newState {
-                selectedRoomID = rooms.contains(where: { $0.id == storedSelection })
-                    ? storedSelection
-                    : rooms.first?.id
+                session.selectRoom(
+                    id: rooms.first(where: { $0.id == selectedRoomID })?.id
+                        ?? rooms.first(where: { $0.id == storedSelection })?.id
+                        ?? rooms.first?.id,
+                    persistIfCanonical: false
+                )
             } else {
-                selectedRoomID = nil
+                session.selectRoom(id: nil, persistIfCanonical: false)
             }
         }
         .onChange(of: liveChat.turnState) { _, turnState in
             guard turnState == .failed else { return }
             if session.restoreRecoveredDraftIfNeeded() { focusedRegion = .composer }
         }
+        .alert("Rename Conversation", isPresented: Binding(
+            get: { renameRoom != nil },
+            set: { if !$0 { renameRoom = nil } }
+        )) {
+            TextField("Conversation name", text: $renameText)
+            Button("Cancel", role: .cancel) { renameRoom = nil }
+            Button("Rename") { renameSelectedConversation() }
+                .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("Choose a calm, searchable name. The Cider room identity and history will not change.")
+        }
+        .alert("Room action unavailable", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "Try again.")
+        }
     }
 
     private var header: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: Spacing.md) {
-                headerTitle
-                Spacer(minLength: Spacing.md)
-                newTestChatButton
-                openLiveChatButton
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                headerTitle
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            ViewThatFits(in: .horizontal) {
                 HStack(spacing: Spacing.sm) {
+                    headerTitle
+                    Spacer(minLength: Spacing.md)
+                    newConversationButton
                     newTestChatButton
                     openLiveChatButton
                 }
+
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    headerTitle
+                    HStack(spacing: Spacing.sm) {
+                        newConversationButton
+                        newTestChatButton
+                        openLiveChatButton
+                    }
+                }
             }
+            roomNavigationControls
         }
         .padding(.horizontal, Spacing.xxl)
         .padding(.vertical, Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var roomNavigationControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.sm) {
+                conversationSearchField
+                conversationScopePicker.frame(width: 250)
+            }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                conversationSearchField
+                conversationScopePicker
+            }
+        }
+    }
+
+    private var conversationSearchField: some View {
+        HStack(spacing: Spacing.xs) {
+            TextField("Search conversations", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedRegion, equals: .search)
+                .onSubmit { applySearch() }
+                .accessibilityLabel("Search conversations")
+            Button {
+                focusedRegion = .search
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("f", modifiers: .command)
+            .accessibilityLabel("Focus conversation search")
+            .help("Search conversations (Command-F)")
+        }
+    }
+
+    private var conversationScopePicker: some View {
+        Picker("Conversation collection", selection: $request.scope) {
+            Text("Active conversations").tag(AgentRoomsListScope.active)
+            Text("Archived conversations").tag(AgentRoomsListScope.archived)
+        }
+        .pickerStyle(.segmented)
+        .onChange(of: request.scope) { _, _ in
+            Task { await reload() }
+        }
+        .accessibilityLabel("Show active or archived conversations")
+    }
+
+    private var newConversationButton: some View {
+        Button {
+            createConversation()
+        } label: {
+            Label("New Conversation", systemImage: "square.and.pencil")
+                .font(CiderFont.labelMedium)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(roomActions == nil)
+        .keyboardShortcut("n", modifiers: .command)
+        .accessibilityLabel("New Conversation")
+        .help("Create a durable Cider conversation")
     }
 
     private var headerTitle: some View {
@@ -176,6 +278,8 @@ struct AgentRoomsWorkspaceView: View {
 
     private var newTestChatButton: some View {
         Button {
+            request = .init(scope: .active)
+            searchText = ""
             session.createTestChat()
             Task {
                 await liveChat.refreshTransportReadiness()
@@ -187,14 +291,14 @@ struct AgentRoomsWorkspaceView: View {
             )
             .font(CiderFont.labelMedium)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(.bordered)
         .disabled(liveChat.transportState == .checking)
         .accessibilityLabel(liveChat.testRoom == nil ? "Start Cider Test Chat" : "Open Cider Test Chat")
     }
 
     @ViewBuilder
     private var workspaceBody: some View {
-        if let testRoom = liveChat.testRoom {
+        if let testRoom = visibleTestRoom {
             let legacy = legacyRoomsAndNotice
             let rooms = [testRoom] + legacy.rooms.filter { $0.id != testRoom.id }
             let selected = rooms.first(where: { $0.id == selectedRoomID }) ?? testRoom
@@ -212,6 +316,17 @@ struct AgentRoomsWorkspaceView: View {
         } else {
             workspaceBodyWithoutTestRoom
         }
+    }
+
+    private var visibleTestRoom: AgentRoom? {
+        guard request.scope == .active, let room = liveChat.testRoom else { return nil }
+        let query = request.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return room }
+        let matchesTitle = room.title.localizedCaseInsensitiveContains(query)
+        let matchesTranscript = room.transcript.messages.contains {
+            $0.body.localizedCaseInsensitiveContains(query)
+        }
+        return matchesTitle || matchesTranscript ? room : nil
     }
 
     @ViewBuilder
@@ -358,14 +473,22 @@ struct AgentRoomsWorkspaceView: View {
 
     private func emptyState(authority: AgentRoomsWorkspaceAuthority) -> some View {
         let presentation = authorityPresentation(for: authority)
+        let isArchivedCanonicalCollection = authority == .canonicalIncomplete
+            && request.scope == .archived
+        let emptyTitle = isArchivedCanonicalCollection
+            ? "No archived conversations"
+            : presentation.emptyTitle
+        let emptyDetail = isArchivedCanonicalCollection
+            ? "Conversations you archive will appear here and can be restored."
+            : presentation.emptyDetail
         return VStack(spacing: Spacing.md) {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(CiderFont.emptyStateIcon)
                 .foregroundColor(CiderColors.tertiary)
-            Text(presentation.emptyTitle)
+            Text(emptyTitle)
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.secondary)
-            Text(presentation.emptyDetail)
+            Text(emptyDetail)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
                 .multilineTextAlignment(.center)
@@ -564,7 +687,11 @@ struct AgentRoomsWorkspaceView: View {
 
     private func roomRow(_ room: AgentRoom, isSelected: Bool) -> some View {
         Button {
-            selectedRoomID = room.id
+            session.selectRoom(
+                id: room.id,
+                persistIfCanonical: state.authority == .canonicalIncomplete
+                    && room.lifecycleState == .active
+            )
             focusedRegion = .roomList
         } label: {
             HStack(alignment: .top, spacing: Spacing.sm) {
@@ -606,6 +733,9 @@ struct AgentRoomsWorkspaceView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(room.title), \(room.preview), \(room.relativeTime)")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .contextMenu {
+            roomManagementMenu(room)
+        }
     }
 
     private func moveSelection(
@@ -623,7 +753,12 @@ struct AgentRoomsWorkspaceView: View {
         default:
             return
         }
-        selectedRoomID = rooms[nextIndex].id
+        let room = rooms[nextIndex]
+        session.selectRoom(
+            id: room.id,
+            persistIfCanonical: state.authority == .canonicalIncomplete
+                && room.lifecycleState == .active
+        )
     }
 
     private func transcriptPane(room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
@@ -723,9 +858,22 @@ struct AgentRoomsWorkspaceView: View {
     private func transcriptHeading(_ room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
         let presentation = authorityPresentation(for: authority)
         return VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text(room.title)
-                .font(CiderFont.titleMedium)
-                .foregroundColor(CiderColors.primary)
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(room.title)
+                    .font(CiderFont.titleMedium)
+                    .foregroundColor(CiderColors.primary)
+                Spacer(minLength: Spacing.sm)
+                if canManage(room) {
+                    Menu {
+                        roomManagementMenu(room)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .accessibilityLabel("Manage \(room.title)")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Rename, archive, or restore this conversation")
+                }
+            }
             HStack(spacing: Spacing.xs) {
                 Circle()
                     .fill(CiderColors.secondary)
@@ -752,13 +900,13 @@ struct AgentRoomsWorkspaceView: View {
         switch authority {
         case .canonicalIncomplete:
             AuthorityPresentation(
-                badge: "Read-only · Canonical incomplete",
-                badgeAccessibility: "Read-only, incomplete canonical data",
-                subtitle: "A secondary, incomplete view of durable agent threads.",
+                badge: "Cider-owned",
+                badgeAccessibility: "Cider-owned canonical conversations",
+                subtitle: "Durable local conversations with calm room controls.",
                 transcript: "Read-only transcript",
-                transcriptAccessibility: "read-only incomplete canonical transcript",
-                emptyTitle: "No canonical rooms available yet",
-                emptyDetail: "Existing live legacy chats remain in the Hermes panel."
+                transcriptAccessibility: "Cider-owned canonical transcript",
+                emptyTitle: "No active conversations",
+                emptyDetail: "Create a durable conversation or open Cider Test Chat."
             )
         case .legacyAuthoritativePreview:
             AuthorityPresentation(
@@ -1150,7 +1298,95 @@ struct AgentRoomsWorkspaceView: View {
     @MainActor
     private func reload() async {
         state = .loading(authority: state.authority)
-        state = await loadWorkspace()
+        state = await loadWorkspace(request)
+    }
+
+    @ViewBuilder
+    private func roomManagementMenu(_ room: AgentRoom) -> some View {
+        if canManage(room) {
+            Button("Rename Conversation") {
+                renameText = room.title
+                renameRoom = room
+            }
+            .accessibilityLabel("Rename Conversation \(room.title)")
+
+            if room.lifecycleState == .active {
+                Button("Archive Conversation") {
+                    archiveConversation(room)
+                }
+                .accessibilityLabel("Archive Conversation \(room.title)")
+            } else if room.lifecycleState == .archived {
+                Button("Restore Conversation") {
+                    restoreConversation(room)
+                }
+                .accessibilityLabel("Restore Conversation \(room.title)")
+            }
+        }
+    }
+
+    private func canManage(_ room: AgentRoom) -> Bool {
+        roomActions != nil
+            && state.authority == .canonicalIncomplete
+            && UUID(uuidString: room.id) != nil
+            && room.id != liveChat.testRoom?.id
+    }
+
+    private func applySearch() {
+        request.searchText = searchText
+        Task { await reload() }
+    }
+
+    private func createConversation() {
+        guard let roomActions else { return }
+        do {
+            let room = try roomActions.createConversation()
+            request = .init(scope: .active)
+            searchText = ""
+            session.selectRoom(id: room.id.uuidString, persistIfCanonical: true)
+            Task { await reload() }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func renameSelectedConversation() {
+        guard let roomActions, let room = renameRoom, let roomID = UUID(uuidString: room.id) else { return }
+        do {
+            let renamed = try roomActions.renameConversation(id: roomID, title: renameText)
+            renameRoom = nil
+            session.selectRoom(
+                id: renamed.id.uuidString,
+                persistIfCanonical: renamed.lifecycleState == .active
+            )
+            Task { await reload() }
+        } catch {
+            renameRoom = nil
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func archiveConversation(_ room: AgentRoom) {
+        guard let roomActions, let roomID = UUID(uuidString: room.id) else { return }
+        do {
+            _ = try roomActions.archiveConversation(id: roomID)
+            session.selectRoom(id: nil, persistIfCanonical: false)
+            Task { await reload() }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func restoreConversation(_ room: AgentRoom) {
+        guard let roomActions, let roomID = UUID(uuidString: room.id) else { return }
+        do {
+            let restored = try roomActions.restoreConversation(id: roomID)
+            request = .init(scope: .active)
+            searchText = ""
+            session.selectRoom(id: restored.id.uuidString, persistIfCanonical: true)
+            Task { await reload() }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 }
 

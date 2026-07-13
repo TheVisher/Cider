@@ -555,6 +555,8 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
         for required in [
             "let repository = ConversationRepository(database: CiderDatabase.shared)",
             "AgentRoomsReadService(repository: repository)",
+            "loadWorkspace: { request in",
+            "canonical.loadWorkspace(request: request)",
             "StoragePaths.legacyConversationPreviewDirectories()",
             "let parityReader = ConversationRepositoryParityReader(repository: repository)",
             "LegacyConversationEligiblePreviewService(",
@@ -565,6 +567,7 @@ final class AgentRoomsWorkspaceModelsTests: XCTestCase {
             "loadCanonical: canonical.loadWorkspace",
             "loadLegacy: eligibleAdapter.loadWorkspace",
             ").loadWorkspace()",
+            "roomActions: AgentRoomsActionService(repository: repository)",
         ] {
             XCTAssertTrue(roomsComposition.contains(required), "Missing strict production composition: \(required)")
         }

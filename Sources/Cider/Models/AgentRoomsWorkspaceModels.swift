@@ -73,6 +73,24 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let transcript: AgentRoomTranscript
     var messageLimitNotice: String? = nil
     var continuity: AgentRoomContinuity = .historicalReplay
+    var lifecycleState: ConversationRoomLifecycle = .active
+}
+
+enum AgentRoomsListScope: String, CaseIterable, Equatable, Sendable {
+    case active
+    case archived
+
+    var lifecycle: ConversationRoomLifecycle {
+        switch self {
+        case .active: .active
+        case .archived: .archived
+        }
+    }
+}
+
+struct AgentRoomsWorkspaceRequest: Equatable, Sendable {
+    var scope: AgentRoomsListScope = .active
+    var searchText = ""
 }
 
 struct AgentRoomsEligibleNotice: Equatable, Sendable {

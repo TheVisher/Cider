@@ -7,16 +7,32 @@ final class AgentRoomsSessionModel: ObservableObject {
 
     @Published var selectedRoomID: String?
     @Published var composerText = ""
+    private(set) var preferredCanonicalRoomID: String?
+    private let selectionStore: (any AgentRoomsSelectionPersisting)?
 
-    init(liveChat: AgentRoomsLiveChatModel) {
+    init(
+        liveChat: AgentRoomsLiveChatModel,
+        selectionStore: (any AgentRoomsSelectionPersisting)? = nil
+    ) {
         self.liveChat = liveChat
+        self.selectionStore = selectionStore
+        let restoredSelection = selectionStore?.loadSelectedRoomID()
+        self.selectedRoomID = restoredSelection
+        self.preferredCanonicalRoomID = restoredSelection
     }
 
     convenience init(transport: any HermesBridgeTransport) {
         self.init(liveChat: AgentRoomsLiveChatModel(
             transport: transport,
             persistence: AgentRoomsTestChatPersistence()
-        ))
+        ), selectionStore: AgentRoomsSelectionStore.application)
+    }
+
+    func selectRoom(id: String?, persistIfCanonical: Bool) {
+        selectedRoomID = id
+        guard persistIfCanonical, let id, UUID(uuidString: id) != nil else { return }
+        preferredCanonicalRoomID = id
+        selectionStore?.saveSelectedRoomID(id)
     }
 
     @discardableResult
@@ -26,12 +42,12 @@ final class AgentRoomsSessionModel: ObservableObject {
 
     func startTestChat() async {
         await liveChat.startTestChat()
-        selectedRoomID = liveChat.testRoom?.id
+        selectRoom(id: liveChat.testRoom?.id, persistIfCanonical: true)
     }
 
     func createTestChat() {
         liveChat.createTestChat()
-        selectedRoomID = liveChat.testRoom?.id
+        selectRoom(id: liveChat.testRoom?.id, persistIfCanonical: true)
     }
 
     @discardableResult

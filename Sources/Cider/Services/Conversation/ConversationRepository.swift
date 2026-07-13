@@ -92,6 +92,69 @@ final class ConversationRepository {
         return results
     }
 
+    /// Searches titles and durable transcript text inside one explicit lifecycle.
+    func searchRooms(
+        query: String,
+        lifecycle: ConversationRoomLifecycle,
+        limit: Int
+    ) throws -> [ConversationRoom] {
+        let boundedLimit = try validatedReadLimit(limit)
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else {
+            return try rooms(lifecycle: lifecycle, limit: boundedLimit)
+        }
+        guard normalizedQuery.count <= 240 else {
+            throw ConversationRepositoryError.invalidDraft("Room search query is too long.")
+        }
+        let escapedQuery = normalizedQuery
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        let pattern = "%\(escapedQuery)%"
+        let statement = try database.prepare("""
+            SELECT r.id, r.stable_key, r.title, r.kind, r.lifecycle_state,
+                   r.next_turn_sequence, r.next_message_sequence, r.metadata_json,
+                   r.created_at, r.updated_at, r.archived_at, r.trashed_at
+            FROM conversation_rooms r
+            WHERE r.lifecycle_state = ?
+              AND (
+                LOWER(r.title) LIKE LOWER(?) ESCAPE '\\'
+                OR EXISTS (
+                    SELECT 1 FROM conversation_messages m
+                    WHERE m.room_id = r.id
+                      AND LOWER(m.content_text) LIKE LOWER(?) ESCAPE '\\'
+                )
+              )
+            ORDER BY r.updated_at DESC, r.id ASC
+            LIMIT ?;
+            """)
+        statement.bind(lifecycle.rawValue, at: 1)
+            .bind(pattern, at: 2)
+            .bind(pattern, at: 3)
+            .bind(boundedLimit, at: 4)
+        var results: [ConversationRoom] = []
+        while try statement.step() { results.append(try decodeRoom(statement)) }
+        return results
+    }
+
+    @discardableResult
+    func renameRoom(roomID: UUID, title: String, at date: Date) throws -> ConversationRoom {
+        try database.withTransaction {
+            try requireNonempty(title, field: "room title")
+            _ = try requiredRoom(id: roomID)
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET title = ?, updated_at = ?
+                WHERE id = ?;
+                """)
+            statement.bind(title, at: 1)
+                .bind(DatabaseHelpers.encode(date), at: 2)
+                .bind(roomID.uuidString, at: 3)
+            try statement.step()
+            return try requiredRoom(id: roomID)
+        }
+    }
+
     func setLifecycle(roomID: UUID, state: ConversationRoomLifecycle, at date: Date) throws {
         try database.withTransaction {
             _ = try requiredRoom(id: roomID)
