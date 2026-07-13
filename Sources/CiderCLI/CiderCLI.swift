@@ -283,6 +283,12 @@ struct CiderCLI {
             return true
         }
 
+        if command == "review", subcommand == "summary", hasHelpArg(args) {
+            print("Usage: cider-cli review summary [--include-deferred] [--json]")
+            print("Read-only review queue summary. Summarizing review items does not change review state.")
+            return true
+        }
+
         guard command == "item" else {
             return false
         }
@@ -14755,7 +14761,10 @@ struct CiderCLI {
 
     static func printReviewQueueSummaryResult(_ result: CiderReviewQueueSummaryResult) {
         if jsonOutput {
-            outputJSON(result.toDictionary())
+            var payload = result.toDictionary()
+            payload["readOnly"] = true
+            payload["changed"] = false
+            outputJSON(payload)
             return
         }
 

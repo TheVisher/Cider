@@ -98,6 +98,80 @@ struct CiderCLIAgentSafetyTests {
         #expect(filters["limit"] as? Int == 10)
     }
 
+    @Test("populated review summary JSON declares read-only unchanged contract")
+    func populatedReviewSummaryJSONDeclaresReadOnlyUnchangedContract() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-summary-contract-populated-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add",
+                "--kind", "todo",
+                "--content", "Verify the review summary JSON contract",
+                "--title", "Review summary contract fixture",
+                "--json",
+            ],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        #expect(captureResult.status == 0)
+        #expect(capture["command"] as? String == "capture.add")
+
+        let result = try runCLI(
+            args: ["review", "summary", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["command"] as? String == "review.summary")
+        #expect((payload["totalCount"] as? Int ?? 0) > 0)
+        #expect((payload["groups"] as? [[String: Any]])?.isEmpty == false)
+        #expect(payload["batchEnrichmentPreview"] as? [String: Any] != nil)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+    }
+
+    @Test("empty review summary JSON declares read-only unchanged contract")
+    func emptyReviewSummaryJSONDeclaresReadOnlyUnchangedContract() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-summary-contract-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(
+            args: ["review", "summary", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["command"] as? String == "review.summary")
+        #expect(payload["totalCount"] as? Int == 0)
+        #expect((payload["groups"] as? [[String: Any]])?.isEmpty == true)
+        #expect(payload["batchEnrichmentPreview"] as? [String: Any] != nil)
+        #expect(payload["readOnly"] as? Bool == true)
+        #expect(payload["changed"] as? Bool == false)
+    }
+
+    @Test("review summary help is command-specific and exits before vault access")
+    func reviewSummaryHelpIsCommandSpecificAndExitsBeforeVaultAccess() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-review-summary-help-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(args: ["review", "summary", "--help"], vault: vault)
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Usage: cider-cli review summary"))
+        #expect(result.stdout.contains("--include-deferred"))
+        #expect(result.stdout.contains("Read-only"))
+        #expect(FileManager.default.fileExists(atPath: vault.path) == false)
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".cider").path) == false)
+    }
+
     @Test("review list help is command-specific and exits before vault access")
     func reviewListHelpIsCommandSpecificAndExitsBeforeVaultAccess() throws {
         let vault = FileManager.default.temporaryDirectory
