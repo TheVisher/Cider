@@ -11,6 +11,7 @@ struct HermesAPICapabilities: Decodable, Equatable, Sendable {
         let runEventsSSE: Bool
         let runStop: Bool
         let toolProgressEvents: Bool
+        let runAttachments: Bool?
         let sessionContinuityHeader: String?
 
         enum CodingKeys: String, CodingKey {
@@ -23,6 +24,7 @@ struct HermesAPICapabilities: Decodable, Equatable, Sendable {
             case runEventsSSE = "run_events_sse"
             case runStop = "run_stop"
             case toolProgressEvents = "tool_progress_events"
+            case runAttachments = "run_attachments"
             case sessionContinuityHeader = "session_continuity_header"
         }
     }
@@ -369,7 +371,11 @@ struct HermesAPIClient: Sendable {
         return decoded
     }
 
-    func createRun(input: String, sessionID: String?) async throws -> HermesRunCreateResponse {
+    func createRun(
+        input: String,
+        sessionID: String?,
+        attachments: [ConversationAttachmentTransportPayload] = []
+    ) async throws -> HermesRunCreateResponse {
         var request = URLRequest(url: endpoint("v1", "runs"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -377,6 +383,18 @@ struct HermesAPIClient: Sendable {
         var body: [String: Any] = ["input": input]
         if let sessionID, !sessionID.isEmpty {
             body["session_id"] = sessionID
+        }
+        if !attachments.isEmpty {
+            body["attachments"] = attachments.map { attachment in
+                [
+                    "id": attachment.id.uuidString,
+                    "display_name": attachment.displayName,
+                    "content_type": attachment.contentType,
+                    "byte_size": attachment.byteSize,
+                    "sha256": attachment.sha256,
+                    "data_base64": attachment.data.base64EncodedString(),
+                ] as [String: Any]
+            }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

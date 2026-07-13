@@ -263,6 +263,9 @@ struct HermesCiderAttachment: Codable, Equatable, Sendable {
     let provenance: String
     let source: String
     let sourceRef: String
+    let sha256: String?
+    let inputSource: String?
+    let lifecycle: String?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case id, target, provenance, source
@@ -270,6 +273,9 @@ struct HermesCiderAttachment: Codable, Equatable, Sendable {
         case contentType = "content_type"
         case byteSize = "byte_size"
         case sourceRef = "source_ref"
+        case sha256
+        case inputSource = "input_source"
+        case lifecycle
     }
 
     init(
@@ -280,7 +286,10 @@ struct HermesCiderAttachment: Codable, Equatable, Sendable {
         byteSize: Int64?,
         provenance: String,
         source: String,
-        sourceRef: String
+        sourceRef: String,
+        sha256: String? = nil,
+        inputSource: String? = nil,
+        lifecycle: String? = nil
     ) {
         self.id = id
         self.target = target
@@ -290,6 +299,9 @@ struct HermesCiderAttachment: Codable, Equatable, Sendable {
         self.provenance = provenance
         self.source = source
         self.sourceRef = sourceRef
+        self.sha256 = sha256
+        self.inputSource = inputSource
+        self.lifecycle = lifecycle
     }
 
     init(from decoder: Decoder) throws {
@@ -306,6 +318,9 @@ struct HermesCiderAttachment: Codable, Equatable, Sendable {
         provenance = try container.decode(String.self, forKey: .provenance)
         source = try container.decode(String.self, forKey: .source)
         sourceRef = try container.decode(String.self, forKey: .sourceRef)
+        sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
+        inputSource = try container.decodeIfPresent(String.self, forKey: .inputSource)
+        lifecycle = try container.decodeIfPresent(String.self, forKey: .lifecycle)
     }
 }
 
@@ -374,7 +389,19 @@ enum HermesCiderAssetFactContract {
     static func normalizedAttachments(
         _ values: [HermesCiderAttachment]
     ) -> (state: HermesStructuredFactState, values: [HermesCiderAttachment]) {
-        normalized(
+        guard values.allSatisfy({ value in
+            let hashValid = value.sha256.map { hash in
+                hash.count == 64 && hash.unicodeScalars.allSatisfy {
+                    CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+                }
+            } ?? true
+            let inputValid = value.inputSource.map {
+                ConversationAttachmentInputSource(rawValue: $0) != nil
+            } ?? true
+            let lifecycleValid = value.lifecycle.map { $0 == "accepted" } ?? true
+            return hashValid && inputValid && lifecycleValid
+        }) else { return (.rejected, []) }
+        return normalized(
             values,
             id: \.id,
             target: \.target,
@@ -663,10 +690,34 @@ protocol HermesBridgeTransport: Sendable {
         existingMessages: [AIAssistantMessage],
         onEvent: (@Sendable (HermesRunEvent) async -> Void)?
     ) async throws -> HermesBridgeSendResult
+    func attachmentCapability() async -> ConversationAttachmentTransportCapability
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        attachments: [ConversationAttachmentTransportPayload],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult
     func stop(runID: String) async throws
 }
 
 extension HermesBridgeTransport {
+    func attachmentCapability() async -> ConversationAttachmentTransportCapability {
+        .unsupported(reason: "The selected runtime does not support native file attachments.")
+    }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        attachments: [ConversationAttachmentTransportPayload],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult {
+        guard attachments.isEmpty else {
+            throw ConversationAttachmentInputError.rejected("The selected runtime does not support native file attachments.")
+        }
+        return try await send(text: text, state: state, existingMessages: existingMessages, onEvent: onEvent)
+    }
     func send(
         text: String,
         state: HermesConversationState,

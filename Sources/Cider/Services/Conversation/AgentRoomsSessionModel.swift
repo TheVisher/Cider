@@ -49,7 +49,11 @@ final class AgentRoomsSessionModel: ObservableObject {
                 defaultAgentProfile: assignments.defaultProfile
             ),
             agentAssignments: assignments,
-            participants: participants
+            participants: participants,
+            attachmentService: AgentRoomsAttachmentService(
+                database: CiderDatabase.shared,
+                didMaterialize: { VaultFileService.shared.scan() }
+            )
         ), selectionStore: AgentRoomsSelectionStore.application,
            draftStore: AgentRoomsDraftStore.application,
            agentAssignments: assignments,

@@ -364,6 +364,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     @Published private(set) var activeRunCanBeCancelled = false
     @Published private(set) var turnState: AgentRoomsLiveTurnState = .idle
     @Published private(set) var liveActivity: [AgentRoomsLiveActivity] = []
+    @Published private(set) var stagedAttachments: [ConversationStagedAttachment] = []
 
     private let transport: any HermesBridgeTransport
     private let turnCoordinator: HermesTurnCoordinator
@@ -375,6 +376,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private let persistence: (any AgentRoomsConversationPersisting)?
     private let agentAssignments: (any AgentRoomsAgentAssignmentReading)?
     private let participants: AgentRoomsParticipantService?
+    private let attachmentService: AgentRoomsAttachmentService
 
     private var roomID: UUID?
     private var activeRoomTitle = AgentRoomsLiveChatModel.roomTitle
@@ -396,12 +398,18 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var assignmentAllowsSend = true
     private var activeAgent: AgentRoomActingAgent?
     private var participantAttributionByClientMessageID: [String: ConversationParticipantRunAttribution] = [:]
+    private var attachmentCapability: ConversationAttachmentTransportCapability = .unsupported(
+        reason: "The selected runtime does not support native file attachments."
+    )
+    private var assignedProfileSupportsAttachments = true
+    private var stagedAttachmentsByRoomID: [UUID: [ConversationStagedAttachment]] = [:]
 
     private struct AcceptedSubmission {
         let text: String
         let clientID: String
         let eventAttemptID: UUID
         let persistentAttempt: AgentRoomsConversationAttempt?
+        let attachments: [ConversationAcceptedAttachment]
     }
 
     var testRoom: AgentRoom? {
@@ -433,7 +441,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         now: @escaping @MainActor () -> Date = Date.init,
         persistence: (any AgentRoomsConversationPersisting)? = nil,
         agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil,
-        participants: AgentRoomsParticipantService? = nil
+        participants: AgentRoomsParticipantService? = nil,
+        attachmentService: AgentRoomsAttachmentService = AgentRoomsAttachmentService()
     ) {
         self.transport = transport
         self.turnCoordinator = turnCoordinator
@@ -445,6 +454,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         self.persistence = persistence
         self.agentAssignments = agentAssignments
         self.participants = participants
+        self.attachmentService = attachmentService
     }
 
     @discardableResult
@@ -475,6 +485,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     func deactivateRoom() {
         guard activeAttemptID == nil else { return }
+        if let roomID { stagedAttachmentsByRoomID[roomID] = stagedAttachments }
         roomID = nil
         activeRoomTitle = Self.roomTitle
         isReservedTestChat = false
@@ -489,6 +500,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         liveActivity = []
         completedAssistantSourceIDs = []
         participantAttributionByClientMessageID = [:]
+        stagedAttachments = []
         assignmentAllowsSend = agentAssignments == nil
         activeAgent = nil
     }
@@ -552,10 +564,31 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         case .apiRuns:
             transportState = .ready
             composerMessage = nil
+            attachmentCapability = await transport.attachmentCapability()
         case .cliFallback, .unavailable:
             transportState = .blocked
             composerMessage = Self.unavailableMessage
         }
+    }
+
+    func stageAttachments(from urls: [URL], source: ConversationAttachmentInputSource) {
+        var accepted = stagedAttachments
+        var lastError: String?
+        for url in urls {
+            do { accepted.append(try attachmentService.stage(url, source: source, existing: accepted)) }
+            catch { lastError = (error as? LocalizedError)?.errorDescription ?? "Cider could not stage that file." }
+        }
+        stagedAttachments = accepted
+        if let roomID { stagedAttachmentsByRoomID[roomID] = accepted }
+        if let lastError { composerMessage = lastError }
+        else if !urls.isEmpty { composerMessage = nil }
+        rebuildRoom()
+    }
+
+    func removeStagedAttachment(id: UUID) {
+        stagedAttachments.removeAll { $0.id == id }
+        if let roomID { stagedAttachmentsByRoomID[roomID] = stagedAttachments }
+        composerMessage = nil
     }
 
     func isComposerEnabled(selectedRoomID: String?) -> Bool {
@@ -667,6 +700,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                         "\(participant.profile.displayName) has no connected production runtime. Nothing was sent."
                     )
                 }
+                if !stagedAttachments.isEmpty,
+                   !participant.profile.capabilities.contains(where: { $0.id == "file-attachments" }) {
+                    throw ConversationParticipantInvocationError.unavailable(
+                        "\(participant.profile.displayName) does not support file attachments. Nothing was sent."
+                    )
+                }
                 participantAttribution = ConversationParticipantRunAttribution(
                     invocationID: attemptID,
                     runID: attemptID,
@@ -683,6 +722,26 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 return nil
             }
         }
+        if !stagedAttachments.isEmpty {
+            guard assignedProfileSupportsAttachments else {
+                surfacePreAcceptFailure("The selected acting agent does not support file attachments. Nothing was sent.")
+                return nil
+            }
+            if case .unsupported(let reason) = attachmentCapability {
+                surfacePreAcceptFailure(reason)
+                return nil
+            }
+        }
+        let acceptedAttachments: [ConversationAcceptedAttachment]
+        do {
+            acceptedAttachments = stagedAttachments.isEmpty
+                ? []
+                : try attachmentService.materialize(stagedAttachments, at: timestamp)
+        } catch {
+            surfacePreAcceptFailure((error as? LocalizedError)?.errorDescription ?? "Cider could not safely accept these attachments. Nothing was sent.")
+            return nil
+        }
+        let attachmentFacts = acceptedAttachments.map(\.fact)
         let durableAttempt: AgentRoomsConversationAttempt?
         do {
             if let participantAttribution {
@@ -695,6 +754,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     userMessageID: userMessageID,
                     assistantMessageID: assistantMessageID,
                     text: trimmed,
+                    attachments: attachmentFacts,
                     attribution: participantAttribution,
                     at: timestamp
                 )
@@ -708,10 +768,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     userMessageID: userMessageID,
                     assistantMessageID: assistantMessageID,
                     text: trimmed,
+                    attachments: attachmentFacts,
                     at: timestamp
                 )
             }
         } catch {
+            attachmentService.discard(acceptedAttachments)
             surfacePreAcceptFailure("Cider could not safely save this message. Nothing was sent.")
             return nil
         }
@@ -720,22 +782,27 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             role: .human,
             author: "You",
             body: trimmed,
-            deliveryState: .pending
+            deliveryState: .pending,
+            attachments: attachmentFacts
         ))
         if let participantAttribution {
             participantAttributionByClientMessageID[clientID] = participantAttribution
         }
+        stagedAttachments = []
+        stagedAttachmentsByRoomID[roomID] = []
         return activateAcceptedSubmission(
             text: trimmed,
             clientID: clientID,
-            persistentAttempt: durableAttempt
+            persistentAttempt: durableAttempt,
+            attachments: acceptedAttachments
         )
     }
 
     private func activateAcceptedSubmission(
         text: String,
         clientID: String,
-        persistentAttempt: AgentRoomsConversationAttempt?
+        persistentAttempt: AgentRoomsConversationAttempt?,
+        attachments: [ConversationAcceptedAttachment] = []
     ) -> AcceptedSubmission {
         let eventAttemptID = makeID()
         activeAttemptID = eventAttemptID
@@ -755,7 +822,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             text: text,
             clientID: clientID,
             eventAttemptID: eventAttemptID,
-            persistentAttempt: persistentAttempt
+            persistentAttempt: persistentAttempt,
+            attachments: attachments
         )
     }
 
@@ -783,6 +851,18 @@ final class AgentRoomsLiveChatModel: ObservableObject {
               })
         else { return }
         let text = roomMessages[index].body
+        let facts = roomMessages[index].attachments ?? []
+        if !facts.isEmpty {
+            guard refreshAssignedAgentEligibility(), assignedProfileSupportsAttachments else {
+                surfacePreAcceptFailure("The selected acting agent no longer supports these attachments. Nothing was sent.")
+                return
+            }
+            attachmentCapability = await transport.attachmentCapability()
+            if case .unsupported(let reason) = attachmentCapability {
+                surfacePreAcceptFailure(reason)
+                return
+            }
+        }
         recoveredDraft = nil
         recoveredDraftRoomID = nil
         roomMessages[index].deliveryState = .pending
@@ -791,8 +871,13 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         rebuildRoom()
         let attemptID = makeID()
         let durableAttempt: AgentRoomsConversationAttempt?
+        var retryAttachments: [ConversationAcceptedAttachment] = []
         do {
             guard let roomID else { return }
+            if !facts.isEmpty {
+                let payloads = try attachmentService.payloads(for: facts)
+                retryAttachments = zip(facts, payloads).map { .init(fact: $0.0, payload: $0.1) }
+            }
             if let previous = participantAttributionByClientMessageID[clientMessageID] {
                 guard let participants else {
                     throw ConversationParticipantInvocationError.unavailable(
@@ -832,6 +917,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     userMessageID: makeID(),
                     assistantMessageID: makeID(),
                     text: text,
+                    attachments: facts,
                     attribution: retryAttribution,
                     at: now()
                 )
@@ -846,6 +932,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     userMessageID: makeID(),
                     assistantMessageID: makeID(),
                     text: text,
+                    attachments: facts,
                     at: now()
                 )
             }
@@ -860,7 +947,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         let accepted = activateAcceptedSubmission(
             text: text,
             clientID: clientMessageID,
-            persistentAttempt: durableAttempt
+            persistentAttempt: durableAttempt,
+            attachments: retryAttachments
         )
         await performSend(accepted)
     }
@@ -912,7 +1000,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         guard let state = conversationState, activeAttemptID == attemptID else { return }
 
         do {
-            let result = try await coordinatedSend(text: text, state: state, attemptID: attemptID)
+            let result = try await coordinatedSend(text: text, state: state, attachments: submission.attachments.map(\.payload), attemptID: attemptID)
             guard activeAttemptID == attemptID else { return }
             guard !eventIntegrityFailed,
                   let terminalRunID = nonempty(result.completion.runID),
@@ -926,7 +1014,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     activity: liveActivity
                 )
             }
-            try applyCompletion(result.completion, expectedText: text, clientID: clientID)
+            try applyCompletion(result.completion, expectedText: text, clientID: clientID, inputAttachments: submission.attachments.map(\.fact))
             turnState = .completed
             clearActiveAttempt()
             rebuildRoom()
@@ -996,6 +1084,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private func coordinatedSend(
         text: String,
         state: HermesConversationState,
+        attachments: [ConversationAttachmentTransportPayload],
         attemptID: UUID
     ) async throws -> HermesBridgeSendResult {
         let turnID = try await turnCoordinator.beginTurn()
@@ -1004,6 +1093,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 text: text,
                 state: state,
                 existingMessages: transportMessages,
+                attachments: attachments,
                 onEvent: { [weak self] event in
                     await self?.receive(event, attemptID: attemptID)
                 }
@@ -1117,13 +1207,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private func applyCompletion(
         _ completion: HermesRunCompletionEnvelope,
         expectedText: String,
-        clientID: String
+        clientID: String,
+        inputAttachments: [HermesCiderAttachment]
     ) throws {
         guard !eventIntegrityFailed,
               completion.provenance == .hermesRunsAPI,
               completion.terminalStatus == .completed,
               completion.finalSessionSynchronizationComplete,
               completion.observedFacts.runIdentityConsistent,
+              (!completion.observedFacts.containedAttachmentContentOrEvent || !inputAttachments.isEmpty),
               nonempty(completion.modelIdentity) != nil,
               let runID = nonempty(completion.runID),
               activeRunID == nil || activeRunID == runID,
@@ -1194,9 +1286,10 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             requests: completion.approvalRequests,
             bookmarkThumbnail: savedBookmarkThumbnail
         )
+        let displayedAttachments = inputAttachments.isEmpty ? completion.attachments : inputAttachments
         let attachments = AgentRoomsAssetProjector.attachments(
-            factState: completion.attachmentFactState,
-            facts: completion.attachments,
+            factState: displayedAttachments.isEmpty ? completion.attachmentFactState : .validated,
+            facts: displayedAttachments,
             canonicalOpenRoute: canonicalAssetOpenRoute
         )
         let generatedArtifacts = AgentRoomsAssetProjector.generatedArtifacts(
@@ -1229,6 +1322,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         runID: String?
     ) -> AgentRoomReceipt {
         let displayRunID = runID.map { sanitized($0, limit: Self.maximumRunIdentityLength) }
+        let inputFacts = persistentAttempt?.inputAttachments ?? []
+        let attachmentReceipt = AgentRoomsAssetProjector.attachments(
+            factState: inputFacts.isEmpty ? .notReported : .validated,
+            facts: inputFacts,
+            canonicalOpenRoute: canonicalAssetOpenRoute
+        )
         return AgentRoomReceipt(
             id: "cider-room-receipt:\(displayRunID ?? makeID().uuidString)",
             title: title,
@@ -1238,7 +1337,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             sourceBackedTransport: runID != nil,
             sourceIdentity: Self.receiptSourceIdentity,
             runIdentity: displayRunID,
-            activity: liveActivity
+            activity: liveActivity,
+            attachments: attachmentReceipt
         )
     }
 
@@ -1297,6 +1397,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     return false
                 }
                 assignmentAllowsSend = true
+                assignedProfileSupportsAttachments = profile.capabilities.contains { $0.id == "file-attachments" }
                 return true
             case .ineligible(_, _, let reason):
                 assignmentAllowsSend = false
@@ -1339,7 +1440,11 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     private func apply(_ snapshot: AgentRoomsConversationSnapshot, reservedTestChat: Bool) {
+        if let roomID, roomID != snapshot.room.id {
+            stagedAttachmentsByRoomID[roomID] = stagedAttachments
+        }
         roomID = snapshot.room.id
+        stagedAttachments = stagedAttachmentsByRoomID[snapshot.room.id] ?? []
         activeRoomTitle = snapshot.room.title
         isReservedTestChat = reservedTestChat
         conversationState = snapshot.conversationState
@@ -1445,7 +1550,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 objectReceipts: status == .completed ? objectReceipts : [],
                 contextCheckpoint: status == .completed ? contextCheckpoint : nil,
                 approvalCheckpoint: status == .completed ? approvalCheckpoint : nil,
-                attachments: status == .completed ? attachments : nil,
+                attachments: attachments,
                 generatedArtifacts: status == .completed ? generatedArtifacts : nil
             )
             turnState = status == .completed ? .completed : .failed

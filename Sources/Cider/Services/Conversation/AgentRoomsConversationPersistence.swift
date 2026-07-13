@@ -29,6 +29,7 @@ struct AgentRoomsConversationAttempt: Equatable, Sendable {
     let assistantMessageID: UUID
     let createdAt: Date
     var participantAttribution: ConversationParticipantRunAttribution? = nil
+    var inputAttachments: [HermesCiderAttachment] = []
 }
 
 @MainActor
@@ -58,6 +59,17 @@ protocol AgentRoomsConversationPersisting: AnyObject {
         text: String,
         attribution: ConversationParticipantRunAttribution,
         at date: Date
+    ) throws -> AgentRoomsConversationAttempt
+    func beginAttempt(
+        roomID: UUID, roomTitle: String, isReservedTestChat: Bool, attemptID: UUID,
+        clientMessageID: String, userMessageID: UUID, assistantMessageID: UUID,
+        text: String, attachments: [HermesCiderAttachment], at date: Date
+    ) throws -> AgentRoomsConversationAttempt
+    func beginAttributedAttempt(
+        roomID: UUID, roomTitle: String, isReservedTestChat: Bool, attemptID: UUID,
+        clientMessageID: String, userMessageID: UUID, assistantMessageID: UUID,
+        text: String, attachments: [HermesCiderAttachment],
+        attribution: ConversationParticipantRunAttribution, at date: Date
     ) throws -> AgentRoomsConversationAttempt
     func markRunStarted(
         _ attempt: AgentRoomsConversationAttempt,
@@ -108,6 +120,27 @@ extension AgentRoomsConversationPersisting {
             at: date
         )
         attempt.participantAttribution = attribution
+        return attempt
+    }
+
+    func beginAttempt(
+        roomID: UUID, roomTitle: String, isReservedTestChat: Bool, attemptID: UUID,
+        clientMessageID: String, userMessageID: UUID, assistantMessageID: UUID,
+        text: String, attachments: [HermesCiderAttachment], at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
+        var attempt = try beginAttempt(roomID: roomID, roomTitle: roomTitle, isReservedTestChat: isReservedTestChat, attemptID: attemptID, clientMessageID: clientMessageID, userMessageID: userMessageID, assistantMessageID: assistantMessageID, text: text, at: date)
+        attempt.inputAttachments = attachments
+        return attempt
+    }
+
+    func beginAttributedAttempt(
+        roomID: UUID, roomTitle: String, isReservedTestChat: Bool, attemptID: UUID,
+        clientMessageID: String, userMessageID: UUID, assistantMessageID: UUID,
+        text: String, attachments: [HermesCiderAttachment],
+        attribution: ConversationParticipantRunAttribution, at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
+        var attempt = try beginAttributedAttempt(roomID: roomID, roomTitle: roomTitle, isReservedTestChat: isReservedTestChat, attemptID: attemptID, clientMessageID: clientMessageID, userMessageID: userMessageID, assistantMessageID: assistantMessageID, text: text, attribution: attribution, at: date)
+        attempt.inputAttachments = attachments
         return attempt
     }
 }
@@ -241,6 +274,14 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         )
     }
 
+    func beginAttempt(
+        roomID: UUID, roomTitle: String, isReservedTestChat: Bool, attemptID: UUID,
+        clientMessageID: String, userMessageID: UUID, assistantMessageID: UUID,
+        text: String, attachments: [HermesCiderAttachment], at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
+        try beginAttempt(roomID: roomID, roomTitle: roomTitle, isReservedTestChat: isReservedTestChat, attemptID: attemptID, clientMessageID: clientMessageID, userMessageID: userMessageID, assistantMessageID: assistantMessageID, text: text, attachments: attachments, attribution: nil, at: date)
+    }
+
     func beginAttributedAttempt(
         roomID: UUID,
         roomTitle: String,
@@ -267,6 +308,15 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         )
     }
 
+    func beginAttributedAttempt(
+        roomID: UUID, roomTitle: String, isReservedTestChat: Bool, attemptID: UUID,
+        clientMessageID: String, userMessageID: UUID, assistantMessageID: UUID,
+        text: String, attachments: [HermesCiderAttachment],
+        attribution: ConversationParticipantRunAttribution, at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
+        try beginAttempt(roomID: roomID, roomTitle: roomTitle, isReservedTestChat: isReservedTestChat, attemptID: attemptID, clientMessageID: clientMessageID, userMessageID: userMessageID, assistantMessageID: assistantMessageID, text: text, attachments: attachments, attribution: attribution, at: date)
+    }
+
     private func beginAttempt(
         roomID: UUID,
         roomTitle: String,
@@ -276,6 +326,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         userMessageID: UUID,
         assistantMessageID: UUID,
         text: String,
+        attachments: [HermesCiderAttachment] = [],
         attribution: ConversationParticipantRunAttribution?,
         at date: Date
     ) throws -> AgentRoomsConversationAttempt {
@@ -294,7 +345,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 clientMessageID: clientMessageID,
                 runID: nil,
                 activity: [],
-                attribution: attribution
+                attribution: attribution,
+                attachments: attachments
             )
             let turn = try repository.beginTurn(.init(
                 id: attemptID,
@@ -315,7 +367,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 guard existingUser.role == "user",
                       existingUser.contentText == normalizedText,
                       existingUser.status == .complete,
-                      existingUser.finishReason == .stop
+                      existingUser.finishReason == .stop,
+                      try decodeAttachments(existingUser.metadata["attachments_json"]) == attachments
                 else { throw AgentRoomsConversationPersistenceError.authorityMismatch }
                 canonicalUserID = existingUser.id
             } else {
@@ -339,7 +392,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                         ],
                         invocationID: attribution?.invocationID,
                         attribution: nil
-                    ),
+                    ).merging(attachmentMetadata(attachments), uniquingKeysWith: { current, _ in current }),
                     createdAt: date
                 ), intent: .historicalReplay).message.id
             }
@@ -351,7 +404,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 userMessageID: canonicalUserID,
                 assistantMessageID: assistantMessageID,
                 createdAt: date,
-                participantAttribution: attribution
+                participantAttribution: attribution,
+                inputAttachments: attachments
             )
         }
     }
@@ -373,7 +427,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     clientMessageID: attempt.clientMessageID,
                     runID: runID,
                     activity: activity,
-                    attribution: attempt.participantAttribution
+                    attribution: attempt.participantAttribution,
+                    attachments: attempt.inputAttachments
                 ),
                 at: date
             )
@@ -394,9 +449,14 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         let terminal = try validatedTerminal(
             completion,
             expectedText: expectedText,
-            expectedConversationID: attempt.roomID
+            expectedConversationID: attempt.roomID,
+            allowsAttachmentContent: !attempt.inputAttachments.isEmpty
         )
         let structuredFacts = normalizedStructuredFacts(completion)
+        let durableAttachments = mergedAttachments(
+            local: attempt.inputAttachments,
+            remote: structuredFacts.attachments
+        )
         try database.withTransaction {
             let room = try requiredRoom(id: attempt.roomID)
             let reserved = room.stableKey == AgentRoomsTestChatPersistence.stableRoomKey
@@ -419,8 +479,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 contextCheckpoint: structuredFacts.context,
                 approvalFactState: structuredFacts.approvalState,
                 approvalRequests: structuredFacts.approvals,
-                attachmentFactState: structuredFacts.attachmentState,
-                attachments: structuredFacts.attachments,
+                attachmentFactState: durableAttachments.isEmpty ? structuredFacts.attachmentState : .validated,
+                attachments: durableAttachments,
                 generatedArtifactFactState: structuredFacts.generatedArtifactState,
                 generatedArtifacts: structuredFacts.generatedArtifacts,
                 activity: activity,
@@ -495,7 +555,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 clientMessageID: attempt.clientMessageID,
                 runID: normalizedRunID,
                 activity: activity,
-                attribution: attempt.participantAttribution
+                attribution: attempt.participantAttribution,
+                attachments: attempt.inputAttachments
             )
             _ = try repository.bindActiveTurnExecution(
                 id: attempt.turnID,
@@ -557,13 +618,14 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
     private func validatedTerminal(
         _ completion: HermesRunCompletionEnvelope,
         expectedText: String,
-        expectedConversationID: UUID
+        expectedConversationID: UUID,
+        allowsAttachmentContent: Bool = false
     ) throws -> ValidatedTerminal {
         guard completion.provenance == .hermesRunsAPI,
               completion.terminalStatus == .completed,
               completion.finalSessionSynchronizationComplete,
               completion.observedFacts.runIdentityConsistent,
-              !completion.observedFacts.containedAttachmentContentOrEvent,
+              (!completion.observedFacts.containedAttachmentContentOrEvent || allowsAttachmentContent),
               !completion.observedFacts.containedPendingContentOrEvent,
               let runID = try? required(completion.runID),
               let modelIdentity = try? required(completion.modelIdentity),
@@ -739,7 +801,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     author: "You",
                     body: message.contentText,
                     deliveryState: failed ? .failed : .sent,
-                    canRetry: failed && !accepted
+                    canRetry: failed && !accepted,
+                    attachments: try decodeAttachments(message.metadata["attachments_json"])
                 )
             case "assistant":
                 let participantName: String?
@@ -1021,7 +1084,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         clientMessageID: String,
         runID: String?,
         activity: [AgentRoomsLiveActivity],
-        attribution: ConversationParticipantRunAttribution? = nil
+        attribution: ConversationParticipantRunAttribution? = nil,
+        attachments: [HermesCiderAttachment] = []
     ) -> [String: String] {
         var metadata = [
             "authority": Self.attemptAuthority,
@@ -1031,6 +1095,7 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             "activity_json": encodeActivity(activity),
         ]
         if let runID { metadata["run_id"] = runID }
+        metadata.merge(attachmentMetadata(attachments), uniquingKeysWith: { current, _ in current })
         if let attribution,
            let encoded = DatabaseHelpers.encodeJSON(attribution) {
             metadata[AgentRoomsParticipantService.runAttributionMetadataKey] = encoded
@@ -1081,7 +1146,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             clientMessageID: attempt.clientMessageID,
             runID: runID,
             activity: activity,
-            attribution: attempt.participantAttribution
+            attribution: attempt.participantAttribution,
+            attachments: attempt.inputAttachments
         )
         metadata["model_identity"] = modelIdentity
         metadata["cider_references_json"] = encodeReferences(references)
@@ -1104,6 +1170,31 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         metadata["terminal_user_source_id"] = userSourceID
         metadata["terminal_assistant_source_id"] = assistantSourceID
         return metadata
+    }
+
+    private func attachmentMetadata(_ attachments: [HermesCiderAttachment]) -> [String: String] {
+        guard !attachments.isEmpty,
+              HermesCiderAssetFactContract.normalizedAttachments(attachments).state == .validated
+        else { return [:] }
+        return [
+            "attachment_fact_state": HermesStructuredFactState.validated.rawValue,
+            "attachments_json": encode(attachments),
+        ]
+    }
+
+    private func mergedAttachments(
+        local: [HermesCiderAttachment],
+        remote: [HermesCiderAttachment]
+    ) -> [HermesCiderAttachment] {
+        var values = local
+        var ids = Set(local.map(\.id))
+        var targets = Set(local.map(\.target.sourceRef))
+        for fact in remote where !ids.contains(fact.id) && !targets.contains(fact.target.sourceRef) {
+            values.append(fact)
+            ids.insert(fact.id)
+            targets.insert(fact.target.sourceRef)
+        }
+        return HermesCiderAssetFactContract.normalizedAttachments(values).state == .validated ? values : local
     }
 
     private func messageMetadata(

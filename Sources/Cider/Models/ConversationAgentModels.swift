@@ -225,6 +225,7 @@ enum AgentRoomsProductionAgentProfiles {
             ConversationAgentCapability(id: "streaming", displayName: "Streaming"),
             ConversationAgentCapability(id: "cancel", displayName: "Cancel"),
             ConversationAgentCapability(id: "retry", displayName: "Retry"),
+            ConversationAgentCapability(id: "file-attachments", displayName: "File attachments"),
         ]
         let hermes = try! ConversationAgentProfile.validated(
             id: "hermes",

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AgentRoomsWorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -22,6 +23,8 @@ struct AgentRoomsWorkspaceView: View {
     @State private var renameText = ""
     @State private var actionError: String?
     @State private var invokedParticipantByRoom: [String: UUID] = [:]
+    @State private var showsAttachmentPicker = false
+    @State private var attachmentDropTargeted = false
     @FocusState private var focusedRegion: FocusRegion?
 
     private enum FocusRegion: Hashable {
@@ -1766,6 +1769,15 @@ struct AgentRoomsWorkspaceView: View {
                     .accessibilityLabel(detail)
             }
             HStack(alignment: .bottom, spacing: Spacing.sm) {
+                Button {
+                    showsAttachmentPicker = true
+                } label: {
+                    Image(systemName: "paperclip")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!enabled || liveChat.stagedAttachments.count >= AgentRoomsAttachmentService.maximumCount)
+                .accessibilityLabel("Attach text or image files")
+
                 TextField(composerPlaceholder(roomID: roomID), text: composerTextBinding, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
@@ -1801,6 +1813,46 @@ struct AgentRoomsWorkspaceView: View {
                     .disabled(!enabled || !validDraft)
                     .accessibilityLabel(composerActionAccessibilityLabel(roomID: roomID))
             }
+            if !liveChat.stagedAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Spacing.sm) {
+                        ForEach(liveChat.stagedAttachments) { attachment in
+                            HStack(spacing: Spacing.xs) {
+                                if let data = attachment.imagePreviewData, let image = NSImage(data: data) {
+                                    Image(nsImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 32, height: 32)
+                                        .clipShape(RoundedRectangle(cornerRadius: Radius.xs))
+                                        .accessibilityLabel("Image preview")
+                                } else {
+                                    Image(systemName: "doc.text")
+                                        .accessibilityHidden(true)
+                                }
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(attachment.displayName).lineLimit(1)
+                                    if let preview = attachment.textPreview {
+                                        Text(preview).font(CiderFont.micro).lineLimit(1)
+                                    }
+                                    Text("\(attachment.contentType) · \(attachment.byteSize) bytes · \(attachment.inputSource.displayName)")
+                                        .font(CiderFont.micro)
+                                        .foregroundColor(CiderColors.tertiary)
+                                }
+                                Button {
+                                    liveChat.removeStagedAttachment(id: attachment.id)
+                                } label: { Image(systemName: "xmark.circle.fill") }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Remove \(attachment.displayName)")
+                            }
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.xs)
+                            .background(RoundedRectangle(cornerRadius: Radius.sm).fill(CiderColors.surfaceInput))
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Staged attachment \(attachment.displayName), \(attachment.inputSource.displayName), local draft only")
+                        }
+                    }
+                }
+            }
             Text("Return sends · Shift-Return adds a line · \(composerText.count)/\(AgentRoomsLiveChatModel.maximumMessageLength)")
                 .font(CiderFont.micro)
                 .foregroundColor(CiderColors.tertiary)
@@ -1810,6 +1862,26 @@ struct AgentRoomsWorkspaceView: View {
         .background(CiderColors.surfaceSubtle)
         .background(CiderWindowDragExclusionReporter(id: "agent-rooms-live-composer"))
         .overlay(alignment: .top) { Divider().overlay(CiderColors.borderSubtle) }
+        .overlay {
+            if attachmentDropTargeted {
+                RoundedRectangle(cornerRadius: Radius.sm)
+                    .stroke(CiderColors.controlAccent, style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                    .accessibilityHidden(true)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            liveChat.stageAttachments(from: urls, source: .dragAndDrop)
+            return !urls.isEmpty
+        } isTargeted: { attachmentDropTargeted = $0 }
+        .fileImporter(
+            isPresented: $showsAttachmentPicker,
+            allowedContentTypes: [.plainText, .text, .json, .png, .jpeg, .gif],
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                liveChat.stageAttachments(from: urls, source: .filePicker)
+            }
+        }
     }
 
     private func composerPlaceholder(roomID: String) -> String {

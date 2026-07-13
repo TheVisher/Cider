@@ -23,6 +23,7 @@ struct AgentRoomMessage: Identifiable, Equatable, Sendable {
     var body: String
     var deliveryState: AgentRoomMessageDeliveryState = .sent
     var canRetry: Bool = false
+    var attachments: [HermesCiderAttachment]? = nil
 }
 
 struct AgentRoomLink: Identifiable, Equatable, Sendable {

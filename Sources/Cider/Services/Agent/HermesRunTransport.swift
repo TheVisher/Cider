@@ -21,16 +21,42 @@ struct HermesRunTransport: HermesBridgeTransport {
         }
     }
 
+    func attachmentCapability() async -> ConversationAttachmentTransportCapability {
+        do {
+            let capabilities = try await apiClient.capabilities()
+            return capabilities.features.runAttachments == true
+                ? .supported
+                : .unsupported(reason: "The connected Hermes runtime does not advertise native file attachments.")
+        } catch {
+            return .unsupported(reason: "Cider could not verify attachment support for the connected Hermes runtime.")
+        }
+    }
+
     func send(
         text: String,
         state: HermesConversationState,
         existingMessages: [AIAssistantMessage],
         onEvent: (@Sendable (HermesRunEvent) async -> Void)? = nil
     ) async throws -> HermesBridgeSendResult {
+        try await send(text: text, state: state, existingMessages: existingMessages, attachments: [], onEvent: onEvent)
+    }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        attachments: [ConversationAttachmentTransportPayload],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)? = nil
+    ) async throws -> HermesBridgeSendResult {
         let capabilities: HermesAPICapabilities
         do {
             capabilities = try await apiClient.capabilities()
         } catch {
+            guard attachments.isEmpty else {
+                throw ConversationAttachmentInputError.rejected(
+                    "Cider could not verify attachment support; no fallback was used."
+                )
+            }
             let result = try await fallbackService.send(
                 text: text,
                 state: state,
@@ -51,11 +77,17 @@ struct HermesRunTransport: HermesBridgeTransport {
                 )
             ))
         }
+        guard attachments.isEmpty || capabilities.features.runAttachments == true else {
+            throw ConversationAttachmentInputError.rejected(
+                "The connected Hermes runtime does not advertise native file attachments."
+            )
+        }
         return try await sendWithRunsAPI(
             text: text,
             state: state,
             existingMessages: existingMessages,
             modelIdentity: capabilities.model,
+            attachments: attachments,
             onEvent: onEvent
         )
     }
@@ -69,9 +101,14 @@ struct HermesRunTransport: HermesBridgeTransport {
         state: HermesConversationState,
         existingMessages: [AIAssistantMessage],
         modelIdentity: String,
+        attachments: [ConversationAttachmentTransportPayload],
         onEvent: (@Sendable (HermesRunEvent) async -> Void)?
     ) async throws -> HermesBridgeSendResult {
-        let created = try await apiClient.createRun(input: text, sessionID: state.activeRuntimeSessionID)
+        let created = try await apiClient.createRun(
+            input: text,
+            sessionID: state.activeRuntimeSessionID,
+            attachments: attachments
+        )
         var snapshot = HermesRunSnapshot(status: .running(runID: created.runID), visibleText: "", toolSummary: nil)
         var observed = HermesRunObservationAccumulator(runID: created.runID)
         observed.recordInitialStatus(created.status)
