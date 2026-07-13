@@ -376,6 +376,25 @@ struct CiderCLI {
                     "cider-cli item recall-context --query <topic> --json",
                 ]
             )
+        case "journal-intelligence", "journal-intelligence-receipt":
+            let isAlias = subcommand != "journal-intelligence"
+            let usageName = subcommand
+            return recallHelpContractPayload(
+                command: "item.\(subcommand).help",
+                subcommand: subcommand,
+                aliasOf: isAlias ? "item.journal-intelligence" : nil,
+                usage: "cider-cli item \(usageName) --date YYYY-MM-DD [--json]",
+                description: "Read-only deterministic daily Journal Intelligence receipt. Counts only precision-gated active proposals with exact capture-event and timestamped-section provenance; suppressed candidates are explained and never promoted.",
+                options: [
+                    optionContract("--date", value: "YYYY-MM-DD", description: "Journal day to inspect."),
+                    optionContract("--json", description: "Emit the grouped machine-readable receipt."),
+                    optionContract("--help", description: "Show this command contract."),
+                ],
+                safeVerificationCommands: [
+                    "cider-cli item \(usageName) --help --json",
+                    "cider-cli item journal-intelligence --date YYYY-MM-DD --json",
+                ]
+            )
         default:
             return nil
         }
@@ -472,6 +491,8 @@ struct CiderCLI {
       cider-cli item memory-facts intents [--fact <candidate-id>] [--limit <n>] [--json]
       cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]
         Default sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows.
+      cider-cli item journal-intelligence --date YYYY-MM-DD [--json]
+        Read-only grouped daily receipt of precision-gated Journal proposals with exact capture provenance and explainable suppressions.
       cider-cli item memory-facts proposals create|list|inspect|accept|reject|defer|preview|previews|execute|executions ... [--json]
       cider-cli item saved-place-preference-links [--owner <bookmark-id-or-ref>] [--limit <n>] [--json]
       cider-cli item preference-saved-place-links [--owner <owner-ref-or-prefix>] [--limit <n>] [--json]
@@ -681,6 +702,8 @@ struct CiderCLI {
             return "cider-cli item daily-tracker [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--query <term>] [--sort oldest|newest] [--limit <n>] [--json]\nDefault sort is oldest to preserve date-window reports; use --sort newest with --query --limit 1 for latest matching recall rows."
         case "daily-episode", "episode-daily":
             return "cider-cli item daily-episode --date YYYY-MM-DD [--json]"
+        case "journal-intelligence", "journal-intelligence-receipt":
+            return "cider-cli item journal-intelligence --date YYYY-MM-DD [--json]"
         case "weekly-chapter", "chapter-weekly":
             return "cider-cli item weekly-chapter --week YYYY-MM-DD [--json]"
         case "monthly-chapter", "chapter-monthly":
@@ -6618,6 +6641,29 @@ struct CiderCLI {
                     }
                     print("  Entries: \(preview.entries.count)")
                     print("  Read-only preview; no source notes changed.")
+                }
+            } catch {
+                printCLIError(error.localizedDescription)
+            }
+
+        case "journal-intelligence", "journal-intelligence-receipt":
+            guard let date = parseFlag("--date", from: args), isValidLocalDateString(date) else {
+                printCLIError("Usage: cider-cli item journal-intelligence --date YYYY-MM-DD [--json]")
+                return
+            }
+            do {
+                let receipt = try JournalIntelligenceDailyReceiptService(database: .shared).receipt(date: date)
+                if jsonOutput {
+                    outputJSON(receipt.toDictionary())
+                } else {
+                    print(receipt.statement)
+                    for group in receipt.groups {
+                        print("  \(group.label): \(group.count)")
+                    }
+                    if receipt.suppressedCount > 0 {
+                        print("  Suppressed: \(receipt.suppressedCount) (see --json for reasons)")
+                    }
+                    print("  Read-only receipt; no candidate state or Journal source changed.")
                 }
             } catch {
                 printCLIError(error.localizedDescription)
