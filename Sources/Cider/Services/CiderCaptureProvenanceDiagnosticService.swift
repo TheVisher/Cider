@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum CiderCaptureProvenanceGapClassification: String, Codable, CaseIterable {
@@ -112,6 +113,11 @@ enum CiderCaptureProvenanceExplanationError: String, Error, Equatable, Localized
     case captureEventNotFound = "capture_event_not_found"
     case unsupportedSourceKind = "unsupported_capture_source_kind"
     case captureEventNoLongerHasGap = "capture_event_no_longer_has_provenance_gap"
+    case malformedDuplicateAuditContinuation = "malformed_duplicate_audit_continuation"
+    case forgedDuplicateAuditContinuation = "forged_duplicate_audit_continuation"
+    case mismatchedDuplicateAuditContinuation = "mismatched_duplicate_audit_continuation"
+    case staleDuplicateAuditContinuation = "stale_duplicate_audit_continuation"
+    case duplicateAuditLimitOutOfRange = "duplicate_audit_limit_out_of_range"
 
     var errorDescription: String? { rawValue }
 }
@@ -150,6 +156,37 @@ struct CiderCaptureProvenanceEvidenceCheck: Codable, Equatable {
     }
 }
 
+struct CiderCaptureDuplicateAuditScanPage: Codable, Equatable {
+    var requestedLimit: Int
+    var appliedLimit: Int
+    var maximumLimit: Int
+    var scannedCount: Int
+    var cumulativeScannedCount: Int
+    var hasMore: Bool
+    var saturated: Bool
+    var exhausted: Bool
+    var scannedAuditRefs: [String]
+    var scannedAuditRefsTruncated: Bool
+    var continuationToken: String?
+
+    func toDictionary() -> [String: Any] {
+        var result: [String: Any] = [
+            "requestedLimit": requestedLimit,
+            "appliedLimit": appliedLimit,
+            "maximumLimit": maximumLimit,
+            "scannedCount": scannedCount,
+            "cumulativeScannedCount": cumulativeScannedCount,
+            "hasMore": hasMore,
+            "saturated": saturated,
+            "exhausted": exhausted,
+            "scannedAuditRefs": scannedAuditRefs,
+            "scannedAuditRefsTruncated": scannedAuditRefsTruncated,
+        ]
+        if let continuationToken { result["continuationToken"] = continuationToken }
+        return result
+    }
+}
+
 struct CiderCaptureProvenanceGapExplanation: Codable, Equatable {
     var command = "capture.provenance-gap"
     var readOnly = true
@@ -165,6 +202,7 @@ struct CiderCaptureProvenanceGapExplanation: Codable, Equatable {
     var evidenceRefs: [String]
     var missingEvidenceReasons: [String]
     var caps: [String: Int]
+    var duplicateAuditScan: CiderCaptureDuplicateAuditScanPage
     var truthBoundary: String
     var safeNextCommands: [String]
     var safeVerificationCommands: [String]
@@ -185,6 +223,7 @@ struct CiderCaptureProvenanceGapExplanation: Codable, Equatable {
             "evidenceRefs": evidenceRefs,
             "missingEvidenceReasons": missingEvidenceReasons,
             "caps": caps,
+            "duplicateAuditScan": duplicateAuditScan.toDictionary(),
             "truthBoundary": truthBoundary,
             "safeNextCommands": safeNextCommands,
             "safeVerificationCommands": safeVerificationCommands,
@@ -308,6 +347,31 @@ final class CiderCaptureProvenanceDiagnosticService {
         var createdAt: Date
     }
 
+    private struct DuplicateAuditSnapshot: Equatable {
+        var count: Int
+        var newestID: String?
+        var newestOccurredAt: Double?
+    }
+
+    private struct DuplicateAuditCursor: Codable {
+        var version: Int
+        var captureEventID: String
+        var eventFingerprint: String
+        var snapshotCount: Int
+        var snapshotNewestID: String?
+        var snapshotNewestOccurredAt: Double?
+        var lastID: String
+        var lastOccurredAt: Double
+        var cumulativeScannedCount: Int
+    }
+
+    private struct DuplicateAuditPage {
+        var entries: [MutationAuditEntry]
+        var hasMore: Bool
+        var cumulativeScannedCount: Int
+        var continuationToken: String?
+    }
+
     private struct CanonicalItemEvidence {
         var cliType: String
         var itemID: UUID
@@ -347,7 +411,14 @@ final class CiderCaptureProvenanceDiagnosticService {
         self.secondBrainStore = SecondBrainStore(database: database)
     }
 
-    func explain(captureEventRef rawRef: String) throws -> CiderCaptureProvenanceGapExplanation {
+    func explain(
+        captureEventRef rawRef: String,
+        duplicateAuditContinuation: String? = nil,
+        duplicateAuditLimit requestedDuplicateAuditLimit: Int = CiderCaptureProvenanceDiagnosticService.duplicateAuditLimit
+    ) throws -> CiderCaptureProvenanceGapExplanation {
+        guard (1...Self.duplicateAuditLimit).contains(requestedDuplicateAuditLimit) else {
+            throw CiderCaptureProvenanceExplanationError.duplicateAuditLimitOutOfRange
+        }
         let components = rawRef.split(separator: ":", omittingEmptySubsequences: false)
         guard components.count == 2,
               components[0] == "capture_event",
@@ -360,6 +431,9 @@ final class CiderCaptureProvenanceDiagnosticService {
         guard Self.supportedSourceKinds.contains(event.sourceKind) else {
             throw CiderCaptureProvenanceExplanationError.unsupportedSourceKind
         }
+        guard event.sourceKind == "url" || duplicateAuditContinuation == nil else {
+            throw CiderCaptureProvenanceExplanationError.mismatchedDuplicateAuditContinuation
+        }
 
         let owner = SecondBrainOwnerRef(ownerType: "capture_event", ownerID: event.id)
         let producedItemRelations = try secondBrainStore.outgoingRelations(for: owner)
@@ -368,10 +442,14 @@ final class CiderCaptureProvenanceDiagnosticService {
             throw CiderCaptureProvenanceExplanationError.captureEventNoLongerHasGap
         }
 
-        let loadedAudits = mutationAuditService.loadEntries(limit: Self.duplicateAuditLimit + 1)
-        let auditCapReached = loadedAudits.count > Self.duplicateAuditLimit
-        let boundedAudits = Array(loadedAudits.prefix(Self.duplicateAuditLimit))
-        let finding = classify(event, duplicateAudits: auditCapReached ? [] : boundedAudits)
+        let auditPage = try duplicateAuditPage(
+            for: event,
+            continuation: duplicateAuditContinuation,
+            limit: requestedDuplicateAuditLimit
+        )
+        let boundedAudits = auditPage.entries
+        let auditCapReached = auditPage.hasMore
+        let finding = classify(event, duplicateAudits: boundedAudits)
         let captureRef = "capture_event:\(event.id)"
         let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: event.metadataJSON)
         let candidateEvidence = canonicalCandidateEvidence(for: event, metadata: metadata)
@@ -409,8 +487,11 @@ final class CiderCaptureProvenanceDiagnosticService {
         }.map { reason in
             reason == "capture_metadata_has_no_provenance_claim" ? "no_exact_persisted_item_reference" : reason
         })
-        let replayCommand = "cider-cli capture provenance-gap \(captureRef) --json"
-        let safeCommands = orderedUnique([replayCommand] + finding.safeVerificationCommands)
+        let replayCommand = "cider-cli capture provenance-gap \(captureRef) --duplicate-audit-limit \(requestedDuplicateAuditLimit) --json"
+        let continuationCommand = auditPage.continuationToken.map {
+            "cider-cli capture provenance-gap \(captureRef) --duplicate-audit-limit \(requestedDuplicateAuditLimit) --duplicate-audit-cursor \($0) --json"
+        }
+        let safeCommands = orderedUnique([replayCommand] + [continuationCommand].compactMap { $0 } + finding.safeVerificationCommands)
         let refs = orderedUnique(finding.evidenceRefs + checks.flatMap(\.evidenceRefs))
             .prefix(Self.evidenceRefLimit)
 
@@ -429,10 +510,185 @@ final class CiderCaptureProvenanceDiagnosticService {
                 "duplicateAuditEntries": Self.duplicateAuditLimit,
                 "evidenceRefs": Self.evidenceRefLimit,
             ],
+            duplicateAuditScan: CiderCaptureDuplicateAuditScanPage(
+                requestedLimit: requestedDuplicateAuditLimit,
+                appliedLimit: requestedDuplicateAuditLimit,
+                maximumLimit: Self.duplicateAuditLimit,
+                scannedCount: auditPage.entries.count,
+                cumulativeScannedCount: auditPage.cumulativeScannedCount,
+                hasMore: auditPage.hasMore,
+                saturated: auditPage.hasMore,
+                exhausted: !auditPage.hasMore,
+                scannedAuditRefs: auditPage.entries.prefix(Self.evidenceRefLimit).map { "mutation_audit:\($0.id.uuidString)" },
+                scannedAuditRefsTruncated: auditPage.entries.count > Self.evidenceRefLimit,
+                continuationToken: auditPage.continuationToken
+            ),
             truthBoundary: "read_only_explanation_no_inference_candidate_selection_or_provenance_repair",
             safeNextCommands: safeCommands,
             safeVerificationCommands: safeCommands
         )
+    }
+
+    private func duplicateAuditPage(
+        for event: CaptureEventRow,
+        continuation: String?,
+        limit: Int
+    ) throws -> DuplicateAuditPage {
+        guard event.sourceKind == "url" else {
+            return DuplicateAuditPage(
+                entries: [], hasMore: false, cumulativeScannedCount: 0, continuationToken: nil
+            )
+        }
+
+        let snapshot = try duplicateAuditSnapshot()
+        let cursor: DuplicateAuditCursor?
+        if let continuation {
+            cursor = try decodeDuplicateAuditCursor(continuation)
+            guard cursor?.captureEventID == event.id else {
+                throw CiderCaptureProvenanceExplanationError.mismatchedDuplicateAuditContinuation
+            }
+            guard cursor?.eventFingerprint == eventFingerprint(event) else {
+                throw CiderCaptureProvenanceExplanationError.staleDuplicateAuditContinuation
+            }
+            guard cursor?.snapshotCount == snapshot.count,
+                  cursor?.snapshotNewestID == snapshot.newestID,
+                  cursor?.snapshotNewestOccurredAt == snapshot.newestOccurredAt else {
+                throw CiderCaptureProvenanceExplanationError.staleDuplicateAuditContinuation
+            }
+        } else {
+            cursor = nil
+        }
+
+        let loaded = try loadDuplicateAuditEntries(limit: limit + 1, after: cursor)
+        let entries = Array(loaded.prefix(limit))
+        let hasMore = loaded.count > limit
+        let cumulative = (cursor?.cumulativeScannedCount ?? 0) + entries.count
+        let nextToken: String?
+        if hasMore, let last = entries.last {
+            nextToken = try encodeDuplicateAuditCursor(DuplicateAuditCursor(
+                version: 1,
+                captureEventID: event.id,
+                eventFingerprint: eventFingerprint(event),
+                snapshotCount: snapshot.count,
+                snapshotNewestID: snapshot.newestID,
+                snapshotNewestOccurredAt: snapshot.newestOccurredAt,
+                lastID: last.id.uuidString,
+                lastOccurredAt: last.occurredAt.timeIntervalSince1970,
+                cumulativeScannedCount: cumulative
+            ))
+        } else {
+            nextToken = nil
+        }
+        return DuplicateAuditPage(
+            entries: entries,
+            hasMore: hasMore,
+            cumulativeScannedCount: cumulative,
+            continuationToken: nextToken
+        )
+    }
+
+    private func duplicateAuditSnapshot() throws -> DuplicateAuditSnapshot {
+        let countStatement = try database.prepare("SELECT count(*) FROM mutation_audit;")
+        _ = try countStatement.step()
+        let count = countStatement.int(at: 0)
+        let newest = try database.prepare("SELECT id, occurred_at FROM mutation_audit ORDER BY occurred_at DESC, id DESC LIMIT 1;")
+        guard try newest.step() else {
+            return DuplicateAuditSnapshot(count: count, newestID: nil, newestOccurredAt: nil)
+        }
+        return DuplicateAuditSnapshot(count: count, newestID: newest.string(at: 0), newestOccurredAt: newest.double(at: 1))
+    }
+
+    private func loadDuplicateAuditEntries(limit: Int, after cursor: DuplicateAuditCursor?) throws -> [MutationAuditEntry] {
+        let statement: SQLStatement
+        if let cursor {
+            statement = try database.prepare("""
+                SELECT id, occurred_at, item_type, item_id, action, source, before_state, after_state, metadata
+                FROM mutation_audit
+                WHERE occurred_at < ? OR (occurred_at = ? AND id < ?)
+                ORDER BY occurred_at DESC, id DESC
+                LIMIT ?;
+                """)
+            statement.bind(cursor.lastOccurredAt, at: 1)
+                .bind(cursor.lastOccurredAt, at: 2)
+                .bind(cursor.lastID, at: 3)
+                .bind(limit, at: 4)
+        } else {
+            statement = try database.prepare("""
+                SELECT id, occurred_at, item_type, item_id, action, source, before_state, after_state, metadata
+                FROM mutation_audit
+                ORDER BY occurred_at DESC, id DESC
+                LIMIT ?;
+                """)
+            statement.bind(limit, at: 1)
+        }
+        var entries: [MutationAuditEntry] = []
+        while try statement.step() {
+            guard let id = UUID(uuidString: statement.string(at: 0)),
+                  let itemID = UUID(uuidString: statement.string(at: 3)),
+                  let source = MutationAuditSource(rawValue: statement.string(at: 5)) else { continue }
+            entries.append(MutationAuditEntry(
+                id: id,
+                occurredAt: DatabaseHelpers.decodeDate(statement.double(at: 1)),
+                itemType: statement.string(at: 2),
+                itemID: itemID,
+                action: statement.string(at: 4),
+                source: source,
+                beforeState: DatabaseHelpers.decodeJSON([String: String].self, from: statement.optionalString(at: 6)) ?? [:],
+                afterState: DatabaseHelpers.decodeJSON([String: String].self, from: statement.optionalString(at: 7)) ?? [:],
+                metadata: DatabaseHelpers.decodeJSON([String: String].self, from: statement.optionalString(at: 8)) ?? [:]
+            ))
+        }
+        return entries
+    }
+
+    private func eventFingerprint(_ event: CaptureEventRow) -> String {
+        let material = [event.id, event.sourceKind, event.sourceURL ?? "", event.metadataJSON, String(event.createdAt.timeIntervalSince1970)]
+            .joined(separator: "\u{1F}")
+        return Self.sha256(material)
+    }
+
+    private func encodeDuplicateAuditCursor(_ cursor: DuplicateAuditCursor) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(cursor)
+        let payload = Self.base64URL(data)
+        return "\(payload).\(Self.sha256("cider.duplicate-audit-continuation.v1|\(payload)"))"
+    }
+
+    private func decodeDuplicateAuditCursor(_ token: String) throws -> DuplicateAuditCursor {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2, let data = Self.dataFromBase64URL(String(parts[0])) else {
+            throw CiderCaptureProvenanceExplanationError.malformedDuplicateAuditContinuation
+        }
+        let payload = String(parts[0])
+        let expected = Self.sha256("cider.duplicate-audit-continuation.v1|\(payload)")
+        guard String(parts[1]) == expected else {
+            throw CiderCaptureProvenanceExplanationError.forgedDuplicateAuditContinuation
+        }
+        guard let cursor = try? JSONDecoder().decode(DuplicateAuditCursor.self, from: data),
+              cursor.version == 1,
+              cursor.cumulativeScannedCount >= 0,
+              UUID(uuidString: cursor.captureEventID) != nil,
+              UUID(uuidString: cursor.lastID) != nil else {
+            throw CiderCaptureProvenanceExplanationError.malformedDuplicateAuditContinuation
+        }
+        return cursor
+    }
+
+    private static func sha256(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func dataFromBase64URL(_ value: String) -> Data? {
+        var base64 = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
+        return Data(base64Encoded: base64)
     }
 
     func diagnose(limit requestedLimit: Int = CiderCaptureProvenanceDiagnosticService.defaultLimit) throws -> CiderCaptureProvenanceDiagnosticReport {
@@ -1069,14 +1325,6 @@ final class CiderCaptureProvenanceDiagnosticService {
                 evidenceRefs: []
             )
         }
-        guard !capReached else {
-            return CiderCaptureProvenanceEvidenceCheck(
-                category: .duplicateAudit,
-                status: .capped,
-                reasonCode: "duplicate_audit_scan_cap_reached",
-                evidenceRefs: []
-            )
-        }
         guard candidateEvidence.check.status != .ambiguous,
               candidateEvidence.check.status != .capped,
               let candidate = candidateEvidence.uniqueBookmark,
@@ -1105,6 +1353,14 @@ final class CiderCaptureProvenanceDiagnosticService {
                 status: .found,
                 reasonCode: "nearby_duplicate_audit_matches_unique_candidate",
                 evidenceRefs: ["mutation_audit:\(nearby.id.uuidString)"]
+            )
+        }
+        guard !capReached else {
+            return CiderCaptureProvenanceEvidenceCheck(
+                category: .duplicateAudit,
+                status: .capped,
+                reasonCode: "duplicate_audit_scan_cap_reached",
+                evidenceRefs: []
             )
         }
         if !matches.isEmpty {

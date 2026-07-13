@@ -258,7 +258,7 @@ struct CiderCLI {
         }
 
         if command == "capture", subcommand == "provenance-gap", hasHelpArg(args) {
-            let usage = "cider-cli capture provenance-gap <capture_event:UUID> [--json]"
+            let usage = "cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]"
             if args.contains("--json") {
                 outputJSON([
                     "ok": true,
@@ -266,7 +266,7 @@ struct CiderCLI {
                     "usage": usage,
                     "readOnly": true,
                     "changed": false,
-                    "description": "Bounded evidence drilldown for one capture provenance gap. Never infers, selects, repairs, or backfills provenance.",
+                    "description": "Bounded evidence drilldown for one capture provenance gap, with resumable duplicate-audit evidence pages for URL events. Never infers, selects, repairs, or backfills provenance.",
                     "safeVerificationCommands": ["cider-cli capture provenance-gap --help --json"],
                     "truthBoundary": "help_contract_only_not_vault_truth",
                 ])
@@ -2475,14 +2475,39 @@ struct CiderCLI {
     }
 
     static func handleCaptureProvenanceGap(args: [String]) {
-        let positional = args.filter { !$0.hasPrefix("-") }
+        if args.contains("--duplicate-audit-limit"), parseFlag("--duplicate-audit-limit", from: args) == nil {
+            printCLIError("Malformed duplicate-audit budget: --duplicate-audit-limit requires an integer from 1 through 500.")
+            return
+        }
+        guard let duplicateAuditLimit = parsePositiveIntFlag(
+            "--duplicate-audit-limit", from: args, command: "capture.provenance-gap", minimum: 1
+        ) else { return }
+        if args.contains("--duplicate-audit-cursor"), parseFlag("--duplicate-audit-cursor", from: args) == nil {
+            printCLIError("Malformed duplicate-audit continuation: --duplicate-audit-cursor requires a token.")
+            return
+        }
+        var positional: [String] = []
+        var index = 0
+        while index < args.count {
+            let argument = args[index]
+            if argument == "--duplicate-audit-limit" || argument == "--duplicate-audit-cursor" {
+                index += 2
+                continue
+            }
+            if argument != "--json" && !argument.hasPrefix("-") { positional.append(argument) }
+            index += 1
+        }
         guard positional.count == 1 else {
-            printCLIError("Usage: cider-cli capture provenance-gap <capture_event:UUID> [--json]")
+            printCLIError("Usage: cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]")
             return
         }
         do {
             let report = try CiderCaptureProvenanceDiagnosticService(database: .shared)
-                .explain(captureEventRef: positional[0])
+                .explain(
+                    captureEventRef: positional[0],
+                    duplicateAuditContinuation: parseFlag("--duplicate-audit-cursor", from: args),
+                    duplicateAuditLimit: duplicateAuditLimit ?? 500
+                )
             if jsonOutput {
                 outputJSON(report.toDictionary())
             } else {
@@ -2492,6 +2517,7 @@ struct CiderCLI {
                 for check in report.checkedEvidence {
                     print("  \(check.category.rawValue): \(check.status.rawValue) (\(check.reasonCode))")
                 }
+                print("  Duplicate audit page: \(report.duplicateAuditScan.scannedCount) scanned; \(report.duplicateAuditScan.hasMore ? "more available" : "exhausted")")
             }
         } catch {
             printCLIError(error.localizedDescription)
@@ -2526,7 +2552,7 @@ struct CiderCLI {
         print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill")
-        print("       cider-cli capture provenance-gap <capture_event:UUID> [--json]  # read-only evidence drilldown")
+        print("       cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]  # read-only resumable evidence drilldown")
         print("       cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]  # read-only content-free aggregate")
         print("       cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
         print("       Journal capture: use `cider-cli capture add --kind journal --date today --stdin --json` so readable Markdown, metadata, provenance, indexing, and reviewable candidates stay connected.")
@@ -31044,7 +31070,7 @@ struct CiderCLI {
           cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--url <url>|--path <source-file-path>|--content <text>) [--title <title>] [--date yyyy-MM-dd|today] [--details <text>] [--name <name>] [--folder <target-folder-path>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]
           cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]
           cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill
-          cider-cli capture provenance-gap <capture_event:UUID> [--json]  # read-only evidence drilldown
+          cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]  # read-only resumable evidence drilldown
           cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]  # read-only content-free aggregate
 
         TEST RUN

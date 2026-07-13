@@ -64,6 +64,8 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["changed"] as? Bool == false)
         #expect(payload["truthBoundary"] as? String == "help_contract_only_not_vault_truth")
         #expect((payload["safeVerificationCommands"] as? [String]) == ["cider-cli capture provenance-gap --help --json"])
+        #expect((payload["usage"] as? String)?.contains("--duplicate-audit-limit <1-500>") == true)
+        #expect((payload["usage"] as? String)?.contains("--duplicate-audit-cursor <token>") == true)
         #expect(try FileManager.default.contentsOfDirectory(atPath: vault.path).isEmpty)
     }
 
