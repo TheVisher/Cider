@@ -188,6 +188,24 @@ struct CiderCLIAgentSafetyTests {
         #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".cider").path) == false)
     }
 
+    @Test("capture review queue help is command-specific and exits before vault access")
+    func captureReviewQueueHelpIsCommandSpecificAndExitsBeforeVaultAccess() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-capture-review-queue-help-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let result = try runCLI(args: ["capture", "review-queue", "--help"], vault: vault)
+
+        #expect(result.status == 0)
+        #expect(result.stdout.contains("Usage: cider-cli capture review-queue"))
+        #expect(result.stdout.contains("--limit <n>"))
+        #expect(result.stdout.contains("--json"))
+        #expect(result.stdout.contains("Read-only"))
+        #expect(!result.stdout.contains("Capture review queue:"))
+        #expect(FileManager.default.fileExists(atPath: vault.path) == false)
+        #expect(FileManager.default.fileExists(atPath: vault.appendingPathComponent(".cider").path) == false)
+    }
+
     @Test("capture provenance diagnostic help is read only and machine actionable")
     func captureProvenanceDiagnosticHelpIsReadOnly() throws {
         let vault = FileManager.default.temporaryDirectory
