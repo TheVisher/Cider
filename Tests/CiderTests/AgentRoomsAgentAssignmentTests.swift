@@ -261,6 +261,82 @@ struct AgentRoomsAgentAssignmentTests {
         }
     }
 
+    @Test("production Hermes composition accepts an explicit roster participant and rejects unavailable advisor before transport")
+    func productionCompositionRoutesExplicitParticipantOnly() async throws {
+        try await withDatabaseAndRepository { database, repository in
+            let hermes = try profile(id: "hermes", displayName: "Hermes")
+            let codex = try profile(
+                id: "codex",
+                displayName: "Codex",
+                providerID: "openai",
+                runtimeID: "codex",
+                availability: .unavailable(reason: "Codex is not connected.")
+            )
+            let catalog = try ConversationAgentProfileCatalog(
+                profiles: [hermes, codex],
+                defaultProfileID: hermes.id
+            )
+            let assignments = AgentRoomsAgentAssignmentService(repository: repository, catalog: catalog)
+            let participants = AgentRoomsParticipantService(repository: repository, catalog: catalog)
+            let room = try AgentRoomsActionService(
+                repository: repository,
+                agentAssignments: assignments
+            ).createConversation(title: "Production participant routing")
+            let roster = try #require(try participants.roster(roomID: room.id))
+            let hermesID = try #require(roster.members.first(where: { $0.profile.id == hermes.id })?.id)
+            let codexID = try #require(roster.members.first(where: { $0.profile.id == codex.id })?.id)
+            let transport = AssignmentProbeTransport()
+            let liveChat = AgentRoomsLiveChatModel(
+                transport: transport,
+                turnCoordinator: HermesTurnCoordinator(),
+                persistence: AgentRoomsConversationPersistence(
+                    database: database,
+                    repository: repository,
+                    defaultAgentProfile: hermes,
+                    participantProfiles: catalog.profiles
+                ),
+                agentAssignments: assignments,
+                participants: participants
+            )
+
+            #expect(liveChat.activateCanonicalRoom(id: room.id))
+            await liveChat.refreshTransportReadiness()
+            let disposition = liveChat.startSubmission(
+                "Invoke Hermes explicitly",
+                selectedRoomID: room.id.uuidString,
+                invokedParticipantIDs: [hermesID]
+            )
+            guard disposition == .accepted else {
+                Issue.record("Explicit Hermes invocation was rejected: \(liveChat.composerMessage ?? "no reason")")
+                return
+            }
+            for _ in 0..<200 where await transport.sendCount() == 0 {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            for _ in 0..<200 where liveChat.turnState != .failed {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+
+            let acceptedTurns = try repository.turns(roomID: room.id)
+            let acceptedMessages = try repository.messages(roomID: room.id)
+            #expect(acceptedTurns.count == 1)
+            #expect(try participants.turnAttribution(acceptedTurns[0])?.participantID == hermesID)
+            #expect(try participants.messageAttribution(acceptedMessages[0])?.invocationID
+                == participants.turnAttribution(acceptedTurns[0])?.invocationID)
+            #expect(await transport.sendCount() == 1)
+
+            #expect(liveChat.startSubmission(
+                "Do not invoke Codex",
+                selectedRoomID: room.id.uuidString,
+                invokedParticipantIDs: [codexID]
+            ) == .rejected)
+            #expect(liveChat.composerMessage == "Codex is not connected. Nothing was sent.")
+            #expect(await transport.sendCount() == 1)
+            #expect(try repository.turns(roomID: room.id).count == 1)
+            #expect(try repository.messages(roomID: room.id).count == 1)
+        }
+    }
+
     private func profile(
         id: String,
         displayName: String,
@@ -302,6 +378,19 @@ struct AgentRoomsAgentAssignmentTests {
             removeDatabase(at: url)
         }
         return try await body(ConversationRepository(database: database))
+    }
+
+    private func withDatabaseAndRepository<T>(
+        _ body: (CiderDatabase, ConversationRepository) async throws -> T
+    ) async throws -> T {
+        let url = disposableDatabaseURL()
+        let database = CiderDatabase()
+        try database.open(at: url)
+        defer {
+            database.close()
+            removeDatabase(at: url)
+        }
+        return try await body(database, ConversationRepository(database: database))
     }
 
     private func disposableDatabaseURL() -> URL {

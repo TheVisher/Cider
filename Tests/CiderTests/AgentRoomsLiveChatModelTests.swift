@@ -653,7 +653,7 @@ struct AgentRoomsLiveChatModelTests {
             "Start Cider Test Chat",
             "Live continuation",
             "TextField(composerPlaceholder(roomID: roomID)",
-            "Button(\"Send\")",
+            "Button(invokedParticipantByRoom[roomID] == nil ? \"Send\" : \"Invoke\")",
             ".onSubmit",
             "Shift-Return adds a line",
             "Retry failed message",

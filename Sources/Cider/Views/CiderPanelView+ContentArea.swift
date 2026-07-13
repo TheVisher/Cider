@@ -413,9 +413,12 @@ extension CiderPanelView {
                 let repository = ConversationRepository(database: CiderDatabase.shared)
                 let assignments = agentRoomsSession.agentAssignments
                     ?? AgentRoomsAgentAssignmentService(repository: repository)
+                let participants = agentRoomsSession.participants
+                    ?? AgentRoomsParticipantService(repository: repository)
                 let canonical = AgentRoomsReadService(
                     repository: repository,
-                    agentAssignments: assignments
+                    agentAssignments: assignments,
+                    participants: participants
                 )
                 AgentRoomsWorkspaceView(
                     loadWorkspace: { request in

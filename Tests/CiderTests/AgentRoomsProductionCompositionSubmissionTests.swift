@@ -195,7 +195,8 @@ final class AgentRoomsProductionCompositionSubmissionTests: XCTestCase {
         let suffix = source[submission.lowerBound...]
         let functionBody = String(suffix.prefix(500))
 
-        XCTAssertTrue(functionBody.contains("liveChat.startSubmission(text, selectedRoomID: roomID) == .accepted"))
+        XCTAssertTrue(functionBody.contains("liveChat.startSubmission("))
+        XCTAssertTrue(functionBody.contains("invokedParticipantIDs: participantIDs"))
         XCTAssertFalse(functionBody.contains("liveChat.isComposerEnabled"))
         XCTAssertFalse(functionBody.contains("Task { await liveChat.send"))
         XCTAssertLessThan(

@@ -31,6 +31,17 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
         let externalSessionID: String?
     }
 
+    struct Participant: Codable, Equatable, Sendable {
+        let id: UUID
+        let profileID: String
+        let displayName: String
+        let role: ConversationRoomParticipantRole
+        let providerID: String
+        let runtimeID: String
+        let capabilities: [String]
+        let availability: ConversationAgentAvailability
+    }
+
     struct Turn: Codable, Equatable, Sendable {
         let id: UUID
         let sequence: Int64
@@ -42,6 +53,8 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
         let startedAt: String?
         let completedAt: String?
         let updatedAt: String
+        let participantAttribution: ConversationParticipantRunAttribution?
+        let participantActivity: [ConversationParticipantActivity]
         let sources: AgentRoomsRoomExportFactCollection<HermesCiderReference>
         let context: AgentRoomsRoomExportFactCollection<HermesCiderContextCheckpoint>
         let approvals: AgentRoomsRoomExportFactCollection<HermesApprovalRequest>
@@ -63,11 +76,13 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
         let sourceCreatedAt: String?
         let createdAt: String
         let updatedAt: String
+        let participantAttribution: ConversationParticipantMessageAttribution?
     }
 
     let schemaVersion: Int
     let room: Room
     let runtimeBindings: [RuntimeBinding]
+    let participants: [Participant]
     let turns: [Turn]
     let messages: [Message]
 }
@@ -133,10 +148,17 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
         let bindings = try repository.bindings(roomID: roomID)
         let turns = try repository.turns(roomID: roomID)
         let messages = try repository.messages(roomID: roomID)
-        try validateRows(room: room, bindings: bindings, turns: turns, messages: messages)
+        let roster = try repository.participantRoster(roomID: roomID)
+        try validateRows(
+            room: room,
+            roster: roster,
+            bindings: bindings,
+            turns: turns,
+            messages: messages
+        )
 
         let manifest = AgentRoomsRoomExportManifest(
-            schemaVersion: 1,
+            schemaVersion: 2,
             room: .init(
                 id: room.id,
                 title: room.title,
@@ -156,9 +178,21 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
                     externalSessionID: nil
                 )
             },
-            turns: try turns.map(exportTurn),
-            messages: messages.map {
+            participants: roster?.members.map { member in
                 .init(
+                    id: member.id,
+                    profileID: member.profile.id,
+                    displayName: member.profile.displayName,
+                    role: member.role,
+                    providerID: member.profile.runtimeBinding.providerID,
+                    runtimeID: member.profile.runtimeBinding.runtimeID,
+                    capabilities: member.profile.capabilities.map(\.displayName),
+                    availability: member.profile.availability
+                )
+            } ?? [],
+            turns: try turns.map(exportTurn),
+            messages: try messages.map {
+                return .init(
                     id: $0.id,
                     turnID: $0.turnID,
                     runtimeBindingID: $0.runtimeBindingID,
@@ -171,7 +205,8 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
                     source: $0.source,
                     sourceCreatedAt: $0.sourceCreatedAt.map(Self.timestamp),
                     createdAt: Self.timestamp($0.createdAt),
-                    updatedAt: Self.timestamp($0.updatedAt)
+                    updatedAt: Self.timestamp($0.updatedAt),
+                    participantAttribution: try participantMessageAttribution($0)
                 )
             }
         )
@@ -262,19 +297,21 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             throw AgentRoomsRoomExportError.ineligibleRoom
         }
         if room.stableKey == nil {
+            let metadata = ConversationRepository.metadataWithoutAgentConfiguration(room.metadata)
             guard room.kind == "chat",
-                  room.metadata.isEmpty || room.metadata == [
+                  metadata.isEmpty || metadata == [
                     "authority": AgentRoomsConversationPersistence.nativeRoomAuthority,
                     "schema_version": "1",
                   ]
             else { throw AgentRoomsRoomExportError.ineligibleRoom }
         } else {
+            let metadata = ConversationRepository.metadataWithoutAgentConfiguration(room.metadata)
             guard room.stableKey == AgentRoomsTestChatPersistence.stableRoomKey,
                   room.kind == "cider-test-chat",
-                  room.metadata["authority"] == "cider-test-chat.hermes-runs.v1",
-                  room.metadata["schema_version"] == "1",
-                  room.metadata["source"] == "cider-rooms-live-continuation",
-                  room.metadata.count == 3
+                  metadata["authority"] == "cider-test-chat.hermes-runs.v1",
+                  metadata["schema_version"] == "1",
+                  metadata["source"] == "cider-rooms-live-continuation",
+                  metadata.count == 3
             else { throw AgentRoomsRoomExportError.ineligibleRoom }
         }
         guard safeText(room.title, limit: 240) else { throw AgentRoomsRoomExportError.privateContent }
@@ -282,6 +319,7 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
 
     private func validateRows(
         room: ConversationRoom,
+        roster: ConversationRoomParticipantRoster?,
         bindings: [ConversationRuntimeBinding],
         turns: [ConversationTurn],
         messages: [ConversationMessage]
@@ -295,6 +333,24 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
 
         let turnIDs = Set(turns.map(\.id))
         let bindingIDs = Set(bindings.map(\.id))
+        let participantIDs = Set(roster?.members.map(\.id) ?? [])
+        let participantsByID = Dictionary(uniqueKeysWithValues: (roster?.members ?? []).map {
+            ($0.id, $0)
+        })
+        if let roster {
+            try roster.validate()
+            for member in roster.members {
+                guard safeIdentity(member.profile.id),
+                      safeText(member.profile.displayName, limit: 80),
+                      safeIdentity(member.profile.runtimeBinding.providerID),
+                      safeIdentity(member.profile.runtimeBinding.runtimeID),
+                      member.profile.capabilities.allSatisfy({
+                          safeIdentity($0.id) && safeText($0.displayName, limit: 80)
+                      }),
+                      member.profile.availability.reason.map({ safeText($0, limit: 240) }) ?? true
+                else { throw AgentRoomsRoomExportError.privateContent }
+            }
+        }
         for binding in bindings {
             guard safeIdentity(binding.runtimeID),
                   safeIdentity(binding.transportID),
@@ -303,17 +359,41 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             else { throw AgentRoomsRoomExportError.privateContent }
         }
         for turn in turns {
+            let attribution = try participantRunAttribution(turn)
+            let activity = try participantActivity(turn)
+            let attributedParticipant = attribution.flatMap { participantsByID[$0.participantID] }
             guard turn.runtimeBindingID.map(bindingIDs.contains) ?? true,
                   turn.source.map({ safeSource($0) }) ?? true,
-                  turn.error.map({ safeIdentity($0.code) }) ?? true
+                  turn.error.map({ safeIdentity($0.code) }) ?? true,
+                  attribution.map({
+                      attributedParticipant?.profile.id == $0.profileID
+                          && attributedParticipant?.role == $0.participantRole
+                  }) ?? true,
+                  activity.allSatisfy({ value in
+                      participantIDs.contains(value.participantID)
+                          && value.invocationID == attribution?.invocationID
+                          && value.runID == attribution?.runID
+                          && value.participantID == attribution?.participantID
+                  })
             else { throw AgentRoomsRoomExportError.privateContent }
         }
         for message in messages {
+            let attribution = try participantMessageAttribution(message)
+            let participantAttributionIsValid = attribution.map { value in
+                if let participantID = value.participantID {
+                    guard let participant = participantsByID[participantID] else { return false }
+                    return value.runID != nil
+                        && value.profileID == participant.profile.id
+                        && value.participantRole == participant.role
+                }
+                return value.runID == nil && value.profileID == nil && value.participantRole == nil
+            } ?? true
             guard message.turnID.map(turnIDs.contains) ?? true,
                   message.runtimeBindingID.map(bindingIDs.contains) ?? true,
                   message.source.map({ safeSource($0) }) ?? true,
                   safeIdentity(message.role),
-                  safeText(message.contentText, limit: AgentRoomsLiveChatModel.maximumStreamingMessageLength)
+                  safeText(message.contentText, limit: AgentRoomsLiveChatModel.maximumStreamingMessageLength),
+                  participantAttributionIsValid
             else { throw AgentRoomsRoomExportError.privateContent }
         }
     }
@@ -324,6 +404,8 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
         let approvals = approvalFact(turn.metadata)
         let attachments = attachmentFact(turn.metadata)
         let artifacts = generatedArtifactFact(turn.metadata)
+        let attribution = try participantRunAttribution(turn)
+        let activity = try participantActivity(turn)
         return .init(
             id: turn.id,
             sequence: turn.sequence,
@@ -335,12 +417,61 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             startedAt: turn.startedAt.map(Self.timestamp),
             completedAt: turn.completedAt.map(Self.timestamp),
             updatedAt: Self.timestamp(turn.updatedAt),
+            participantAttribution: attribution,
+            participantActivity: activity,
             sources: references,
             context: context,
             approvals: approvals,
             attachments: attachments,
             generatedArtifacts: artifacts
         )
+    }
+
+    private func participantRunAttribution(
+        _ turn: ConversationTurn
+    ) throws -> ConversationParticipantRunAttribution? {
+        guard let encoded = turn.metadata[AgentRoomsParticipantService.runAttributionMetadataKey] else {
+            return nil
+        }
+        guard let attribution = DatabaseHelpers.decodeJSON(
+            ConversationParticipantRunAttribution.self,
+            from: encoded
+        ), safeIdentity(attribution.profileID), attribution.selectionSequence > 0 else {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return attribution
+    }
+
+    private func participantMessageAttribution(
+        _ message: ConversationMessage
+    ) throws -> ConversationParticipantMessageAttribution? {
+        guard let encoded = message.metadata[AgentRoomsParticipantService.messageAttributionMetadataKey] else {
+            return nil
+        }
+        guard let attribution = DatabaseHelpers.decodeJSON(
+            ConversationParticipantMessageAttribution.self,
+            from: encoded
+        ), attribution.profileID.map(safeIdentity) ?? true else {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return attribution
+    }
+
+    private func participantActivity(
+        _ turn: ConversationTurn
+    ) throws -> [ConversationParticipantActivity] {
+        guard let encoded = turn.metadata[AgentRoomsParticipantService.activityMetadataKey] else {
+            return []
+        }
+        guard let values = DatabaseHelpers.decodeJSON(
+            [ConversationParticipantActivity].self,
+            from: encoded
+        ), values.count <= ConversationParticipantInvocationLimits.checkpoint.maximumUpdatesPerParticipant,
+              values.allSatisfy({ safeText($0.summary, limit: 240) && $0.sequence > 0 }),
+              Set(values.map(\.sequence)).count == values.count else {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return values.sorted { $0.sequence < $1.sequence }
     }
 
     private func referencesFact(_ raw: String?) -> AgentRoomsRoomExportFactCollection<HermesCiderReference> {
@@ -423,6 +554,17 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             "This is a local, open-data Cider export. Runtime sessions, private paths, credentials, and raw transport payloads are omitted.",
         ]
         let messagesByTurn = Dictionary(grouping: manifest.messages, by: \.turnID)
+        let participantNames = Dictionary(uniqueKeysWithValues: manifest.participants.map {
+            ($0.id, $0.displayName)
+        })
+        if !manifest.participants.isEmpty {
+            lines.append(contentsOf: ["", "## Participants", ""])
+            for participant in manifest.participants {
+                lines.append(
+                    "- \(participant.displayName) · \(participant.role.rawValue) · \(participant.providerID)/\(participant.runtimeID)"
+                )
+            }
+        }
         for turn in manifest.turns {
             lines.append(contentsOf: [
                 "",
@@ -432,11 +574,19 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
                 "- Terminal truth: \(terminalTruth(turn.status))",
                 "- Source: \(turn.source?.namespace ?? "Cider local")",
             ])
+            if let participantID = turn.participantAttribution?.participantID,
+               let participantName = participantNames[participantID] {
+                lines.append("- Participant: \(participantName)")
+            }
             if let errorCode = turn.errorCode { lines.append("- Error code: \(errorCode)") }
             for message in (messagesByTurn[turn.id] ?? []).sorted(by: { $0.sequence < $1.sequence }) {
+                let author = message.role == "user"
+                    ? "You"
+                    : message.participantAttribution?.participantID.flatMap { participantNames[$0] }
+                        ?? "Hermes"
                 lines.append(contentsOf: [
                     "",
-                    "### \(message.role == "user" ? "You" : "Hermes")",
+                    "### \(author)",
                     "",
                     message.body,
                 ])

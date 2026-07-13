@@ -32,6 +32,9 @@ final class AgentRoomsActionService: AgentRoomsActionServicing {
 
     func createConversation(title: String = AgentRoomsActionService.defaultTitle) throws -> ConversationRoom {
         let timestamp = now()
+        let rosterProfiles = [agentAssignments.defaultProfile]
+            + agentAssignments.profiles.filter { $0.id != agentAssignments.defaultProfile.id }
+                .prefix(ConversationRoomParticipantRoster.maximumParticipantCount - 1)
         return try repository.createRoom(.init(
             title: try normalizedTitle(title),
             metadata: [
@@ -41,6 +44,17 @@ final class AgentRoomsActionService: AgentRoomsActionServicing {
             agentAssignment: ConversationRoomAgentAssignment(
                 profile: agentAssignments.defaultProfile,
                 assignedAt: timestamp
+            ),
+            participantRoster: ConversationRoomParticipantRoster(
+                members: rosterProfiles.enumerated().map { index, profile in
+                    ConversationRoomParticipant(
+                        id: UUID(),
+                        profile: profile,
+                        role: index == 0 ? .actingAgent : .advisor,
+                        addedAt: timestamp
+                    )
+                },
+                updatedAt: timestamp
             ),
             createdAt: timestamp,
             updatedAt: timestamp

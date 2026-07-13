@@ -17,11 +17,16 @@ final class AgentRoomsReadService {
     private let loadRuntimeBindings: (UUID, Int) throws -> [ConversationRuntimeBinding]
     private let loadRecentTurns: (UUID, Int) throws -> [ConversationTurn]
     private let loadActingAgent: (UUID) throws -> AgentRoomActingAgent?
+    private let loadParticipantRoster: (UUID) throws -> AgentRoomParticipantRoster?
+    private let loadMessageAttribution: (ConversationMessage) throws -> ConversationParticipantMessageAttribution?
+    private let loadTurnAttribution: (ConversationTurn) throws -> ConversationParticipantRunAttribution?
+    private let loadParticipantActivity: (UUID, UUID) throws -> [ConversationParticipantActivity]
     private let now: () -> Date
 
     init(
         repository: ConversationRepository,
         agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil,
+        participants: (any AgentRoomsParticipantReading)? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         let assignments = agentAssignments
@@ -32,6 +37,12 @@ final class AgentRoomsReadService {
         self.loadRuntimeBindings = repository.runtimeBindings(roomID:limit:)
         self.loadRecentTurns = repository.recentTurns(roomID:limit:)
         self.loadActingAgent = assignments.presentation(roomID:)
+        let participantService: any AgentRoomsParticipantReading = participants
+            ?? AgentRoomsParticipantService(repository: repository, now: now)
+        self.loadParticipantRoster = participantService.presentation(roomID:)
+        self.loadMessageAttribution = participantService.messageAttribution(_:)
+        self.loadTurnAttribution = participantService.turnAttribution(_:)
+        self.loadParticipantActivity = participantService.activity(roomID:invocationID:)
         self.now = now
     }
 
@@ -43,6 +54,10 @@ final class AgentRoomsReadService {
         loadRuntimeBindings: @escaping (UUID, Int) throws -> [ConversationRuntimeBinding],
         loadRecentTurns: @escaping (UUID, Int) throws -> [ConversationTurn],
         loadActingAgent: @escaping (UUID) throws -> AgentRoomActingAgent? = { _ in nil },
+        loadParticipantRoster: @escaping (UUID) throws -> AgentRoomParticipantRoster? = { _ in nil },
+        loadMessageAttribution: @escaping (ConversationMessage) throws -> ConversationParticipantMessageAttribution? = { _ in nil },
+        loadTurnAttribution: @escaping (ConversationTurn) throws -> ConversationParticipantRunAttribution? = { _ in nil },
+        loadParticipantActivity: @escaping (UUID, UUID) throws -> [ConversationParticipantActivity] = { _, _ in [] },
         now: @escaping () -> Date = Date.init
     ) {
         self.loadRooms = loadRooms
@@ -56,6 +71,10 @@ final class AgentRoomsReadService {
         self.loadRuntimeBindings = loadRuntimeBindings
         self.loadRecentTurns = loadRecentTurns
         self.loadActingAgent = loadActingAgent
+        self.loadParticipantRoster = loadParticipantRoster
+        self.loadMessageAttribution = loadMessageAttribution
+        self.loadTurnAttribution = loadTurnAttribution
+        self.loadParticipantActivity = loadParticipantActivity
         self.now = now
     }
 
@@ -98,11 +117,12 @@ final class AgentRoomsReadService {
         newestTurn: ConversationTurn?
     ) throws -> AgentRoom {
         let actingAgent = try loadActingAgent(room.id)
+        let participantRoster = try loadParticipantRoster(room.id)
         let binding = bindings.first(where: { $0.state == .active }) ?? bindings.first
         let runtimeLabel = actingAgent?.displayName
             ?? binding.map { displayRuntime($0.runtimeID) }
             ?? "Unassigned"
-        let supportedMessages = messages.compactMap { message -> AgentRoomMessage? in
+        let supportedMessages = try messages.compactMap { message -> AgentRoomMessage? in
             switch message.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             case "user":
                 return AgentRoomMessage(
@@ -112,10 +132,14 @@ final class AgentRoomsReadService {
                     body: message.contentText
                 )
             case "assistant":
+                let attribution = try loadMessageAttribution(message)
+                let author = attribution?.participantID.flatMap { participantID in
+                    participantRoster?.members.first(where: { $0.id == participantID })?.displayName
+                } ?? runtimeLabel
                 return AgentRoomMessage(
                     id: message.id.uuidString,
                     role: .agent,
-                    author: runtimeLabel,
+                    author: author,
                     body: message.contentText
                 )
             default:
@@ -127,6 +151,25 @@ final class AgentRoomsReadService {
             .first(where: { !$0.isEmpty }) ?? Self.fallbackPreview
         let title = room.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let receipt = mapReceipt(newestTurn, roomID: room.id, bindings: bindings)
+        let participantActivity: AgentRoomParticipantActivitySummary?
+        if let newestTurn,
+           let attribution = try loadTurnAttribution(newestTurn) {
+            let updates = try loadParticipantActivity(room.id, attribution.invocationID)
+            let status: ConversationParticipantRunStatus = switch newestTurn.status {
+            case .completed: .completed
+            case .cancelled: .cancelled
+            case .pending, .running, .waiting: .running
+            case .unknown, .failed: .failed
+            }
+            participantActivity = AgentRoomParticipantActivitySummary(
+                participantCount: max(1, Set(updates.map(\.participantID)).count),
+                updateCount: updates.count,
+                status: status,
+                updates: updates
+            )
+        } else {
+            participantActivity = nil
+        }
 
         return AgentRoom(
             id: room.id.uuidString,
@@ -142,6 +185,8 @@ final class AgentRoomsReadService {
                 futureArtifact: nil
             ),
             actingAgent: actingAgent,
+            participantRoster: participantRoster,
+            participantActivity: participantActivity,
             lifecycleState: room.lifecycleState
         )
     }

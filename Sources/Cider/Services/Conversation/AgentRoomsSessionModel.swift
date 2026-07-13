@@ -5,6 +5,7 @@ import Foundation
 final class AgentRoomsSessionModel: ObservableObject {
     let liveChat: AgentRoomsLiveChatModel
     let agentAssignments: (any AgentRoomsAgentAssignmentActing)?
+    let participants: AgentRoomsParticipantService?
     let messagePresentationStore = AgentRoomsMessagePresentationStore()
 
     @Published var selectedRoomID: String?
@@ -23,10 +24,12 @@ final class AgentRoomsSessionModel: ObservableObject {
         liveChat: AgentRoomsLiveChatModel,
         selectionStore: (any AgentRoomsSelectionPersisting)? = nil,
         draftStore: (any AgentRoomsDraftPersisting)? = nil,
-        agentAssignments: (any AgentRoomsAgentAssignmentActing)? = nil
+        agentAssignments: (any AgentRoomsAgentAssignmentActing)? = nil,
+        participants: AgentRoomsParticipantService? = nil
     ) {
         self.liveChat = liveChat
         self.agentAssignments = agentAssignments
+        self.participants = participants
         self.selectionStore = selectionStore
         self.draftStore = draftStore ?? makeAgentRoomsMemoryDraftStore()
         let restoredSelection = selectionStore?.loadSelectedRoomID()
@@ -38,16 +41,19 @@ final class AgentRoomsSessionModel: ObservableObject {
     convenience init(transport: any HermesBridgeTransport) {
         let repository = ConversationRepository(database: CiderDatabase.shared)
         let assignments = AgentRoomsAgentAssignmentService(repository: repository)
+        let participants = AgentRoomsParticipantService(repository: repository)
         self.init(liveChat: AgentRoomsLiveChatModel(
             transport: transport,
             persistence: AgentRoomsConversationPersistence(
                 repository: repository,
                 defaultAgentProfile: assignments.defaultProfile
             ),
-            agentAssignments: assignments
+            agentAssignments: assignments,
+            participants: participants
         ), selectionStore: AgentRoomsSelectionStore.application,
            draftStore: AgentRoomsDraftStore.application,
-           agentAssignments: assignments)
+           agentAssignments: assignments,
+           participants: participants)
     }
 
     func selectRoom(id: String?, persistIfCanonical: Bool) {

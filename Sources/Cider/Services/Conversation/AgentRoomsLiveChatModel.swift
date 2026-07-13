@@ -374,6 +374,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private let now: @MainActor () -> Date
     private let persistence: (any AgentRoomsConversationPersisting)?
     private let agentAssignments: (any AgentRoomsAgentAssignmentReading)?
+    private let participants: AgentRoomsParticipantService?
 
     private var roomID: UUID?
     private var activeRoomTitle = AgentRoomsLiveChatModel.roomTitle
@@ -394,6 +395,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var activeSendTask: Task<Void, Never>?
     private var assignmentAllowsSend = true
     private var activeAgent: AgentRoomActingAgent?
+    private var participantAttributionByClientMessageID: [String: ConversationParticipantRunAttribution] = [:]
 
     private struct AcceptedSubmission {
         let text: String
@@ -404,6 +406,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     var testRoom: AgentRoom? {
         isReservedTestChat ? activeRoom : nil
+    }
+
+    var activeInvocationParticipantDisplayName: String? {
+        guard let participantID = persistentAttempt?.participantAttribution?.participantID else {
+            return nil
+        }
+        return activeRoom?.participantRoster?.members.first(where: {
+            $0.id == participantID
+        })?.displayName
     }
 
     init(
@@ -421,7 +432,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         makeID: @escaping @MainActor () -> UUID = UUID.init,
         now: @escaping @MainActor () -> Date = Date.init,
         persistence: (any AgentRoomsConversationPersisting)? = nil,
-        agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil
+        agentAssignments: (any AgentRoomsAgentAssignmentReading)? = nil,
+        participants: AgentRoomsParticipantService? = nil
     ) {
         self.transport = transport
         self.turnCoordinator = turnCoordinator
@@ -432,6 +444,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         self.now = now
         self.persistence = persistence
         self.agentAssignments = agentAssignments
+        self.participants = participants
     }
 
     @discardableResult
@@ -475,6 +488,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         turnState = .idle
         liveActivity = []
         completedAssistantSourceIDs = []
+        participantAttributionByClientMessageID = [:]
         assignmentAllowsSend = agentAssignments == nil
         activeAgent = nil
     }
@@ -553,8 +567,16 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     }
 
     @discardableResult
-    func startSubmission(_ text: String, selectedRoomID: String?) -> AgentRoomsSubmissionDisposition {
-        guard let accepted = acceptSubmission(text, selectedRoomID: selectedRoomID) else {
+    func startSubmission(
+        _ text: String,
+        selectedRoomID: String?,
+        invokedParticipantIDs: [UUID] = []
+    ) -> AgentRoomsSubmissionDisposition {
+        guard let accepted = acceptSubmission(
+            text,
+            selectedRoomID: selectedRoomID,
+            invokedParticipantIDs: invokedParticipantIDs
+        ) else {
             return .rejected
         }
         activeSendTask = Task { [weak self] in
@@ -563,12 +585,24 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         return .accepted
     }
 
-    func send(_ text: String, selectedRoomID: String?) async {
-        guard let accepted = acceptSubmission(text, selectedRoomID: selectedRoomID) else { return }
+    func send(
+        _ text: String,
+        selectedRoomID: String?,
+        invokedParticipantIDs: [UUID] = []
+    ) async {
+        guard let accepted = acceptSubmission(
+            text,
+            selectedRoomID: selectedRoomID,
+            invokedParticipantIDs: invokedParticipantIDs
+        ) else { return }
         await performSend(accepted)
     }
 
-    private func acceptSubmission(_ text: String, selectedRoomID: String?) -> AcceptedSubmission? {
+    private func acceptSubmission(
+        _ text: String,
+        selectedRoomID: String?,
+        invokedParticipantIDs: [UUID]
+    ) -> AcceptedSubmission? {
         guard refreshAssignedAgentEligibility() else {
             transportState = .blocked
             rebuildRoom()
@@ -603,19 +637,80 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         let attemptID = makeID()
         let assistantMessageID = makeID()
         let timestamp = now()
+        let participantAttribution: ConversationParticipantRunAttribution?
+        if invokedParticipantIDs.isEmpty {
+            participantAttribution = nil
+        } else {
+            guard let participants else {
+                surfacePreAcceptFailure("Participant routing is unavailable. Nothing was sent.")
+                return nil
+            }
+            do {
+                let request = ConversationParticipantInvocationRequest(
+                    id: attemptID,
+                    roomID: roomID,
+                    prompt: trimmed,
+                    selectedParticipantIDs: invokedParticipantIDs,
+                    origin: .user,
+                    limits: .checkpoint
+                )
+                let plan = try participants.invocationPlan(request)
+                guard plan.count == 1, let participant = plan.first else {
+                    throw ConversationParticipantInvocationError.invalid(
+                        "The native Hermes composer executes one explicitly selected participant per turn."
+                    )
+                }
+                guard participant.profile.runtimeBinding.providerID == "hermes",
+                      participant.profile.runtimeBinding.runtimeID == "hermes"
+                else {
+                    throw ConversationParticipantInvocationError.unavailable(
+                        "\(participant.profile.displayName) has no connected production runtime. Nothing was sent."
+                    )
+                }
+                participantAttribution = ConversationParticipantRunAttribution(
+                    invocationID: attemptID,
+                    runID: attemptID,
+                    participantID: participant.id,
+                    profileID: participant.profile.id,
+                    participantRole: participant.role,
+                    selectionSequence: 1
+                )
+            } catch {
+                surfacePreAcceptFailure(
+                    (error as? LocalizedError)?.errorDescription
+                        ?? "Cider could not verify the selected participant. Nothing was sent."
+                )
+                return nil
+            }
+        }
         let durableAttempt: AgentRoomsConversationAttempt?
         do {
-            durableAttempt = try persistence?.beginAttempt(
-                roomID: roomID,
-                roomTitle: activeRoomTitle,
-                isReservedTestChat: isReservedTestChat,
-                attemptID: attemptID,
-                clientMessageID: clientID,
-                userMessageID: userMessageID,
-                assistantMessageID: assistantMessageID,
-                text: trimmed,
-                at: timestamp
-            )
+            if let participantAttribution {
+                durableAttempt = try persistence?.beginAttributedAttempt(
+                    roomID: roomID,
+                    roomTitle: activeRoomTitle,
+                    isReservedTestChat: isReservedTestChat,
+                    attemptID: attemptID,
+                    clientMessageID: clientID,
+                    userMessageID: userMessageID,
+                    assistantMessageID: assistantMessageID,
+                    text: trimmed,
+                    attribution: participantAttribution,
+                    at: timestamp
+                )
+            } else {
+                durableAttempt = try persistence?.beginAttempt(
+                    roomID: roomID,
+                    roomTitle: activeRoomTitle,
+                    isReservedTestChat: isReservedTestChat,
+                    attemptID: attemptID,
+                    clientMessageID: clientID,
+                    userMessageID: userMessageID,
+                    assistantMessageID: assistantMessageID,
+                    text: trimmed,
+                    at: timestamp
+                )
+            }
         } catch {
             surfacePreAcceptFailure("Cider could not safely save this message. Nothing was sent.")
             return nil
@@ -627,6 +722,9 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             body: trimmed,
             deliveryState: .pending
         ))
+        if let participantAttribution {
+            participantAttributionByClientMessageID[clientID] = participantAttribution
+        }
         return activateAcceptedSubmission(
             text: trimmed,
             clientID: clientID,
@@ -695,21 +793,67 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         let durableAttempt: AgentRoomsConversationAttempt?
         do {
             guard let roomID else { return }
-            durableAttempt = try persistence?.beginAttempt(
-                roomID: roomID,
-                roomTitle: activeRoomTitle,
-                isReservedTestChat: isReservedTestChat,
-                attemptID: attemptID,
-                clientMessageID: clientMessageID,
-                userMessageID: makeID(),
-                assistantMessageID: makeID(),
-                text: text,
-                at: now()
-            )
+            if let previous = participantAttributionByClientMessageID[clientMessageID] {
+                guard let participants else {
+                    throw ConversationParticipantInvocationError.unavailable(
+                        "Participant routing is unavailable. Nothing was sent."
+                    )
+                }
+                let plan = try participants.invocationPlan(.init(
+                    id: attemptID,
+                    roomID: roomID,
+                    prompt: text,
+                    selectedParticipantIDs: [previous.participantID],
+                    origin: .user,
+                    limits: .checkpoint
+                ))
+                guard plan.count == 1,
+                      plan[0].profile.runtimeBinding.providerID == "hermes",
+                      plan[0].profile.runtimeBinding.runtimeID == "hermes"
+                else {
+                    throw ConversationParticipantInvocationError.unavailable(
+                        "The selected participant has no connected production runtime. Nothing was sent."
+                    )
+                }
+                let retryAttribution = ConversationParticipantRunAttribution(
+                    invocationID: attemptID,
+                    runID: attemptID,
+                    participantID: previous.participantID,
+                    profileID: previous.profileID,
+                    participantRole: previous.participantRole,
+                    selectionSequence: 1
+                )
+                durableAttempt = try persistence?.beginAttributedAttempt(
+                    roomID: roomID,
+                    roomTitle: activeRoomTitle,
+                    isReservedTestChat: isReservedTestChat,
+                    attemptID: attemptID,
+                    clientMessageID: clientMessageID,
+                    userMessageID: makeID(),
+                    assistantMessageID: makeID(),
+                    text: text,
+                    attribution: retryAttribution,
+                    at: now()
+                )
+                participantAttributionByClientMessageID[clientMessageID] = retryAttribution
+            } else {
+                durableAttempt = try persistence?.beginAttempt(
+                    roomID: roomID,
+                    roomTitle: activeRoomTitle,
+                    isReservedTestChat: isReservedTestChat,
+                    attemptID: attemptID,
+                    clientMessageID: clientMessageID,
+                    userMessageID: makeID(),
+                    assistantMessageID: makeID(),
+                    text: text,
+                    at: now()
+                )
+            }
         } catch {
             roomMessages[index].deliveryState = .failed
             roomMessages[index].canRetry = true
-            composerMessage = "Cider could not safely prepare this retry. Nothing was sent."
+            composerMessage = (error as? LocalizedError)?.errorDescription
+                ?? "Cider could not safely prepare this retry. Nothing was sent."
             rebuildRoom()
             return
         }
@@ -1188,6 +1332,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 futureArtifact: nil
             ),
             actingAgent: activeAgent,
+            participantRoster: try? participants?.presentation(roomID: roomID),
+            participantActivity: try? participants?.latestActivitySummary(roomID: roomID),
             continuity: .liveContinuation
         )
     }
@@ -1202,6 +1348,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         completedAssistantSourceIDs = Set(
             snapshot.transportMessages.filter { $0.role == .assistant }.compactMap(\.sourceID)
         )
+        participantAttributionByClientMessageID = snapshot.participantAttributionByClientMessageID
         liveActivity = snapshot.latestActivity
         recoveredDraft = snapshot.presentationMessages.last(where: { $0.canRetry })?.body
         recoveredDraftRoomID = recoveredDraft == nil ? nil : snapshot.room.id.uuidString

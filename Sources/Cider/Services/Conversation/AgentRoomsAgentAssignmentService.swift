@@ -135,7 +135,7 @@ final class AgentRoomsAgentAssignmentService: AgentRoomsAgentAssignmentActing {
         guard let room = try repository.room(id: id) else {
             throw ConversationRepositoryError.notFound("Conversation room was not found.")
         }
-        let metadata = ConversationRepository.metadataWithoutAgentAssignment(room.metadata)
+        let metadata = ConversationRepository.metadataWithoutAgentConfiguration(room.metadata)
         let isNative = room.stableKey == nil
             && room.kind == "chat"
             && metadata["authority"] == AgentRoomsConversationPersistence.nativeRoomAuthority

@@ -20,6 +20,7 @@ enum ConversationRepositoryError: Error, Equatable, LocalizedError {
 final class ConversationRepository {
     private static let maximumBoundedReadLimit = 500
     static let agentAssignmentMetadataKey = "cider.rooms.acting-agent.v1"
+    static let participantRosterMetadataKey = "cider.rooms.participant-roster.v1"
     private let database: CiderDatabase
 
     init(database: CiderDatabase = .shared) {
@@ -35,6 +36,11 @@ final class ConversationRepository {
                     "Conversation room agent assignment metadata must use the typed assignment field."
                 )
             }
+            guard draft.metadata[Self.participantRosterMetadataKey] == nil else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation room participant roster metadata must use the typed roster field."
+                )
+            }
             var roomMetadata = draft.metadata
             if let assignment = draft.agentAssignment {
                 try assignment.validate()
@@ -44,6 +50,20 @@ final class ConversationRepository {
                     )
                 }
                 roomMetadata[Self.agentAssignmentMetadataKey] = encoded
+            }
+            if let roster = draft.participantRoster {
+                try roster.validate()
+                guard roster.actingAgent?.profile.id == draft.agentAssignment?.profile.id else {
+                    throw ConversationRepositoryError.invalidDraft(
+                        "The participant roster acting agent must match the room assignment."
+                    )
+                }
+                guard let encoded = DatabaseHelpers.encodeJSON(roster) else {
+                    throw ConversationRepositoryError.invalidDraft(
+                        "Conversation room participant roster could not be encoded."
+                    )
+                }
+                roomMetadata[Self.participantRosterMetadataKey] = encoded
             }
             let metadata = DatabaseHelpers.encodeJSON(roomMetadata) ?? "{}"
             let createdAt = DatabaseHelpers.encode(draft.createdAt)
@@ -111,6 +131,27 @@ final class ConversationRepository {
         return assignment
     }
 
+    func participantRoster(roomID: UUID) throws -> ConversationRoomParticipantRoster? {
+        let room = try requiredRoom(id: roomID)
+        guard let encoded = room.metadata[Self.participantRosterMetadataKey] else { return nil }
+        guard let roster = DatabaseHelpers.decodeJSON(
+            ConversationRoomParticipantRoster.self,
+            from: encoded
+        ) else {
+            throw ConversationRepositoryError.integrity(
+                "Conversation room contains an invalid participant roster."
+            )
+        }
+        do {
+            try roster.validate()
+        } catch {
+            throw ConversationRepositoryError.integrity(
+                "Conversation room contains an invalid participant roster."
+            )
+        }
+        return roster
+    }
+
     @discardableResult
     func setAgentAssignment(
         roomID: UUID,
@@ -127,6 +168,38 @@ final class ConversationRepository {
             }
             var metadata = room.metadata
             metadata[Self.agentAssignmentMetadataKey] = encoded
+            if let roster = try participantRoster(roomID: roomID) {
+                var members = roster.members
+                if let selectedIndex = members.firstIndex(where: { $0.profile.id == assignment.profile.id }),
+                   let actingIndex = members.firstIndex(where: { $0.role == .actingAgent }) {
+                    members[actingIndex].role = .advisor
+                    members[selectedIndex].role = .actingAgent
+                    members[selectedIndex] = ConversationRoomParticipant(
+                        id: members[selectedIndex].id,
+                        profile: assignment.profile,
+                        role: .actingAgent,
+                        addedAt: members[selectedIndex].addedAt
+                    )
+                } else if let actingIndex = members.firstIndex(where: { $0.role == .actingAgent }) {
+                    members[actingIndex] = ConversationRoomParticipant(
+                        id: members[actingIndex].id,
+                        profile: assignment.profile,
+                        role: .actingAgent,
+                        addedAt: members[actingIndex].addedAt
+                    )
+                }
+                let synchronized = ConversationRoomParticipantRoster(
+                    members: members,
+                    updatedAt: date
+                )
+                try synchronized.validate()
+                guard let rosterJSON = DatabaseHelpers.encodeJSON(synchronized) else {
+                    throw ConversationRepositoryError.invalidDraft(
+                        "Conversation room participant roster could not be encoded."
+                    )
+                }
+                metadata[Self.participantRosterMetadataKey] = rosterJSON
+            }
             let statement = try database.prepare("""
                 UPDATE conversation_rooms
                 SET metadata_json = ?, updated_at = MAX(updated_at, ?)
@@ -141,9 +214,48 @@ final class ConversationRepository {
     }
 
     static func metadataWithoutAgentAssignment(_ metadata: [String: String]) -> [String: String] {
+        metadataWithoutAgentConfiguration(metadata)
+    }
+
+    static func metadataWithoutAgentConfiguration(_ metadata: [String: String]) -> [String: String] {
         var result = metadata
         result.removeValue(forKey: agentAssignmentMetadataKey)
+        result.removeValue(forKey: participantRosterMetadataKey)
         return result
+    }
+
+    @discardableResult
+    func setParticipantRoster(
+        roomID: UUID,
+        roster: ConversationRoomParticipantRoster,
+        at date: Date
+    ) throws -> ConversationRoomParticipantRoster {
+        try database.withTransaction {
+            let room = try requiredRoom(id: roomID)
+            try roster.validate()
+            guard roster.actingAgent?.profile.id == (try agentAssignment(roomID: roomID))?.profile.id else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "The participant roster acting agent must match the room assignment."
+                )
+            }
+            guard let encoded = DatabaseHelpers.encodeJSON(roster) else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation room participant roster could not be encoded."
+                )
+            }
+            var metadata = room.metadata
+            metadata[Self.participantRosterMetadataKey] = encoded
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET metadata_json = ?, updated_at = MAX(updated_at, ?)
+                WHERE id = ?;
+                """)
+            statement.bind(DatabaseHelpers.encodeJSON(metadata) ?? "{}", at: 1)
+                .bind(DatabaseHelpers.encode(date), at: 2)
+                .bind(roomID.uuidString, at: 3)
+            try statement.step()
+            return try participantRoster(roomID: roomID) ?? roster
+        }
     }
 
     /// Returns a bounded lifecycle projection ordered newest first with stable UUID ties.

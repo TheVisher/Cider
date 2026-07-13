@@ -18,6 +18,7 @@ struct AgentRoomsConversationSnapshot: Sendable {
     let latestAttachments: [HermesCiderAttachment]
     let latestGeneratedArtifactFactState: HermesStructuredFactState
     let latestGeneratedArtifacts: [HermesCiderGeneratedArtifact]
+    let participantAttributionByClientMessageID: [String: ConversationParticipantRunAttribution]
 }
 
 struct AgentRoomsConversationAttempt: Equatable, Sendable {
@@ -27,6 +28,7 @@ struct AgentRoomsConversationAttempt: Equatable, Sendable {
     let userMessageID: UUID
     let assistantMessageID: UUID
     let createdAt: Date
+    var participantAttribution: ConversationParticipantRunAttribution? = nil
 }
 
 @MainActor
@@ -43,6 +45,18 @@ protocol AgentRoomsConversationPersisting: AnyObject {
         userMessageID: UUID,
         assistantMessageID: UUID,
         text: String,
+        at date: Date
+    ) throws -> AgentRoomsConversationAttempt
+    func beginAttributedAttempt(
+        roomID: UUID,
+        roomTitle: String,
+        isReservedTestChat: Bool,
+        attemptID: UUID,
+        clientMessageID: String,
+        userMessageID: UUID,
+        assistantMessageID: UUID,
+        text: String,
+        attribution: ConversationParticipantRunAttribution,
         at date: Date
     ) throws -> AgentRoomsConversationAttempt
     func markRunStarted(
@@ -69,6 +83,33 @@ protocol AgentRoomsConversationPersisting: AnyObject {
 
 extension AgentRoomsConversationPersisting {
     func prepareReservedTestChat(id: UUID, at date: Date) throws -> AgentRoomsConversationSnapshot? { nil }
+
+    func beginAttributedAttempt(
+        roomID: UUID,
+        roomTitle: String,
+        isReservedTestChat: Bool,
+        attemptID: UUID,
+        clientMessageID: String,
+        userMessageID: UUID,
+        assistantMessageID: UUID,
+        text: String,
+        attribution: ConversationParticipantRunAttribution,
+        at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
+        var attempt = try beginAttempt(
+            roomID: roomID,
+            roomTitle: roomTitle,
+            isReservedTestChat: isReservedTestChat,
+            attemptID: attemptID,
+            clientMessageID: clientMessageID,
+            userMessageID: userMessageID,
+            assistantMessageID: assistantMessageID,
+            text: text,
+            at: date
+        )
+        attempt.participantAttribution = attribution
+        return attempt
+    }
 }
 
 enum AgentRoomsConversationPersistenceError: Error, Equatable {
@@ -98,15 +139,18 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
     private let database: CiderDatabase
     private let repository: ConversationRepository
     private let defaultAgentProfile: ConversationAgentProfile
+    private let participantProfiles: [ConversationAgentProfile]
 
     init(
         database: CiderDatabase = .shared,
         repository: ConversationRepository? = nil,
-        defaultAgentProfile: ConversationAgentProfile = AgentRoomsProductionAgentProfiles.catalog.defaultProfile
+        defaultAgentProfile: ConversationAgentProfile = AgentRoomsProductionAgentProfiles.catalog.defaultProfile,
+        participantProfiles: [ConversationAgentProfile] = AgentRoomsProductionAgentProfiles.catalog.profiles
     ) {
         self.database = database
         self.repository = repository ?? ConversationRepository(database: database)
         self.defaultAgentProfile = defaultAgentProfile
+        self.participantProfiles = participantProfiles
     }
 
     func prepareReservedTestChat(id: UUID, at date: Date) throws -> AgentRoomsConversationSnapshot? {
@@ -183,6 +227,58 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         text: String,
         at date: Date
     ) throws -> AgentRoomsConversationAttempt {
+        try beginAttempt(
+            roomID: roomID,
+            roomTitle: roomTitle,
+            isReservedTestChat: isReservedTestChat,
+            attemptID: attemptID,
+            clientMessageID: clientMessageID,
+            userMessageID: userMessageID,
+            assistantMessageID: assistantMessageID,
+            text: text,
+            attribution: nil,
+            at: date
+        )
+    }
+
+    func beginAttributedAttempt(
+        roomID: UUID,
+        roomTitle: String,
+        isReservedTestChat: Bool,
+        attemptID: UUID,
+        clientMessageID: String,
+        userMessageID: UUID,
+        assistantMessageID: UUID,
+        text: String,
+        attribution: ConversationParticipantRunAttribution,
+        at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
+        try beginAttempt(
+            roomID: roomID,
+            roomTitle: roomTitle,
+            isReservedTestChat: isReservedTestChat,
+            attemptID: attemptID,
+            clientMessageID: clientMessageID,
+            userMessageID: userMessageID,
+            assistantMessageID: assistantMessageID,
+            text: text,
+            attribution: attribution,
+            at: date
+        )
+    }
+
+    private func beginAttempt(
+        roomID: UUID,
+        roomTitle: String,
+        isReservedTestChat: Bool,
+        attemptID: UUID,
+        clientMessageID: String,
+        userMessageID: UUID,
+        assistantMessageID: UUID,
+        text: String,
+        attribution: ConversationParticipantRunAttribution?,
+        at date: Date
+    ) throws -> AgentRoomsConversationAttempt {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedText.isEmpty else { throw AgentRoomsConversationPersistenceError.ineligibleCompletion }
 
@@ -197,7 +293,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 attemptID: attemptID,
                 clientMessageID: clientMessageID,
                 runID: nil,
-                activity: []
+                activity: [],
+                attribution: attribution
             )
             let turn = try repository.beginTurn(.init(
                 id: attemptID,
@@ -234,11 +331,15 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     finishReason: .stop,
                     source: source,
                     sourceCreatedAt: date,
-                    metadata: [
+                    metadata: participantMessageMetadata(
+                        base: [
                         "authority": Self.attemptAuthority,
                         "schema_version": Self.schemaVersion,
                         "client_message_id": clientMessageID,
-                    ],
+                        ],
+                        invocationID: attribution?.invocationID,
+                        attribution: nil
+                    ),
                     createdAt: date
                 ), intent: .historicalReplay).message.id
             }
@@ -249,7 +350,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 clientMessageID: clientMessageID,
                 userMessageID: canonicalUserID,
                 assistantMessageID: assistantMessageID,
-                createdAt: date
+                createdAt: date,
+                participantAttribution: attribution
             )
         }
     }
@@ -270,7 +372,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     attemptID: attempt.turnID,
                     clientMessageID: attempt.clientMessageID,
                     runID: runID,
-                    activity: activity
+                    activity: activity,
+                    attribution: attempt.participantAttribution
                 ),
                 at: date
             )
@@ -356,7 +459,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     runID: terminal.runID,
                     sessionID: terminal.sessionID,
                     modelIdentity: terminal.modelIdentity,
-                    transportTimestamp: terminal.assistant.timestamp
+                    transportTimestamp: terminal.assistant.timestamp,
+                    attribution: attempt.participantAttribution
                 ),
                 createdAt: assistantCreatedAt
             ), intent: existingAssistant == nil ? .historicalReplay : .liveContinuation)
@@ -390,7 +494,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 attemptID: attempt.turnID,
                 clientMessageID: attempt.clientMessageID,
                 runID: normalizedRunID,
-                activity: activity
+                activity: activity,
+                attribution: attempt.participantAttribution
             )
             _ = try repository.bindActiveTurnExecution(
                 id: attempt.turnID,
@@ -414,11 +519,15 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     finishReason: status == .cancelled ? .cancelled : .error,
                     source: .init(namespace: Self.sourceNamespace, id: "hermes-run:\(normalizedRunID):assistant"),
                     sourceCreatedAt: attempt.createdAt,
-                    metadata: [
+                    metadata: participantMessageMetadata(
+                        base: [
                         "authority": Self.attemptAuthority,
                         "schema_version": Self.schemaVersion,
                         "run_id": normalizedRunID,
-                    ],
+                        ],
+                        invocationID: attempt.participantAttribution?.invocationID,
+                        attribution: attempt.participantAttribution
+                    ),
                     createdAt: attempt.createdAt
                 ), intent: .historicalReplay)
             }
@@ -528,6 +637,19 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                 profile: defaultAgentProfile,
                 assignedAt: date
             ),
+            participantRoster: ConversationRoomParticipantRoster(
+                members: ([defaultAgentProfile] + participantProfiles.filter {
+                    $0.id != defaultAgentProfile.id
+                }.prefix(ConversationRoomParticipantRoster.maximumParticipantCount - 1)).enumerated().map {
+                    index, profile in ConversationRoomParticipant(
+                        id: UUID(),
+                        profile: profile,
+                        role: index == 0 ? .actingAgent : .advisor,
+                        addedAt: date
+                    )
+                },
+                updatedAt: date
+            ),
             createdAt: date,
             updatedAt: date
         ))
@@ -538,9 +660,12 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
               room.archivedAt == nil,
               room.trashedAt == nil
         else { throw AgentRoomsConversationPersistenceError.ineligibleRoom }
-        let baseMetadata = ConversationRepository.metadataWithoutAgentAssignment(room.metadata)
+        let baseMetadata = ConversationRepository.metadataWithoutAgentConfiguration(room.metadata)
         if room.metadata[ConversationRepository.agentAssignmentMetadataKey] != nil {
             _ = try repository.agentAssignment(roomID: room.id)
+        }
+        if room.metadata[ConversationRepository.participantRosterMetadataKey] != nil {
+            _ = try repository.participantRoster(roomID: room.id)
         }
         if reserved {
             guard room.stableKey == AgentRoomsTestChatPersistence.stableRoomKey,
@@ -583,12 +708,23 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         let orderedBindings = orderedSessionBindings(bindings)
         let bindingByID = Dictionary(uniqueKeysWithValues: bindings.map { ($0.id, $0) })
         var latestAttemptByClient: [String: ConversationTurn] = [:]
+        var participantAttributionByClientMessageID: [String: ConversationParticipantRunAttribution] = [:]
         for turn in turns {
             if let clientID = turn.metadata["client_message_id"] {
                 latestAttemptByClient[clientID] = turn
+                if let encoded = turn.metadata[AgentRoomsParticipantService.runAttributionMetadataKey] {
+                    guard let attribution = DatabaseHelpers.decodeJSON(
+                        ConversationParticipantRunAttribution.self,
+                        from: encoded
+                    ) else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+                    participantAttributionByClientMessageID[clientID] = attribution
+                }
             }
         }
-        let presentationMessages = messages.compactMap { message -> AgentRoomMessage? in
+        let participantNames = try repository.participantRoster(roomID: room.id).map { roster in
+            Dictionary(uniqueKeysWithValues: roster.members.map { ($0.id, $0.profile.displayName) })
+        } ?? [:]
+        let presentationMessages = try messages.compactMap { message -> AgentRoomMessage? in
             switch message.role.lowercased() {
             case "user":
                 let clientID = message.source?.namespace == Self.clientSourceNamespace
@@ -606,10 +742,20 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
                     canRetry: failed && !accepted
                 )
             case "assistant":
+                let participantName: String?
+                if let encoded = message.metadata[AgentRoomsParticipantService.messageAttributionMetadataKey] {
+                    guard let attribution = DatabaseHelpers.decodeJSON(
+                        ConversationParticipantMessageAttribution.self,
+                        from: encoded
+                    ) else { throw AgentRoomsConversationPersistenceError.corruptHistory }
+                    participantName = attribution.participantID.flatMap { participantNames[$0] }
+                } else {
+                    participantName = nil
+                }
                 return AgentRoomMessage(
                     id: message.id.uuidString,
                     role: .agent,
-                    author: "Hermes",
+                    author: participantName ?? "Hermes",
                     body: message.contentText
                 )
             default:
@@ -691,7 +837,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             ),
             latestGeneratedArtifacts: try decodeGeneratedArtifacts(
                 latestTurn?.metadata["generated_artifacts_json"]
-            )
+            ),
+            participantAttributionByClientMessageID: participantAttributionByClientMessageID
         )
     }
 
@@ -873,7 +1020,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         attemptID: UUID,
         clientMessageID: String,
         runID: String?,
-        activity: [AgentRoomsLiveActivity]
+        activity: [AgentRoomsLiveActivity],
+        attribution: ConversationParticipantRunAttribution? = nil
     ) -> [String: String] {
         var metadata = [
             "authority": Self.attemptAuthority,
@@ -883,6 +1031,31 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             "activity_json": encodeActivity(activity),
         ]
         if let runID { metadata["run_id"] = runID }
+        if let attribution,
+           let encoded = DatabaseHelpers.encodeJSON(attribution) {
+            metadata[AgentRoomsParticipantService.runAttributionMetadataKey] = encoded
+            let participantActivity = activity.prefix(
+                ConversationParticipantInvocationLimits.checkpoint.maximumUpdatesPerParticipant
+            ).enumerated().map { index, update in
+                let kind: ConversationParticipantActivityKind
+                switch update.kind {
+                case .reasoning: kind = .work
+                case .toolStarted, .toolCompleted: kind = .tool
+                }
+                return ConversationParticipantActivity(
+                    id: UUID(),
+                    invocationID: attribution.invocationID,
+                    runID: attribution.runID,
+                    participantID: attribution.participantID,
+                    sequence: index + 1,
+                    kind: kind,
+                    summary: AgentRoomsActivityPresentation.project(update).summary
+                )
+            }
+            if let activityJSON = DatabaseHelpers.encodeJSON(participantActivity) {
+                metadata[AgentRoomsParticipantService.activityMetadataKey] = activityJSON
+            }
+        }
         return metadata
     }
 
@@ -907,7 +1080,8 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
             attemptID: attempt.turnID,
             clientMessageID: attempt.clientMessageID,
             runID: runID,
-            activity: activity
+            activity: activity,
+            attribution: attempt.participantAttribution
         )
         metadata["model_identity"] = modelIdentity
         metadata["cider_references_json"] = encodeReferences(references)
@@ -936,16 +1110,37 @@ final class AgentRoomsConversationPersistence: AgentRoomsConversationPersisting 
         runID: String,
         sessionID: String,
         modelIdentity: String,
-        transportTimestamp: Date
+        transportTimestamp: Date,
+        attribution: ConversationParticipantRunAttribution?
     ) -> [String: String] {
-        [
+        participantMessageMetadata(base: [
             "authority": Self.attemptAuthority,
             "schema_version": Self.schemaVersion,
             "run_id": runID,
             "session_id": sessionID,
             "model_identity": modelIdentity,
             "transport_timestamp": String(transportTimestamp.timeIntervalSince1970),
-        ]
+        ], invocationID: attribution?.invocationID, attribution: attribution)
+    }
+
+    private func participantMessageMetadata(
+        base: [String: String],
+        invocationID: UUID?,
+        attribution: ConversationParticipantRunAttribution?
+    ) -> [String: String] {
+        guard let invocationID else { return base }
+        var metadata = base
+        let messageAttribution = ConversationParticipantMessageAttribution(
+            invocationID: invocationID,
+            runID: attribution?.runID,
+            participantID: attribution?.participantID,
+            profileID: attribution?.profileID,
+            participantRole: attribution?.participantRole
+        )
+        if let encoded = DatabaseHelpers.encodeJSON(messageAttribution) {
+            metadata[AgentRoomsParticipantService.messageAttributionMetadataKey] = encoded
+        }
+        return metadata
     }
 
     private struct PersistedActivity: Codable {

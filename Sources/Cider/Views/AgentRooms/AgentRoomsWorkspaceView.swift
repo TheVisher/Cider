@@ -21,6 +21,7 @@ struct AgentRoomsWorkspaceView: View {
     @State private var renameRoom: AgentRoom?
     @State private var renameText = ""
     @State private var actionError: String?
+    @State private var invokedParticipantByRoom: [String: UUID] = [:]
     @FocusState private var focusedRegion: FocusRegion?
 
     private enum FocusRegion: Hashable {
@@ -829,6 +830,12 @@ struct AgentRoomsWorkspaceView: View {
                         liveActivityView
                     }
 
+                    if let activity = room.participantActivity,
+                       liveChat.liveActivity.isEmpty,
+                       room.transcript.receipt?.activity.isEmpty != false {
+                        participantActivityView(activity, roster: room.participantRoster)
+                    }
+
                     if let link = room.transcript.link {
                         projectLinkChip(link)
                     }
@@ -905,7 +912,8 @@ struct AgentRoomsWorkspaceView: View {
     }
 
     private var liveActivityView: some View {
-        DisclosureGroup {
+        let participantName = liveChat.activeInvocationParticipantDisplayName ?? activeAgentDisplayName
+        return DisclosureGroup {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 ForEach(liveChat.liveActivity) { activity in
                     receiptActivityRow(activity)
@@ -914,14 +922,14 @@ struct AgentRoomsWorkspaceView: View {
             .padding(.top, Spacing.xs)
         } label: {
             Label(
-                "Hermes is working · \(liveChat.liveActivity.count) update\(liveChat.liveActivity.count == 1 ? "" : "s")",
+                "\(participantName) is working · \(liveChat.liveActivity.count) update\(liveChat.liveActivity.count == 1 ? "" : "s")",
                 systemImage: "sparkles"
             )
             .font(CiderFont.captionMedium)
             .foregroundColor(CiderColors.secondary)
         }
         .tint(CiderColors.secondary)
-        .accessibilityLabel("Hermes live activity, \(liveChat.liveActivity.count) updates, collapsed by default")
+        .accessibilityLabel("\(participantName) live activity, \(liveChat.liveActivity.count) updates, collapsed by default")
     }
 
     private func transcriptHeading(_ room: AgentRoom, authority: AgentRoomsWorkspaceAuthority) -> some View {
@@ -971,6 +979,7 @@ struct AgentRoomsWorkspaceView: View {
                 ? "\(room.transcript.runtimeLabel) runtime, live continuation"
                 : "\(room.transcript.runtimeLabel) runtime, \(presentation.transcriptAccessibility)")
             actingAgentControl(room)
+            participantRosterControl(room)
         }
     }
 
@@ -1021,6 +1030,97 @@ struct AgentRoomsWorkspaceView: View {
                     ? CiderColors.destructive
                     : CiderColors.tertiary)
         }
+    }
+
+    @ViewBuilder
+    private func participantRosterControl(_ room: AgentRoom) -> some View {
+        if let roster = room.participantRoster {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(roster.members) { participant in
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                Text(participant.displayName)
+                                    .font(CiderFont.captionMedium)
+                                    .foregroundColor(CiderColors.secondary)
+                                Text(participantRoleLabel(participant.role))
+                                    .font(CiderFont.micro)
+                                    .foregroundColor(CiderColors.tertiary)
+                            }
+                            Spacer(minLength: Spacing.sm)
+                            if invokedParticipantByRoom[room.id] == participant.id {
+                                Text("Next")
+                                    .font(CiderFont.microMedium)
+                                    .foregroundColor(CiderColors.controlAccent)
+                            }
+                            Button(participant.available ? "Invoke next" : "Select unavailable") {
+                                invokedParticipantByRoom[room.id] = participant.id
+                            }
+                            .buttonStyle(.link)
+                            .disabled(room.continuity != .liveContinuation)
+                            .accessibilityLabel(
+                                "Invoke \(participant.displayName) for the next turn, \(participant.available ? "available" : "unavailable")"
+                            )
+                        }
+                        if let reason = participant.unavailableReason {
+                            Text(reason)
+                                .font(CiderFont.micro)
+                                .foregroundColor(CiderColors.destructive)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .padding(.top, Spacing.xs)
+            } label: {
+                Text("\(roster.members.count) participant\(roster.members.count == 1 ? "" : "s") · \(roster.availableCount) available")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+            }
+            .tint(CiderColors.secondary)
+            .accessibilityLabel(
+                "Room participant roster, \(roster.members.count) participants, \(roster.availableCount) available, collapsed by default"
+            )
+        }
+    }
+
+    private func participantRoleLabel(_ role: ConversationRoomParticipantRole) -> String {
+        switch role {
+        case .actingAgent: "Acting agent"
+        case .advisor: "Advisor"
+        case .delegate: "Delegate"
+        }
+    }
+
+    private func participantActivityView(
+        _ activity: AgentRoomParticipantActivitySummary,
+        roster: AgentRoomParticipantRoster?
+    ) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(activity.updates) { update in
+                    let participant = roster?.members.first(where: { $0.id == update.participantID })
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text(participant?.displayName ?? "Participant")
+                            .font(CiderFont.microMedium)
+                            .foregroundColor(CiderColors.tertiary)
+                        Text(update.summary)
+                            .font(CiderFont.caption)
+                            .foregroundColor(CiderColors.secondary)
+                            .lineLimit(2)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(.top, Spacing.xs)
+        } label: {
+            Text("\(activity.participantCount) agent\(activity.participantCount == 1 ? "" : "s") · \(activity.updateCount) update\(activity.updateCount == 1 ? "" : "s") · \(activity.status.rawValue.capitalized)")
+                .font(CiderFont.captionMedium)
+                .foregroundColor(CiderColors.secondary)
+        }
+        .tint(CiderColors.secondary)
+        .accessibilityLabel(
+            "Participant activity, \(activity.participantCount) agents, \(activity.updateCount) updates, \(activity.status.rawValue), collapsed by default"
+        )
     }
 
     private var authorityPresentation: AuthorityPresentation {
@@ -1694,10 +1794,12 @@ struct AgentRoomsWorkspaceView: View {
                     .accessibilityLabel("Cancel Hermes response")
                 }
 
-                Button("Send") { submitComposer(roomID: roomID) }
+                Button(invokedParticipantByRoom[roomID] == nil ? "Send" : "Invoke") {
+                    submitComposer(roomID: roomID)
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(!enabled || !validDraft)
-                    .accessibilityLabel("Send message to \(activeAgentDisplayName)")
+                    .accessibilityLabel(composerActionAccessibilityLabel(roomID: roomID))
             }
             Text("Return sends · Shift-Return adds a line · \(composerText.count)/\(AgentRoomsLiveChatModel.maximumMessageLength)")
                 .font(CiderFont.micro)
@@ -1722,10 +1824,25 @@ struct AgentRoomsWorkspaceView: View {
             ?? "Hermes"
     }
 
+    private func composerActionAccessibilityLabel(roomID: String) -> String {
+        guard let participantID = invokedParticipantByRoom[roomID],
+              let participant = liveChat.activeRoom?.participantRoster?.members.first(where: {
+                  $0.id == participantID
+              })
+        else { return "Send message to \(activeAgentDisplayName)" }
+        return "Explicitly invoke \(participant.displayName) for this turn"
+    }
+
     private func submitComposer(roomID: String) {
         let text = composerText
-        guard liveChat.startSubmission(text, selectedRoomID: roomID) == .accepted else { return }
+        let participantIDs = invokedParticipantByRoom[roomID].map { [$0] } ?? []
+        guard liveChat.startSubmission(
+            text,
+            selectedRoomID: roomID,
+            invokedParticipantIDs: participantIDs
+        ) == .accepted else { return }
         composerText = ""
+        invokedParticipantByRoom.removeValue(forKey: roomID)
     }
 
     @MainActor

@@ -78,6 +78,28 @@ struct AgentRoomActingAgent: Equatable, Sendable {
     let unavailableReason: String?
 }
 
+struct AgentRoomParticipant: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let profileID: String
+    let displayName: String
+    let role: ConversationRoomParticipantRole
+    let available: Bool
+    let unavailableReason: String?
+}
+
+struct AgentRoomParticipantRoster: Equatable, Sendable {
+    let members: [AgentRoomParticipant]
+
+    var availableCount: Int { members.filter(\.available).count }
+}
+
+struct AgentRoomParticipantActivitySummary: Equatable, Sendable {
+    let participantCount: Int
+    let updateCount: Int
+    let status: ConversationParticipantRunStatus
+    let updates: [ConversationParticipantActivity]
+}
+
 struct AgentRoom: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
@@ -86,6 +108,8 @@ struct AgentRoom: Identifiable, Equatable, Sendable {
     let relativeTime: String
     let transcript: AgentRoomTranscript
     var actingAgent: AgentRoomActingAgent? = nil
+    var participantRoster: AgentRoomParticipantRoster? = nil
+    var participantActivity: AgentRoomParticipantActivitySummary? = nil
     var messageLimitNotice: String? = nil
     var continuity: AgentRoomContinuity = .historicalReplay
     var lifecycleState: ConversationRoomLifecycle = .active

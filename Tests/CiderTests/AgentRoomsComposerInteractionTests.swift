@@ -4,6 +4,26 @@ import XCTest
 @testable import Cider
 
 final class AgentRoomsComposerInteractionTests: XCTestCase {
+    func testParticipantRosterAndActivityControlsStayCollapsedAndAccessible() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "Sources/Cider/Views/AgentRooms/AgentRoomsWorkspaceView.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("Room participant roster"))
+        XCTAssertTrue(source.contains("collapsed by default"))
+        XCTAssertTrue(source.contains("Participant activity"))
+        XCTAssertTrue(source.contains("Explicitly invoke"))
+        XCTAssertTrue(source.contains("invokedParticipantIDs: participantIDs"))
+        XCTAssertTrue(source.contains(".lineLimit(2)"))
+    }
+
     @MainActor
     func testComposerDraftSurvivesHostedWorkspaceReconstruction() async throws {
         let model = AgentRoomsLiveChatModel(
