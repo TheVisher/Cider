@@ -250,6 +250,212 @@ struct JournalIntelligenceDailyReceiptTests {
         }
     }
 
+    @Test("Journal day review composes the production receipt into friendly source-backed groups")
+    func journalDayReviewComposesProductionReceipt() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        try seedCanonicalReconciliationRecords(in: fixture.database)
+
+        let receipt = try JournalIntelligenceDailyReceiptService(database: fixture.database)
+            .receipt(date: JournalIntelligenceCorpus.date)
+        let note = Note(
+            id: fixture.noteID,
+            title: "Daily Journal \(JournalIntelligenceCorpus.date)",
+            content: JournalIntelligenceCorpus.journalMarkdown,
+            createdAt: Date(timeIntervalSince1970: 1_784_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_784_000_000),
+            relativePath: "Inbox/Notes/Daily Journal \(JournalIntelligenceCorpus.date).md"
+        )
+        let day = try #require(JournalLibraryReadModel.build(from: [note]).defaultDay)
+
+        let model = JournalIntelligenceDayReviewModel.make(receipt: receipt, day: day)
+
+        #expect(model.statement == "Cider found 9 things worth reviewing.")
+        #expect(model.health == .ready)
+        #expect(model.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(model.truthBoundaryCopy.localizedCaseInsensitiveContains("not accepted Cider truth"))
+        #expect(model.groups.map(\.category) == JournalIntelligenceCategory.allCases)
+        #expect(model.groups.map(\.label) == [
+            "People updates", "Places", "Activities", "Preferences", "Commitments",
+            "Tasks", "Artifacts & media", "Trip plans", "Memories",
+        ])
+
+        let proposals = model.groups.flatMap(\.proposals)
+        #expect(proposals.count == 9)
+        #expect(Set(proposals.map(\.candidateRef)).count == proposals.count)
+        #expect(proposals.allSatisfy { $0.truthBoundary == "reviewable_candidate_not_truth" })
+        #expect(proposals.allSatisfy { $0.statusLabel == "Suggestion, not accepted truth" })
+        #expect(proposals.allSatisfy { !$0.source.quote.isEmpty })
+        #expect(proposals.allSatisfy { $0.source.spanEnd > $0.source.spanStart })
+        #expect(proposals.allSatisfy { $0.source.coordinateSpace == "capture_event.source_text" })
+        #expect(proposals.allSatisfy { $0.sourceNavigation.captureCardID == $0.sectionID })
+        #expect(proposals.allSatisfy { $0.sourceNavigation.precision == .exactCaptureMoment })
+        #expect(proposals.contains { $0.source.typeLabel == "Text capture" && $0.source.channelLabel == "Cider CLI text" })
+        #expect(proposals.contains { $0.source.typeLabel == "Voice transcript" && $0.source.channelLabel == "Voice Transcript" })
+
+        let reconciliationLabels = Set(proposals.map(\.reconciliation.label))
+        #expect(reconciliationLabels.contains("Likely repeated mention"))
+        #expect(reconciliationLabels.contains("Likely new update"))
+        #expect(reconciliationLabels.contains("Possible correction or conflict"))
+        #expect(reconciliationLabels.contains("No likely existing match"))
+        #expect(reconciliationLabels.contains("Not compared yet"))
+        #expect(proposals.allSatisfy { !$0.reconciliation.explanation.isEmpty })
+
+        var suppressedReceipt = receipt
+        suppressedReceipt.groups = []
+        suppressedReceipt.proposalCount = 0
+        #expect(JournalIntelligenceDayReviewModel.make(receipt: suppressedReceipt, day: day).health == .suppressed)
+
+        var emptyReceipt = suppressedReceipt
+        emptyReceipt.suppressedCount = 0
+        emptyReceipt.suppressions = []
+        #expect(JournalIntelligenceDayReviewModel.make(receipt: emptyReceipt, day: day).health == .empty)
+
+        var unavailableReceipt = receipt
+        unavailableReceipt.journalOwners = []
+        #expect(JournalIntelligenceDayReviewModel.make(receipt: unavailableReceipt, day: day).health == .unavailable)
+
+        var staleReceipt = receipt
+        staleReceipt.dataAsOf = .distantPast
+        let staleModel = JournalIntelligenceDayReviewModel.make(receipt: staleReceipt, day: day)
+        #expect(staleModel.health == .stale)
+        #expect(staleModel.groups.flatMap(\.proposals).contains { $0.reconciliation.label == "Novelty not confirmed" })
+
+        var partialReceipt = receipt
+        let partialIndex = try #require(partialReceipt.groups.firstIndex { $0.category == .places })
+        partialReceipt.groups[partialIndex].proposals[0].crossTimeReconciliation = reconciliation(
+            status: .classificationWithheld,
+            classification: nil,
+            truncated: true
+        )
+        let partialModel = JournalIntelligenceDayReviewModel.make(receipt: partialReceipt, day: day)
+        #expect(partialModel.health == .partial)
+        #expect(partialModel.groups.flatMap(\.proposals).contains { $0.reconciliation.label == "Comparison incomplete" })
+
+        let legacyNote = Note(
+            id: UUID(),
+            title: "Daily Journal \(JournalIntelligenceCorpus.date)",
+            content: "Legacy source note",
+            createdAt: note.createdAt.addingTimeInterval(1),
+            modifiedAt: note.modifiedAt.addingTimeInterval(1),
+            relativePath: "Inbox/Notes/Legacy source.md"
+        )
+        let aggregateDay = try #require(JournalLibraryReadModel.build(from: [note, legacyNote]).defaultDay)
+        let aggregateModel = JournalIntelligenceDayReviewModel.make(receipt: receipt, day: aggregateDay)
+        #expect(aggregateModel.groups.flatMap(\.proposals).allSatisfy {
+            $0.sourceNavigation.precision == .sourceEntry
+                && $0.sourceNavigation.boundaryCopy.localizedCaseInsensitiveContains("legacy")
+        })
+
+        var evidenceOnlyReceipt = receipt
+        for groupIndex in evidenceOnlyReceipt.groups.indices {
+            for proposalIndex in evidenceOnlyReceipt.groups[groupIndex].proposals.indices {
+                evidenceOnlyReceipt.groups[groupIndex].proposals[proposalIndex].journalOwner.id = "missing-owner"
+            }
+        }
+        let evidenceOnlyModel = JournalIntelligenceDayReviewModel.make(receipt: evidenceOnlyReceipt, day: day)
+        #expect(evidenceOnlyModel.groups.flatMap(\.proposals).allSatisfy {
+            $0.sourceNavigation.precision == .evidenceOnly
+                && $0.sourceNavigation.captureCardID == nil
+                && $0.sourceNavigation.boundaryCopy.localizedCaseInsensitiveContains("not available")
+        })
+    }
+
+    @Test("Journal review copy fails closed for every reconciliation and receipt health state")
+    func journalReviewCopyFailsClosedForEveryState() throws {
+        let matched = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .matched, classification: nil),
+            receiptIsStale: false
+        )
+        #expect(matched.label == "Likely existing match")
+
+        let repeated = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .matched, classification: .repeated),
+            receiptIsStale: false
+        )
+        #expect(repeated.label == "Likely repeated mention")
+
+        let update = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .matched, classification: .newUpdate),
+            receiptIsStale: false
+        )
+        #expect(update.label == "Likely new update")
+
+        let conflict = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .matched, classification: .correctionOrConflict),
+            receiptIsStale: false
+        )
+        #expect(conflict.label == "Possible correction or conflict")
+
+        let new = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .noMatch, classification: .genuinelyNew),
+            receiptIsStale: false
+        )
+        #expect(new.label == "No likely existing match")
+
+        let ambiguous = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .ambiguous, classification: nil),
+            receiptIsStale: false
+        )
+        #expect(ambiguous.label == "Several possible matches")
+        #expect(ambiguous.explanation.localizedCaseInsensitiveContains("not choose"))
+
+        let unsupported = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .unsupported, classification: nil),
+            receiptIsStale: false
+        )
+        #expect(unsupported.label == "Not compared yet")
+
+        let partial = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .classificationWithheld, classification: nil, truncated: true),
+            receiptIsStale: false
+        )
+        #expect(partial.label == "Comparison incomplete")
+        #expect(partial.explanation.localizedCaseInsensitiveContains("not claim"))
+
+        let staleNovelty = JournalIntelligenceReviewReconciliation.make(
+            reconciliation: reconciliation(status: .noMatch, classification: .genuinelyNew),
+            receiptIsStale: true
+        )
+        #expect(staleNovelty.label == "Novelty not confirmed")
+        #expect(staleNovelty.explanation.localizedCaseInsensitiveContains("not claiming"))
+
+        #expect(JournalIntelligenceDayReviewHealth.loading.message.localizedCaseInsensitiveContains("checking"))
+        #expect(JournalIntelligenceDayReviewHealth.empty.message.localizedCaseInsensitiveContains("nothing"))
+        #expect(JournalIntelligenceDayReviewHealth.suppressed.message.localizedCaseInsensitiveContains("held back"))
+        #expect(JournalIntelligenceDayReviewHealth.partial.message.localizedCaseInsensitiveContains("partial"))
+        #expect(JournalIntelligenceDayReviewHealth.stale.message.localizedCaseInsensitiveContains("stale"))
+        #expect(JournalIntelligenceDayReviewHealth.unavailable.message.localizedCaseInsensitiveContains("unavailable"))
+    }
+
+    private func reconciliation(
+        status: JournalIntelligenceReconciliationStatus,
+        classification: JournalIntelligenceReconciliationClassification?,
+        truncated: Bool = false
+    ) -> JournalIntelligenceCrossTimeReconciliation {
+        JournalIntelligenceCrossTimeReconciliation(
+            status: status,
+            classification: classification,
+            likelyMatches: [],
+            reasonCodes: truncated ? ["canonical_scan_truncated", "classification_withheld"] : [],
+            explanation: status == .ambiguous
+                ? "Several canonical records could match, so Cider will not choose one."
+                : "Production-shaped reconciliation explanation.",
+            comparedCanonicalKinds: [],
+            canonicalFamilyScans: truncated ? [
+                JournalIntelligenceCanonicalFamilyScan(
+                    family: "owner_labels",
+                    limit: 800,
+                    loadedCount: 800,
+                    complete: false,
+                    truncated: true
+                ),
+            ] : [],
+            maxLikelyMatches: 3,
+            safeNextCommands: []
+        )
+    }
+
     private struct Fixture {
         var database: CiderDatabase
         var databaseURL: URL

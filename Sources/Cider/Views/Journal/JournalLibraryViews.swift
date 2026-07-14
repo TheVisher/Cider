@@ -66,6 +66,9 @@ struct JournalDetailContentView: View {
     let isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
     let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     @State private var isEditingSource = false
+    @State private var intelligenceState: JournalIntelligenceDayReviewLoadState = .loading
+    @State private var isIntelligenceExpanded = false
+    @State private var intelligenceReloadToken = 0
 
     private var selectedDay: JournalLibraryDay? {
         if let selectedEntryID {
@@ -97,12 +100,26 @@ struct JournalDetailContentView: View {
                 if !selectedDay.captureCards.isEmpty, !isEditingSource {
                     JournalCaptureCardsView(
                         day: selectedDay,
+                        intelligenceState: intelligenceState,
+                        isIntelligenceExpanded: $isIntelligenceExpanded,
+                        onReloadIntelligence: { intelligenceReloadToken += 1 },
                         isCanonicalItemResolvable: isCanonicalItemResolvable,
                         onOpenCanonicalItem: onOpenCanonicalItem,
                         onEditSource: selectedDay.editableEntry == nil ? nil : { isEditingSource = true }
                     )
                 } else {
-                    InlineNoteEditorView(viewModel: notesViewModel)
+                    VStack(alignment: .leading, spacing: 0) {
+                        if !isEditingSource {
+                            JournalIntelligenceDayReviewView(
+                                state: intelligenceState,
+                                isExpanded: $isIntelligenceExpanded,
+                                onReload: { intelligenceReloadToken += 1 },
+                                onOpenSource: { _ in }
+                            )
+                            .padding(Spacing.md)
+                        }
+                        InlineNoteEditorView(viewModel: notesViewModel)
+                    }
                 }
             } else {
                 EmptyStateView(icon: "book.closed", title: "No journal entries")
@@ -116,9 +133,37 @@ struct JournalDetailContentView: View {
         }
         .onChange(of: selectedEntryID) { _, _ in
             isEditingSource = false
+            isIntelligenceExpanded = false
             selectJournalNoteIfNeeded()
         }
         .onChange(of: projection.days) { _, _ in selectJournalNoteIfNeeded() }
+        .task(id: intelligenceLoadID) {
+            await loadJournalIntelligence()
+        }
+    }
+
+    private var intelligenceLoadID: String {
+        guard let selectedDay else { return "journal-review-none-\(intelligenceReloadToken)" }
+        let latestUpdate = selectedDay.sourceEntries.map(\.note.modifiedAt.timeIntervalSince1970).max() ?? 0
+        return "\(selectedDay.id)-\(latestUpdate)-\(intelligenceReloadToken)"
+    }
+
+    @MainActor
+    private func loadJournalIntelligence() async {
+        intelligenceState = .loading
+        await Task.yield()
+        guard !Task.isCancelled, let day = selectedDay else {
+            intelligenceState = .unavailable(JournalIntelligenceDayReviewHealth.unavailable.message)
+            return
+        }
+        do {
+            let review = try JournalIntelligenceDayReviewService().review(for: day)
+            guard !Task.isCancelled, selectedDay?.id == day.id else { return }
+            intelligenceState = .ready(review)
+        } catch {
+            guard !Task.isCancelled else { return }
+            intelligenceState = .unavailable(JournalIntelligenceDayReviewHealth.unavailable.message)
+        }
     }
 
     private func selectJournalNoteIfNeeded() {
@@ -143,6 +188,9 @@ struct JournalDetailContentView: View {
 
 private struct JournalCaptureCardsView: View {
     let day: JournalLibraryDay
+    let intelligenceState: JournalIntelligenceDayReviewLoadState
+    @Binding var isIntelligenceExpanded: Bool
+    let onReloadIntelligence: () -> Void
     let isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
     let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     let onEditSource: (() -> Void)?
@@ -152,69 +200,79 @@ private struct JournalCaptureCardsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                if let onEditSource {
-                    HStack {
-                        Text("Capture cards are a read-only view of one physical note.")
-                            .font(CiderFont.captionMedium)
-                            .foregroundColor(CiderColors.tertiary)
-
-                        Spacer(minLength: Spacing.sm)
-
-                        Button("Edit source note", action: onEditSource)
-                            .buttonStyle(.bordered)
-                    }
-                }
-
-                ForEach(day.captureCards) { card in
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                            Text(card.displayTimestamp(format: timestampFormat))
-                                .font(CiderFont.bodySemibold)
-                                .foregroundColor(CiderColors.primary)
-
-                            Text(JournalLibraryReadModel.friendlyCaptureSourceLabel(for: card.captureSource))
-                                .font(CiderFont.captionMedium)
-                                .foregroundColor(CiderColors.secondary)
-
-                            Spacer(minLength: 0)
-                        }
-
-                        Text(card.sourceEntry.note.relativePath)
-                            .font(CiderFont.captionMonospacedMedium)
-                            .foregroundColor(CiderColors.tertiary)
-                            .textSelection(.enabled)
-
-                        MarkdownContentView(
-                            text: card.preparedMarkdown(
-                                timestampFormat: timestampFormat,
-                                isCanonicalItemResolvable: isCanonicalItemResolvable
-                            )
-                        )
-                        .environment(\.openURL, OpenURLAction { destination in
-                            switch JournalCaptureLink.target(
-                                for: destination,
-                                isCanonicalItemResolvable: isCanonicalItemResolvable
-                            ) {
-                            case .external(let url):
-                                openURLSafely(url)
-                                return .handled
-                            case .item(let ref):
-                                onOpenCanonicalItem(ref)
-                                return .handled
-                            case nil:
-                                return .discarded
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                    JournalIntelligenceDayReviewView(
+                        state: intelligenceState,
+                        isExpanded: $isIntelligenceExpanded,
+                        onReload: onReloadIntelligence,
+                        onOpenSource: { navigation in
+                            guard let captureCardID = navigation.captureCardID else { return }
+                            withAnimation(.snappy) {
+                                proxy.scrollTo(captureCardID, anchor: .center)
                             }
-                        })
+                        }
+                    )
+
+                    if let onEditSource {
+                        HStack {
+                            Text("Capture cards are a read-only view of one physical note.")
+                                .font(CiderFont.captionMedium)
+                                .foregroundColor(CiderColors.tertiary)
+
+                            Spacer(minLength: Spacing.sm)
+
+                            Button("Edit source note", action: onEditSource)
+                                .buttonStyle(.bordered)
+                        }
                     }
-                    .padding(Spacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(CiderColors.surfaceInput)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+
+                    ForEach(day.captureCards) { card in
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                                Text(card.displayTimestamp(format: timestampFormat))
+                                    .font(CiderFont.bodySemibold)
+                                    .foregroundColor(CiderColors.primary)
+
+                                Text(JournalLibraryReadModel.friendlyCaptureSourceLabel(for: card.captureSource))
+                                    .font(CiderFont.captionMedium)
+                                    .foregroundColor(CiderColors.secondary)
+
+                                Spacer(minLength: 0)
+                            }
+
+                            MarkdownContentView(
+                                text: card.preparedMarkdown(
+                                    timestampFormat: timestampFormat,
+                                    isCanonicalItemResolvable: isCanonicalItemResolvable
+                                )
+                            )
+                            .environment(\.openURL, OpenURLAction { destination in
+                                switch JournalCaptureLink.target(
+                                    for: destination,
+                                    isCanonicalItemResolvable: isCanonicalItemResolvable
+                                ) {
+                                case .external(let url):
+                                    openURLSafely(url)
+                                    return .handled
+                                case .item(let ref):
+                                    onOpenCanonicalItem(ref)
+                                    return .handled
+                                case nil:
+                                    return .discarded
+                                }
+                            })
+                        }
+                        .padding(Spacing.md)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(CiderColors.surfaceInput)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                        .id(card.id)
+                    }
                 }
+                .padding(Spacing.md)
             }
-            .padding(Spacing.md)
         }
     }
 }

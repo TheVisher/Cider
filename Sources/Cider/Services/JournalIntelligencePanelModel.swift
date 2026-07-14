@@ -82,6 +82,392 @@ struct JournalIntelligenceMissingOpportunity: Equatable, Identifiable {
     var safeNextCommand: String
 }
 
+enum JournalIntelligenceDayReviewHealth: Equatable {
+    case loading
+    case ready
+    case empty
+    case suppressed
+    case partial
+    case stale
+    case unavailable
+
+    var message: String {
+        switch self {
+        case .loading:
+            return "Checking this Journal day for source-backed suggestions…"
+        case .ready:
+            return "Suggestions are ready to review. Nothing here is accepted Cider truth."
+        case .empty:
+            return "Nothing is ready for review from this Journal day."
+        case .suppressed:
+            return "Cider held back uncertain suggestions instead of presenting them as reliable."
+        case .partial:
+            return "The comparison was partial. Cider will not claim an item is new when the scan is incomplete."
+        case .stale:
+            return "Journal Review may be stale. Cider will not claim novelty until the source-backed scan catches up."
+        case .unavailable:
+            return "Journal Review is unavailable right now. Your Journal and Cider truth are unchanged."
+        }
+    }
+}
+
+enum JournalIntelligenceSourceNavigationPrecision: Equatable {
+    case exactCaptureMoment
+    case sourceEntry
+    case evidenceOnly
+}
+
+struct JournalIntelligenceSourceNavigation: Equatable {
+    var captureCardID: String?
+    var sectionID: String
+    var precision: JournalIntelligenceSourceNavigationPrecision
+    var actionLabel: String
+    var boundaryCopy: String
+}
+
+struct JournalIntelligenceReviewSource: Equatable {
+    var timestamp24Hour: String
+    var typeLabel: String
+    var channelLabel: String
+    var sourceKind: String
+    var coordinateSpace: String
+    var spanStart: Int
+    var spanEnd: Int
+    var quote: String
+}
+
+struct JournalIntelligenceReviewLikelyMatch: Equatable, Identifiable {
+    var id: String { canonicalRef }
+    var canonicalRef: String
+    var kindLabel: String
+    var label: String
+    var confidence: Double
+}
+
+struct JournalIntelligenceReviewReconciliation: Equatable {
+    var status: JournalIntelligenceReconciliationStatus?
+    var classification: JournalIntelligenceReconciliationClassification?
+    var label: String
+    var explanation: String
+    var likelyMatches: [JournalIntelligenceReviewLikelyMatch]
+    var isIncomplete: Bool
+
+    static func make(
+        reconciliation: JournalIntelligenceCrossTimeReconciliation?,
+        receiptIsStale: Bool
+    ) -> JournalIntelligenceReviewReconciliation {
+        guard let reconciliation else {
+            return JournalIntelligenceReviewReconciliation(
+                status: nil,
+                classification: nil,
+                label: "Comparison unavailable",
+                explanation: "Cider has not completed a bounded comparison for this suggestion, so it is not claiming a match or novelty.",
+                likelyMatches: [],
+                isIncomplete: true
+            )
+        }
+
+        let likelyMatches = reconciliation.likelyMatches.map {
+            JournalIntelligenceReviewLikelyMatch(
+                canonicalRef: $0.canonicalRef,
+                kindLabel: friendlyKind($0.canonicalKind),
+                label: $0.canonicalLabel,
+                confidence: $0.confidence
+            )
+        }
+        let scanIsIncomplete = reconciliation.canonicalFamilyScans.contains { $0.truncated || !$0.complete }
+
+        if receiptIsStale, reconciliation.classification == .genuinelyNew {
+            return JournalIntelligenceReviewReconciliation(
+                status: reconciliation.status,
+                classification: reconciliation.classification,
+                label: "Novelty not confirmed",
+                explanation: "This review may be stale, so Cider is not claiming this suggestion is genuinely new.",
+                likelyMatches: likelyMatches,
+                isIncomplete: true
+            )
+        }
+
+        let label: String
+        let explanation: String
+        switch reconciliation.status {
+        case .ambiguous:
+            label = "Several possible matches"
+            explanation = reconciliation.explanation
+        case .classificationWithheld:
+            label = "Comparison incomplete"
+            explanation = "The bounded comparison was partial, so Cider does not claim this suggestion is new. \(reconciliation.explanation)"
+        case .unsupported:
+            label = "Not compared yet"
+            explanation = reconciliation.explanation
+        case .matched:
+            switch reconciliation.classification {
+            case .repeated:
+                label = "Likely repeated mention"
+            case .newUpdate:
+                label = "Likely new update"
+            case .correctionOrConflict:
+                label = "Possible correction or conflict"
+            case .genuinelyNew:
+                label = "Possible new information"
+            case nil:
+                label = "Likely existing match"
+            }
+            explanation = reconciliation.explanation
+        case .noMatch:
+            if reconciliation.classification == .genuinelyNew, !scanIsIncomplete {
+                label = "No likely existing match"
+                explanation = reconciliation.explanation
+            } else {
+                label = "No match confirmed"
+                explanation = "Cider did not confirm a match, but it is not claiming novelty from an incomplete comparison. \(reconciliation.explanation)"
+            }
+        }
+
+        return JournalIntelligenceReviewReconciliation(
+            status: reconciliation.status,
+            classification: reconciliation.classification,
+            label: label,
+            explanation: explanation,
+            likelyMatches: likelyMatches,
+            isIncomplete: scanIsIncomplete || reconciliation.status == .classificationWithheld
+        )
+    }
+
+    private static func friendlyKind(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .localizedCapitalized
+    }
+}
+
+struct JournalIntelligenceReviewProposal: Equatable, Identifiable {
+    var id: String { candidateRef }
+    var candidateRef: String
+    var category: JournalIntelligenceCategory
+    var value: String
+    var candidateType: String
+    var confidenceReason: String
+    var reviewState: String
+    var truthBoundary: String
+    var statusLabel: String
+    var sectionID: String
+    var source: JournalIntelligenceReviewSource
+    var sourceNavigation: JournalIntelligenceSourceNavigation
+    var reconciliation: JournalIntelligenceReviewReconciliation
+}
+
+struct JournalIntelligenceReviewGroup: Equatable, Identifiable {
+    var id: String { category.rawValue }
+    var category: JournalIntelligenceCategory
+    var label: String
+    var proposals: [JournalIntelligenceReviewProposal]
+}
+
+struct JournalIntelligenceDayReviewModel: Equatable {
+    var date: String
+    var statement: String
+    var health: JournalIntelligenceDayReviewHealth
+    var healthMessage: String
+    var truthBoundary: String
+    var truthBoundaryCopy: String
+    var suppressedCount: Int
+    var groups: [JournalIntelligenceReviewGroup]
+
+    static func make(
+        receipt: JournalIntelligenceDailyReceipt,
+        day: JournalLibraryDay
+    ) -> JournalIntelligenceDayReviewModel {
+        let latestSourceUpdate = day.sourceEntries.map(\.note.modifiedAt).max()
+        let isStale = latestSourceUpdate.map { latest in
+            guard let dataAsOf = receipt.dataAsOf else { return true }
+            return dataAsOf < latest
+        } ?? false
+
+        var seenCandidateRefs = Set<String>()
+        let receiptProposals = Dictionary(
+            grouping: receipt.groups.flatMap(\.proposals),
+            by: \.category
+        )
+        let groups = JournalIntelligenceCategory.allCases.compactMap { category -> JournalIntelligenceReviewGroup? in
+            let proposals = (receiptProposals[category] ?? []).compactMap { proposal -> JournalIntelligenceReviewProposal? in
+                guard seenCandidateRefs.insert(proposal.candidateRef).inserted else { return nil }
+                return presentationProposal(proposal, day: day, receiptIsStale: isStale)
+            }
+            guard !proposals.isEmpty else { return nil }
+            return JournalIntelligenceReviewGroup(
+                category: category,
+                label: friendlyCategoryLabel(category),
+                proposals: proposals
+            )
+        }
+        let proposalCount = groups.reduce(0) { $0 + $1.proposals.count }
+        let isPartial = groups.flatMap(\.proposals).contains { $0.reconciliation.isIncomplete }
+        let health: JournalIntelligenceDayReviewHealth
+        if receipt.journalOwners.isEmpty, !day.sourceEntries.isEmpty {
+            health = .unavailable
+        } else if isStale {
+            health = .stale
+        } else if isPartial {
+            health = .partial
+        } else if proposalCount > 0 {
+            health = .ready
+        } else if receipt.suppressedCount > 0 {
+            health = .suppressed
+        } else {
+            health = .empty
+        }
+        let noun = proposalCount == 1 ? "thing" : "things"
+
+        return JournalIntelligenceDayReviewModel(
+            date: receipt.date,
+            statement: "Cider found \(proposalCount) \(noun) worth reviewing.",
+            health: health,
+            healthMessage: health.message,
+            truthBoundary: "reviewable_candidate_not_truth",
+            truthBoundaryCopy: "These are reviewable suggestions, not accepted Cider truth. Displaying them does not create, change, or approve anything.",
+            suppressedCount: receipt.suppressedCount,
+            groups: groups
+        )
+    }
+
+    private static func presentationProposal(
+        _ proposal: JournalIntelligenceProposal,
+        day: JournalLibraryDay,
+        receiptIsStale: Bool
+    ) -> JournalIntelligenceReviewProposal {
+        JournalIntelligenceReviewProposal(
+            candidateRef: proposal.candidateRef,
+            category: proposal.category,
+            value: proposal.value,
+            candidateType: friendlyCandidateType(proposal.candidateType),
+            confidenceReason: proposal.confidenceReason,
+            reviewState: proposal.reviewState,
+            truthBoundary: proposal.truthBoundary,
+            statusLabel: "Suggestion, not accepted truth",
+            sectionID: proposal.section.id,
+            source: JournalIntelligenceReviewSource(
+                timestamp24Hour: proposal.section.timestamp24Hour,
+                typeLabel: sourceTypeLabel(proposal.captureEvent),
+                channelLabel: sourceChannelLabel(proposal.captureEvent),
+                sourceKind: proposal.captureEvent.sourceKind,
+                coordinateSpace: proposal.source.coordinateSpace,
+                spanStart: proposal.source.spanStart,
+                spanEnd: proposal.source.spanEnd,
+                quote: proposal.source.quote
+            ),
+            sourceNavigation: sourceNavigation(for: proposal, day: day),
+            reconciliation: JournalIntelligenceReviewReconciliation.make(
+                reconciliation: proposal.crossTimeReconciliation,
+                receiptIsStale: receiptIsStale
+            )
+        )
+    }
+
+    private static func sourceNavigation(
+        for proposal: JournalIntelligenceProposal,
+        day: JournalLibraryDay
+    ) -> JournalIntelligenceSourceNavigation {
+        if let exactCard = day.captureCards.first(where: {
+            $0.id == proposal.section.id
+                && $0.sourceEntry.note.id.uuidString == proposal.journalOwner.id
+        }) {
+            return JournalIntelligenceSourceNavigation(
+                captureCardID: exactCard.id,
+                sectionID: proposal.section.id,
+                precision: .exactCaptureMoment,
+                actionLabel: "Show exact capture",
+                boundaryCopy: "Opens the exact timestamped capture in this Journal day."
+            )
+        }
+        if let sourceEntryCard = day.captureCards.first(where: {
+            $0.sourceEntry.note.id.uuidString == proposal.journalOwner.id
+        }) {
+            return JournalIntelligenceSourceNavigation(
+                captureCardID: sourceEntryCard.id,
+                sectionID: proposal.section.id,
+                precision: .sourceEntry,
+                actionLabel: "Show source entry",
+                boundaryCopy: "This legacy day can navigate to the preserved source entry, not a narrower capture card."
+            )
+        }
+        return JournalIntelligenceSourceNavigation(
+            captureCardID: nil,
+            sectionID: proposal.section.id,
+            precision: .evidenceOnly,
+            actionLabel: "Source shown here",
+            boundaryCopy: "Exact capture-card navigation is not available for this entry yet; the timestamp and exact source quote remain visible here."
+        )
+    }
+
+    private static func friendlyCategoryLabel(_ category: JournalIntelligenceCategory) -> String {
+        switch category {
+        case .people: return "People updates"
+        case .places: return "Places"
+        case .activities: return "Activities"
+        case .preferences: return "Preferences"
+        case .commitments: return "Commitments"
+        case .tasks: return "Tasks"
+        case .artifactsMedia: return "Artifacts & media"
+        case .tripPlans: return "Trip plans"
+        case .durableMemory: return "Memories"
+        }
+    }
+
+    private static func friendlyCandidateType(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .localizedCapitalized
+    }
+
+    private static func sourceTypeLabel(_ event: JournalIntelligenceCaptureEvent) -> String {
+        let raw = [event.inputKind, event.surface, event.channel, event.sourceKind]
+            .compactMap { $0?.localizedLowercase }
+            .joined(separator: " ")
+        if raw.contains("voice") || raw.contains("audio") { return "Voice transcript" }
+        if raw.contains("photo") || raw.contains("image") { return "Photo capture" }
+        if raw.contains("file") { return "File capture" }
+        if raw.contains("link") || raw.contains("url") { return "Link capture" }
+        return "Text capture"
+    }
+
+    private static func sourceChannelLabel(_ event: JournalIntelligenceCaptureEvent) -> String {
+        let raw = (event.channel ?? event.surface ?? event.sourceKind)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return "Cider" }
+        let normalized = raw.replacingOccurrences(of: "_", with: " ")
+        if normalized.localizedLowercase == "cider-cli text" { return "Cider CLI text" }
+        return normalized.split(separator: " ").map { word in
+            switch word.localizedLowercase {
+            case "cli": return "CLI"
+            case "ios": return "iOS"
+            case "macos": return "macOS"
+            default: return word.prefix(1).uppercased() + word.dropFirst().lowercased()
+            }
+        }.joined(separator: " ")
+    }
+}
+
+enum JournalIntelligenceDayReviewLoadState: Equatable {
+    case loading
+    case ready(JournalIntelligenceDayReviewModel)
+    case unavailable(String)
+}
+
+@MainActor
+final class JournalIntelligenceDayReviewService {
+    private let receiptService: JournalIntelligenceDailyReceiptService
+
+    init(database: CiderDatabase = .shared) {
+        receiptService = JournalIntelligenceDailyReceiptService(database: database)
+    }
+
+    func review(for day: JournalLibraryDay) throws -> JournalIntelligenceDayReviewModel {
+        let receipt = try receiptService.receipt(date: day.dateLabel)
+        return JournalIntelligenceDayReviewModel.make(receipt: receipt, day: day)
+    }
+}
+
 @MainActor
 final class JournalIntelligencePanelService {
     private let database: CiderDatabase
