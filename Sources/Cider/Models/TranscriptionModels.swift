@@ -135,8 +135,6 @@ struct TranscriptionProvenance: Equatable, Sendable {
 }
 
 struct TranscriptionTranscript: Equatable, Sendable {
-    static let maximumTextLength = 4_000
-
     let text: String
     let isFinal: Bool
     let provenance: TranscriptionProvenance
@@ -154,11 +152,10 @@ struct TranscriptionTranscript: Equatable, Sendable {
             }
             return String(scalar)
         }.joined()
-        return String(
-            safeScalars
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .prefix(maximumTextLength)
-        )
+        // The shared result must not inherit Chat's composer limit: stored-audio
+        // consumers need the complete derived transcript. Each presentation or
+        // persistence surface applies its own explicit bound when appropriate.
+        return safeScalars.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

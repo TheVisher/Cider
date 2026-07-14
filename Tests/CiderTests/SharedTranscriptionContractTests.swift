@@ -68,6 +68,30 @@ struct SharedTranscriptionContractTests {
         #expect(Mirror(reflecting: request.source).children.allSatisfy { $0.label != "fileURL" })
     }
 
+    @Test("shared stored transcripts are not silently truncated to the Chat composer limit")
+    func storedTranscriptPreservesContentBeyondChatLimit() {
+        let longTranscript = String(repeating: "voice journal words ", count: 400)
+        let service = DeterministicSharedTranscriptionService()
+        let transcript = TranscriptionTranscript(
+            text: longTranscript,
+            isFinal: true,
+            provenance: .init(
+                provider: service.provider,
+                source: .storedAudio(sourceID: "journal-audio:long", displayName: "Long Journal.m4a"),
+                locale: .init(identifier: "en_US"),
+                timing: .init(
+                    startedAt: Date(timeIntervalSince1970: 1),
+                    completedAt: Date(timeIntervalSince1970: 2),
+                    audioDuration: 600
+                )
+            )
+        )
+
+        #expect(transcript.text == longTranscript.trimmingCharacters(in: .whitespacesAndNewlines))
+        #expect(transcript.text.count > AgentRoomsSpeechDraft.maximumTranscriptLength)
+        #expect(AgentRoomsSpeechDraft.boundedTranscript(transcript.text).count == AgentRoomsSpeechDraft.maximumTranscriptLength)
+    }
+
     @Test("Apple is one on-device adapter for both inputs with no fallback or source mutation")
     func appleAdapterIsSharedAndFailClosed() throws {
         let service = CiderTranscriptionProviderSelection.makeDefault(locale: Locale(identifier: "en_US"))
