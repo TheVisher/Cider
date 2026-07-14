@@ -41,6 +41,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
             sentenceOutputs.append(contentsOf: visitedCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             sentenceOutputs.append(contentsOf: consumptionCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             sentenceOutputs.append(contentsOf: wantsCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
+            sentenceOutputs.append(contentsOf: journalIntelligenceIntentCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             sentenceOutputs.append(contentsOf: memoryCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             outputs.append(contentsOf: sentenceOutputs.map { output in
                 outputWithSourceSpan(output, start: sentence.start, end: sentence.end)
@@ -1546,6 +1547,163 @@ struct SecondBrainJournalGraphCandidateExtractor {
         return candidates.compactMap { $0 }
     }
 
+    /// Precision-first deterministic extraction for explicit Journal wording that
+    /// already has a canonical reviewable memory-candidate home. These patterns
+    /// intentionally stay narrow: uncertain, negated, corrected, or pronoun-only
+    /// wording is left as source context rather than promoted into review work.
+    private func journalIntelligenceIntentCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        let normalizedSentence = sentence
+            .replacingOccurrences(of: #"^[-•]\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isUnsafeJournalIntelligenceWording(normalizedSentence) else { return [] }
+
+        var candidates: [SecondBrainEnrichmentOutput?] = []
+
+        if let match = regexMatches(
+            pattern: #"^([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+started\s+a\s+new\s+job\s+at\s+([A-Z][A-Za-z0-9&'’.+-]*(?:\s+[A-Z][A-Za-z0-9&'’.+-]*){0,4})$"#,
+            in: normalizedSentence
+        ).first,
+           match.captures.count >= 2,
+           let person = trimmedNonEmpty(match.captures[0]),
+           let organization = trimmedNonEmpty(match.captures[1]),
+           !isVagueJournalIntelligenceValue(person),
+           !isVagueJournalIntelligenceValue(organization) {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "relationship_event",
+                value: "\(person) started a new job at \(organization).",
+                evidence: sentence,
+                confidence: 0.88,
+                memoryKey: "person-job-update-\(person.slugComponent)-\(organization.slugComponent)",
+                confidenceReason: "Journal sentence explicitly names a person and their new employer."
+            ))
+        }
+
+        if let match = regexMatches(
+            pattern: #"^I\s+promised\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){0,2})\s+(?:that\s+)?I\s+would\s+(.+)$"#,
+            in: normalizedSentence
+        ).first,
+           match.captures.count >= 2,
+           let person = trimmedNonEmpty(match.captures[0]),
+           let action = cleanedJournalIntelligenceValue(match.captures[1]),
+           !isVagueJournalIntelligenceValue(action) {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "commitment",
+                value: "Promise to \(person): \(action).",
+                evidence: sentence,
+                confidence: 0.9,
+                memoryKey: "commitment-\(person.slugComponent)-\(action.slugComponent)",
+                confidenceReason: "Journal sentence explicitly records a first-person promise, recipient, and action."
+            ))
+        }
+
+        if let match = regexMatches(
+            pattern: #"^(?:Remember\s+to|I\s+(?:need|must)\s+to)\s+(.+)$"#,
+            in: normalizedSentence
+        ).first,
+           let action = cleanedJournalIntelligenceValue(match.captures.first ?? nil),
+           !isVagueJournalIntelligenceValue(action) {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "task_intent",
+                value: action,
+                evidence: sentence,
+                confidence: 0.92,
+                memoryKey: "task-intent-\(action.slugComponent)",
+                confidenceReason: "Journal sentence uses explicit remember-to, need-to, or must-do wording with a concrete action."
+            ))
+        }
+
+        if let match = regexMatches(
+            pattern: #"^(?:We\s+are|I\s+am|We're|I'm)\s+planning\s+(?:a|the)\s+(.+\btrip\s+to\s+[A-Z][A-Za-z0-9'’.-]*(?:\s+[A-Z][A-Za-z0-9'’.-]*){0,3})$"#,
+            in: normalizedSentence
+        ).first,
+           let plan = cleanedJournalIntelligenceValue(match.captures.first ?? nil),
+           !isVagueJournalIntelligenceValue(plan) {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "trip_plan",
+                value: plan,
+                evidence: sentence,
+                confidence: 0.9,
+                memoryKey: "trip-plan-\(plan.slugComponent)",
+                confidenceReason: "Journal sentence explicitly states a trip plan and named destination."
+            ))
+        }
+
+        if let match = regexMatches(
+            pattern: #"^(?:Save|Attach|Keep)\s+(?:the\s+)?(.+?\b(?:PDF|photos?|images?|video|audio|recording|document|file|link|URL|itinerary))\s+(?:with|for|to)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9'’ -]{2,})$"#,
+            in: normalizedSentence
+        ).first,
+           match.captures.count >= 2,
+           let artifact = cleanedJournalIntelligenceValue(match.captures[0]),
+           let destination = cleanedJournalIntelligenceValue(match.captures[1]),
+           !isVagueJournalIntelligenceValue(artifact),
+           !isVagueJournalIntelligenceValue(destination) {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "artifact_intent",
+                value: "Save \(artifact) with \(destination).",
+                evidence: sentence,
+                confidence: 0.9,
+                memoryKey: "artifact-intent-\(artifact.slugComponent)-\(destination.slugComponent)",
+                confidenceReason: "Journal sentence explicitly names an artifact and its intended canonical context."
+            ))
+        }
+
+        if let match = regexMatches(
+            pattern: #"^Remember\s+that\s+(.+)$"#,
+            in: normalizedSentence
+        ).first,
+           let fact = cleanedJournalIntelligenceValue(match.captures.first ?? nil),
+           !isVagueJournalIntelligenceValue(fact),
+           fact.components(separatedBy: CharacterSet.alphanumerics.inverted).filter({ $0.count >= 3 }).count >= 4 {
+            candidates.append(makeMemoryCandidate(
+                sourceOwner: sourceOwner,
+                kind: "durable_memory",
+                value: fact,
+                evidence: sentence,
+                confidence: 0.9,
+                memoryKey: "durable-memory-\(fact.slugComponent)",
+                confidenceReason: "Journal sentence explicitly marks a concrete statement for durable recall."
+            ))
+        }
+
+        return candidates.compactMap { $0 }
+    }
+
+    private func isUnsafeJournalIntelligenceWording(_ sentence: String) -> Bool {
+        let lower = sentence.lowercased()
+        let uncertaintyMarkers = [
+            "maybe", "might", "perhaps", "not sure", "unclear", "possibly", "probably", "apparently", "seems like",
+        ]
+        if uncertaintyMarkers.contains(where: lower.contains) { return true }
+        if lower.hasPrefix("correction:") || lower.hasPrefix("actually,") || lower.hasPrefix("never mind") { return true }
+        return lower.range(
+            of: #"\b(?:not|never|don't|doesn't|didn't|won't|wouldn't|can't|cannot|no\s+longer)\b"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func cleanedJournalIntelligenceValue(_ raw: String?) -> String? {
+        guard let value = trimmedNonEmpty(raw) else { return nil }
+        return trimmedNonEmpty(value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)))
+    }
+
+    private func isVagueJournalIntelligenceValue(_ value: String) -> Bool {
+        let lower = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let vagueValues: Set<String> = [
+            "it", "this", "that", "them", "there", "something", "anything", "everything", "stuff", "things", "do it", "the thing", "that place",
+        ]
+        if vagueValues.contains(lower) { return true }
+        if lower.range(of: #"^(?:it|this|that|they|them|he|she|there)\b"#, options: .regularExpression) != nil { return true }
+        return lower.range(of: #"\b(?:it|something|anything)\s+(?:sometime|later|eventually)\b"#, options: .regularExpression) != nil
+    }
+
     private func makeCandidate(
         sourceOwner: SecondBrainOwnerRef,
         candidateKind: SecondBrainGraphCandidateContract.CandidateKind,
@@ -1630,7 +1788,8 @@ struct SecondBrainJournalGraphCandidateExtractor {
         value: String,
         evidence: String,
         confidence: Double,
-        memoryKey: String
+        memoryKey: String,
+        confidenceReason: String = "Journal text explicitly supports this reviewable memory candidate."
     ) -> SecondBrainEnrichmentOutput? {
         guard let value = trimmedNonEmpty(value),
               let evidence = trimmedNonEmpty(evidence) else { return nil }
@@ -1657,6 +1816,7 @@ struct SecondBrainJournalGraphCandidateExtractor {
                 "source_owner_ref": sourceOwner.canonicalRef,
                 "source_kind": "journal",
                 "source_quote": evidence,
+                "confidence_reason": confidenceReason,
             ]
         )
         output.metadata["candidate_ref"] = "memory_candidate:\(output.id)"

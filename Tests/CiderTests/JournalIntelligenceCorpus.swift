@@ -19,7 +19,7 @@ enum JournalIntelligenceCorpus {
             source: "cider-cli text",
             surface: "cli",
             text: """
-            Maya started a new job at Alder Labs. I went to Discovery Park. I loved the cedar loop hike. I promised Maya I would bring the trail map tomorrow. Remember to email the signed permit. I watched Arrival last night. Remember that hiking before work improves my mood.
+            Maya started a new job at Alder Labs. I went to Discovery Park. Dinner was tacos at home. I loved the cedar loop hike. I promised Maya I would bring the trail map tomorrow. Remember to email the signed permit. I watched Arrival last night. Remember that hiking before work improves my mood.
             """
         ),
         Capture(
@@ -41,6 +41,16 @@ enum JournalIntelligenceCorpus {
             """
         ),
     ]
+
+    static let precisionGuardText = """
+    Maya might have started a new job at Alder Labs, but I am not sure.
+    I did not promise Maya I would bring the trail map tomorrow.
+    Remember to maybe email it sometime.
+    Maybe we are planning a trip there, but the dates are unclear.
+    Do not save that with the trip.
+    Remember that it might improve things.
+    Correction: Maya did not start a new job at Alder Labs.
+    """
 
     static var journalMarkdown: String {
         (["# Daily Journal \(date)"] + captures.map { capture in

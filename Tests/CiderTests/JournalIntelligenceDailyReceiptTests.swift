@@ -31,6 +31,31 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(!correctionOutputs.contains { $0.value.localizedCaseInsensitiveContains("Red Barn") })
     }
 
+    @Test("production extractor fails closed for ambiguous negated corrected and vague intent wording")
+    func productionExtractorFailsClosedForGuardWording() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let outputs = SecondBrainJournalGraphCandidateExtractor().extract(
+            sourceOwner: owner,
+            rawContent: JournalIntelligenceCorpus.precisionGuardText,
+            date: JournalIntelligenceCorpus.date,
+            time: "20:15"
+        ).outputs
+
+        let guardedKinds = Set([
+            "relationship_event",
+            "commitment",
+            "task_intent",
+            "trip_plan",
+            "artifact_intent",
+            "durable_memory",
+        ])
+        #expect(outputs.filter { output in
+            guard output.kind == "memory_candidate" else { return false }
+            let kind = output.metadata["memory_kind"] ?? output.metadata["candidate_kind"] ?? ""
+            return guardedKinds.contains(kind)
+        }.isEmpty)
+    }
+
     @Test("daily receipt groups only precise active proposals with complete capture provenance")
     func dailyReceiptGroupsOnlyPreciseActiveProposals() throws {
         let fixture = try makeFixture()

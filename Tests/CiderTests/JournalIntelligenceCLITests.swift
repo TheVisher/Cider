@@ -5,6 +5,133 @@ import Testing
 @Suite("Journal Intelligence CLI Tests", .serialized)
 @MainActor
 struct JournalIntelligenceCLITests {
+    @Test("representative text and voice captures produce all reviewable Journal Intelligence categories")
+    func representativeCapturesProduceAllCategories() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        for capture in JournalIntelligenceCorpus.captures {
+            _ = try captureJournal(
+                date: JournalIntelligenceCorpus.date,
+                time: capture.time,
+                text: capture.text,
+                vault: vault,
+                extraArgs: capture.surface == "voice"
+                    ? ["--surface", "voice", "--channel", "voice-transcript", "--source-meta", "input=voice-transcript"]
+                    : []
+            )
+        }
+
+        let result = try runCLI(
+            args: ["item", "journal-intelligence", "--date", JournalIntelligenceCorpus.date, "--json"],
+            vault: vault
+        )
+        #expect(result.status == 0, "stderr: \(result.stderr)")
+        let payload = try parseJSONObject(result.stdout)
+        let groups = try #require(payload["groups"] as? [[String: Any]])
+        #expect(Set(groups.compactMap { $0["category"] as? String }) == Set(JournalIntelligenceCategory.allCases.map(\.rawValue)))
+
+        let proposals = groups.flatMap { $0["proposals"] as? [[String: Any]] ?? [] }
+        let requiredQuotes = [
+            "Maya started a new job at Alder Labs",
+            "I promised Maya I would bring the trail map tomorrow",
+            "Remember to email the signed permit",
+            "We are planning a September trip to Kyoto",
+            "Save the ferry itinerary PDF with the trip",
+            "Remember that hiking before work improves my mood",
+        ]
+        for quote in requiredQuotes {
+            #expect(proposals.contains { proposal in
+                guard let source = proposal["source"] as? [String: Any] else { return false }
+                return (source["quote"] as? String)?.localizedCaseInsensitiveContains(quote) == true
+                    && source["coordinateSpace"] as? String == "capture_event.source_text"
+                    && proposal["truthBoundary"] as? String == "reviewable_candidate_not_truth"
+            }, "Missing source-backed proposal for: \(quote)")
+        }
+        #expect(!proposals.contains { proposal in
+            guard let source = proposal["source"] as? [String: Any],
+                  let quote = source["quote"] as? String else { return false }
+            let lower = quote.lowercased()
+            return lower.contains("maybe alex")
+                || lower.contains("did not go to portland")
+                || lower.contains("did not visit the red barn")
+                || lower == "i liked it"
+        })
+    }
+
+    @Test("equivalent mentions across captures retain occurrences but deduplicate the receipt")
+    func equivalentMentionsRetainOccurrencesAndDeduplicateReceipt() throws {
+        let vault = try makeTempVault()
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let task = "Remember to email the signed permit."
+        _ = try captureJournal(date: JournalIntelligenceCorpus.date, time: "07:05", text: task, vault: vault)
+        _ = try captureJournal(
+            date: JournalIntelligenceCorpus.date,
+            time: "09:40",
+            text: task,
+            vault: vault,
+            extraArgs: ["--surface", "voice", "--channel", "voice-transcript", "--source-meta", "input=voice-transcript"]
+        )
+        _ = try captureJournal(
+            date: JournalIntelligenceCorpus.date,
+            time: "09:55",
+            text: "I need to email the signed permit.",
+            vault: vault
+        )
+        _ = try captureJournal(
+            date: JournalIntelligenceCorpus.date,
+            time: "10:10",
+            text: "Maya started a new job at Alder Labs.",
+            vault: vault
+        )
+        _ = try captureJournal(
+            date: JournalIntelligenceCorpus.date,
+            time: "11:15",
+            text: "Maya started a new job at Beacon Works.",
+            vault: vault,
+            extraArgs: ["--surface", "voice", "--channel", "voice-transcript", "--source-meta", "input=voice-transcript"]
+        )
+
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let stored = try database.prepare("""
+            SELECT COUNT(DISTINCT json_extract(metadata, '$.capture_event_id'))
+            FROM enrichment_outputs
+            WHERE kind = 'memory_candidate'
+              AND json_extract(metadata, '$.memory_kind') = 'task_intent'
+              AND normalized_value = 'email the signed permit';
+            """)
+        _ = try stored.step()
+        #expect(stored.int(at: 0) == 3)
+        database.close()
+
+        let result = try runCLI(
+            args: ["item", "journal-intelligence", "--date", JournalIntelligenceCorpus.date, "--json"],
+            vault: vault
+        )
+        #expect(result.status == 0, "stderr: \(result.stderr)")
+        let payload = try parseJSONObject(result.stdout)
+        let groups = try #require(payload["groups"] as? [[String: Any]])
+        let taskGroup = try #require(groups.first { $0["category"] as? String == "tasks" })
+        #expect(taskGroup["count"] as? Int == 1)
+        let peopleGroup = try #require(groups.first { $0["category"] as? String == "people" })
+        #expect(peopleGroup["count"] as? Int == 2)
+        let people = try #require(peopleGroup["proposals"] as? [[String: Any]])
+        #expect(Set(people.compactMap { $0["value"] as? String }) == Set([
+            "Maya started a new job at Alder Labs.",
+            "Maya started a new job at Beacon Works.",
+        ]))
+        #expect(Set(people.compactMap { proposal in
+            (proposal["captureEvent"] as? [String: Any])?["id"] as? String
+        }).count == 2)
+        let suppressions = try #require(payload["suppressions"] as? [[String: Any]])
+        #expect(suppressions.count { suppression in
+            (suppression["reasonCodes"] as? [String])?.contains("duplicate_within_day") == true
+                && (suppression["sourceQuote"] as? String)?.localizedCaseInsensitiveContains("email the signed permit") == true
+        } == 2)
+    }
+
     @Test("read-only JSON receipt is deterministic and leaves every SQLite table count unchanged")
     func receiptIsDeterministicAndNonMutating() throws {
         let vault = try makeTempVault()

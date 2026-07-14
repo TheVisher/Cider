@@ -281,6 +281,11 @@ final class SecondBrainEnrichmentOutputService {
               !end.isEmpty else {
             return ""
         }
+        let captureEventID = output.metadata["capture_event_id"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let captureEventID, !captureEventID.isEmpty {
+            return "capture_event:\(captureEventID):\(start)..\(end)"
+        }
         return "\(start)..\(end)"
     }
 
