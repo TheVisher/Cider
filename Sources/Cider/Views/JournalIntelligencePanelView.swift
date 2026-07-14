@@ -5,6 +5,11 @@ struct JournalIntelligenceDayReviewView: View {
     @Binding var isExpanded: Bool
     let onReload: () -> Void
     let onOpenSource: (JournalIntelligenceSourceNavigation) -> Void
+    @State private var correctionDrafts: [String: String] = [:]
+    @State private var selectedTargets: [String: String] = [:]
+    @State private var actionMessages: [String: String] = [:]
+    @State private var actionErrors: [String: String] = [:]
+    @State private var activeActionCandidateRef: String?
 
     var body: some View {
         Group {
@@ -104,6 +109,26 @@ struct JournalIntelligenceDayReviewView: View {
                             reviewGroup(group)
                         }
                     }
+                }
+
+                if !model.reviewedGroups.isEmpty {
+                    Divider()
+                        .background(CiderColors.separator)
+
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        Text("Reviewed")
+                            .font(CiderFont.subheadingSemibold)
+                            .foregroundColor(CiderColors.primary)
+                        Text("Durable decisions remain attached to their original timestamped Journal evidence.")
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.secondary)
+
+                        ForEach(model.reviewedGroups) { group in
+                            reviewGroup(group)
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Reviewed Journal suggestions with preserved source evidence")
                 }
             }
         }
@@ -208,6 +233,8 @@ struct JournalIntelligenceDayReviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(CiderColors.surfaceInput)
             .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+
+            actionControls(proposal)
         }
         .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -219,6 +246,213 @@ struct JournalIntelligenceDayReviewView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(proposal.statusLabel). \(proposal.value). \(proposal.reconciliation.label). Source at \(proposal.source.timestamp24Hour).")
+    }
+
+    @ViewBuilder
+    private func actionControls(_ proposal: JournalIntelligenceReviewProposal) -> some View {
+        let approve = proposal.actions.descriptor(for: .approve)
+        let correct = proposal.actions.descriptor(for: .correct)
+        let reject = proposal.actions.descriptor(for: .reject)
+        let deferAction = proposal.actions.descriptor(for: .defer)
+        let isBusy = activeActionCandidateRef == proposal.candidateRef
+
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Review decision")
+                .font(CiderFont.captionSemibold)
+                .foregroundColor(CiderColors.tertiary)
+                .textCase(.uppercase)
+
+            if let approve {
+                Text(approve.preview)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                    .textSelection(.enabled)
+            }
+
+            if proposal.family == "memory_candidate" {
+                if approve?.availability == .available {
+                    Button(approve?.label ?? "Approve memory") {
+                        performAction(.approve, proposal: proposal)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isBusy)
+                    .accessibilityLabel("Approve this exact suggestion as a Cider memory")
+                    .accessibilityHint(approve?.preview ?? "")
+                }
+
+                if correct?.availability == .requiresCorrection {
+                    TextField(
+                        "Corrected wording",
+                        text: binding(for: proposal.candidateRef, in: $correctionDrafts)
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Corrected wording for \(proposal.value)")
+
+                    Text(correct?.preview ?? "")
+                        .font(CiderFont.captionMedium)
+                        .foregroundColor(CiderColors.secondary)
+
+                    Button(correct?.label ?? "Correct wording") {
+                        performAction(
+                            .correct,
+                            proposal: proposal,
+                            correctedValue: correctionDrafts[proposal.candidateRef]
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(
+                        isBusy
+                            || correctionDrafts[proposal.candidateRef]?
+                                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+                    )
+                    .accessibilityLabel("Save corrected wording without approving it")
+                    .accessibilityHint(correct?.preview ?? "")
+                }
+            } else if proposal.family == "graph_candidate",
+                      let targetDescriptor = approve,
+                      targetDescriptor.availability == .requiresTarget {
+                Menu(selectedTargetLabel(for: proposal) ?? "Choose exact target") {
+                    ForEach(targetDescriptor.targetOptions) { option in
+                        Button("\(option.label) · \(option.relationType)") {
+                            selectedTargets[proposal.candidateRef] = option.id
+                            actionErrors[proposal.candidateRef] = nil
+                        }
+                    }
+                }
+                .accessibilityLabel("Choose exact target for \(proposal.value)")
+                .accessibilityHint(targetDescriptor.guidance)
+
+                HStack(spacing: Spacing.sm) {
+                    Button(correct?.label ?? "Correct target") {
+                        performAction(
+                            .correct,
+                            proposal: proposal,
+                            targetOptionRef: selectedTargets[proposal.candidateRef]
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isBusy || selectedTargets[proposal.candidateRef] == nil)
+                    .accessibilityLabel("Save selected target as a correction without approving it")
+                    .accessibilityHint(correct?.preview ?? "")
+
+                    Button(targetDescriptor.label) {
+                        performAction(
+                            .approve,
+                            proposal: proposal,
+                            targetOptionRef: selectedTargets[proposal.candidateRef]
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isBusy || selectedTargets[proposal.candidateRef] == nil)
+                    .accessibilityLabel("Approve the explicitly selected target for \(proposal.value)")
+                    .accessibilityHint(targetDescriptor.preview)
+                }
+            }
+
+            HStack(spacing: Spacing.sm) {
+                if reject?.availability == .available {
+                    Button(reject?.label ?? "Reject") {
+                        performAction(.reject, proposal: proposal)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isBusy)
+                    .accessibilityLabel("Reject \(proposal.value) without accepting truth")
+                    .accessibilityHint(reject?.preview ?? "")
+                }
+                if deferAction?.availability == .available {
+                    Button(deferAction?.label ?? "Defer") {
+                        performAction(.defer, proposal: proposal)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isBusy)
+                    .accessibilityLabel("Defer \(proposal.value) for later review")
+                    .accessibilityHint(deferAction?.preview ?? "")
+                }
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Saving Journal Review decision")
+                }
+            }
+
+            if let guidance = unavailableGuidance(for: proposal) {
+                Text(guidance)
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                    .accessibilityLabel("Action unavailable. \(guidance)")
+            }
+            if let message = actionMessages[proposal.candidateRef] {
+                Label(message, systemImage: "checkmark.circle")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                    .accessibilityLabel("Journal Review decision saved. \(message)")
+            }
+            if let error = actionErrors[proposal.candidateRef] {
+                Label(error, systemImage: "exclamationmark.circle")
+                    .font(CiderFont.captionMedium)
+                    .foregroundColor(CiderColors.secondary)
+                    .accessibilityLabel("Journal Review action blocked. \(error)")
+            }
+        }
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CiderColors.accentSubtle.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func selectedTargetLabel(for proposal: JournalIntelligenceReviewProposal) -> String? {
+        guard let selected = selectedTargets[proposal.candidateRef],
+              let option = proposal.actions.descriptor(for: .approve)?
+                .targetOptions.first(where: { $0.id == selected }) else { return nil }
+        return "\(option.label) · \(option.relationType)"
+    }
+
+    private func unavailableGuidance(for proposal: JournalIntelligenceReviewProposal) -> String? {
+        let blocked = proposal.actions.descriptors.filter {
+            $0.availability == .unavailable || $0.availability == .alreadyReviewed
+        }
+        guard !blocked.isEmpty else { return nil }
+        return blocked.map(\.guidance).first { !$0.isEmpty }
+    }
+
+    private func binding(
+        for key: String,
+        in dictionary: Binding<[String: String]>
+    ) -> Binding<String> {
+        Binding(
+            get: { dictionary.wrappedValue[key] ?? "" },
+            set: { dictionary.wrappedValue[key] = $0 }
+        )
+    }
+
+    private func performAction(
+        _ action: JournalIntelligenceReviewAction,
+        proposal: JournalIntelligenceReviewProposal,
+        correctedValue: String? = nil,
+        targetOptionRef: String? = nil
+    ) {
+        activeActionCandidateRef = proposal.candidateRef
+        actionErrors[proposal.candidateRef] = nil
+        actionMessages[proposal.candidateRef] = nil
+        do {
+            let result = try JournalIntelligenceReviewActionService().perform(
+                JournalIntelligenceReviewActionRequest(
+                    proposal: proposal,
+                    action: action,
+                    correctedValue: correctedValue,
+                    targetOptionRef: targetOptionRef
+                ),
+                actor: "user"
+            )
+            actionMessages[proposal.candidateRef] = result.message
+            correctionDrafts[proposal.candidateRef] = nil
+            selectedTargets[proposal.candidateRef] = nil
+            onReload()
+        } catch {
+            actionErrors[proposal.candidateRef] = error.localizedDescription
+        }
+        activeActionCandidateRef = nil
     }
 }
 

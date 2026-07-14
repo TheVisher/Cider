@@ -244,17 +244,20 @@ struct JournalIntelligenceReviewReconciliation: Equatable {
 struct JournalIntelligenceReviewProposal: Equatable, Identifiable {
     var id: String { candidateRef }
     var candidateRef: String
+    var family: String
     var category: JournalIntelligenceCategory
     var value: String
     var candidateType: String
     var confidenceReason: String
     var reviewState: String
     var truthBoundary: String
+    var candidateUpdatedAt: Date
     var statusLabel: String
     var sectionID: String
     var source: JournalIntelligenceReviewSource
     var sourceNavigation: JournalIntelligenceSourceNavigation
     var reconciliation: JournalIntelligenceReviewReconciliation
+    var actions: JournalIntelligenceReviewActionSet
 }
 
 struct JournalIntelligenceReviewGroup: Equatable, Identifiable {
@@ -273,10 +276,20 @@ struct JournalIntelligenceDayReviewModel: Equatable {
     var truthBoundaryCopy: String
     var suppressedCount: Int
     var groups: [JournalIntelligenceReviewGroup]
+    var reviewedGroups: [JournalIntelligenceReviewGroup]
+
+    func proposal(candidateRef: String) -> JournalIntelligenceReviewProposal? {
+        groups.flatMap(\.proposals).first { $0.candidateRef == candidateRef }
+    }
+
+    func reviewedProposal(candidateRef: String) -> JournalIntelligenceReviewProposal? {
+        reviewedGroups.flatMap(\.proposals).first { $0.candidateRef == candidateRef }
+    }
 
     static func make(
         receipt: JournalIntelligenceDailyReceipt,
-        day: JournalLibraryDay
+        day: JournalLibraryDay,
+        actionSets: [String: JournalIntelligenceReviewActionSet] = [:]
     ) -> JournalIntelligenceDayReviewModel {
         let latestSourceUpdate = day.sourceEntries.map(\.note.modifiedAt).max()
         let isStale = latestSourceUpdate.map { latest in
@@ -292,8 +305,34 @@ struct JournalIntelligenceDayReviewModel: Equatable {
         let groups = JournalIntelligenceCategory.allCases.compactMap { category -> JournalIntelligenceReviewGroup? in
             let proposals = (receiptProposals[category] ?? []).compactMap { proposal -> JournalIntelligenceReviewProposal? in
                 guard seenCandidateRefs.insert(proposal.candidateRef).inserted else { return nil }
-                return presentationProposal(proposal, day: day, receiptIsStale: isStale)
+                return presentationProposal(
+                    proposal,
+                    day: day,
+                    receiptIsStale: isStale,
+                    actionSet: actionSets[proposal.candidateRef],
+                    reviewed: false
+                )
             }
+            guard !proposals.isEmpty else { return nil }
+            return JournalIntelligenceReviewGroup(
+                category: category,
+                label: friendlyCategoryLabel(category),
+                proposals: proposals
+            )
+        }
+        let reviewedGroups = JournalIntelligenceCategory.allCases.compactMap { category -> JournalIntelligenceReviewGroup? in
+            let proposals = receipt.reviewedGroups
+                .first { $0.category == category }?
+                .proposals
+                .map { proposal in
+                    presentationProposal(
+                        proposal,
+                        day: day,
+                        receiptIsStale: false,
+                        actionSet: actionSets[proposal.candidateRef],
+                        reviewed: true
+                    )
+                } ?? []
             guard !proposals.isEmpty else { return nil }
             return JournalIntelligenceReviewGroup(
                 category: category,
@@ -327,24 +366,39 @@ struct JournalIntelligenceDayReviewModel: Equatable {
             truthBoundary: "reviewable_candidate_not_truth",
             truthBoundaryCopy: "These are reviewable suggestions, not accepted Cider truth. Displaying them does not create, change, or approve anything.",
             suppressedCount: receipt.suppressedCount,
-            groups: groups
+            groups: groups,
+            reviewedGroups: reviewedGroups
         )
     }
 
     private static func presentationProposal(
         _ proposal: JournalIntelligenceProposal,
         day: JournalLibraryDay,
-        receiptIsStale: Bool
+        receiptIsStale: Bool,
+        actionSet: JournalIntelligenceReviewActionSet?,
+        reviewed: Bool
     ) -> JournalIntelligenceReviewProposal {
-        JournalIntelligenceReviewProposal(
+        let fallbackActions = reviewed
+            ? JournalIntelligenceReviewActionSet.reviewed(family: proposal.family, reviewState: proposal.reviewState)
+            : JournalIntelligenceReviewActionSet.unsupported(
+                family: proposal.family,
+                reviewState: proposal.reviewState,
+                guidance: "Refresh Journal Review to verify the canonical action contract."
+            )
+        let resolvedActions = receiptIsStale
+            ? (actionSet ?? fallbackActions).blocked("Journal Review is stale. Refresh before taking an action.")
+            : (actionSet ?? fallbackActions)
+        return JournalIntelligenceReviewProposal(
             candidateRef: proposal.candidateRef,
+            family: proposal.family,
             category: proposal.category,
             value: proposal.value,
             candidateType: friendlyCandidateType(proposal.candidateType),
             confidenceReason: proposal.confidenceReason,
             reviewState: proposal.reviewState,
             truthBoundary: proposal.truthBoundary,
-            statusLabel: "Suggestion, not accepted truth",
+            candidateUpdatedAt: proposal.candidateUpdatedAt,
+            statusLabel: statusLabel(family: proposal.family, reviewState: proposal.reviewState),
             sectionID: proposal.section.id,
             source: JournalIntelligenceReviewSource(
                 timestamp24Hour: proposal.section.timestamp24Hour,
@@ -360,8 +414,24 @@ struct JournalIntelligenceDayReviewModel: Equatable {
             reconciliation: JournalIntelligenceReviewReconciliation.make(
                 reconciliation: proposal.crossTimeReconciliation,
                 receiptIsStale: receiptIsStale
-            )
+            ),
+            actions: resolvedActions
         )
+    }
+
+    private static func statusLabel(family: String, reviewState: String) -> String {
+        switch reviewState {
+        case "accepted":
+            return family == "memory_candidate"
+                ? "Approved as accepted memory truth"
+                : "Approved as an accepted graph link"
+        case "rejected":
+            return "Rejected, not accepted truth"
+        case "deferred":
+            return "Deferred suggestion, not accepted truth"
+        default:
+            return "Suggestion, not accepted truth"
+        }
     }
 
     private static func sourceNavigation(
@@ -457,14 +527,20 @@ enum JournalIntelligenceDayReviewLoadState: Equatable {
 @MainActor
 final class JournalIntelligenceDayReviewService {
     private let receiptService: JournalIntelligenceDailyReceiptService
+    private let actionService: JournalIntelligenceReviewActionService
 
     init(database: CiderDatabase = .shared) {
         receiptService = JournalIntelligenceDailyReceiptService(database: database)
+        actionService = JournalIntelligenceReviewActionService(database: database)
     }
 
     func review(for day: JournalLibraryDay) throws -> JournalIntelligenceDayReviewModel {
         let receipt = try receiptService.receipt(date: day.dateLabel)
-        return JournalIntelligenceDayReviewModel.make(receipt: receipt, day: day)
+        let candidateRefs = (receipt.groups + receipt.reviewedGroups)
+            .flatMap(\.proposals)
+            .map(\.candidateRef)
+        let actionSets = try actionService.actionSets(candidateRefs: candidateRefs)
+        return JournalIntelligenceDayReviewModel.make(receipt: receipt, day: day, actionSets: actionSets)
     }
 }
 

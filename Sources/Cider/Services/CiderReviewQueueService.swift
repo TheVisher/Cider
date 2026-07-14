@@ -1835,6 +1835,29 @@ final class CiderReviewQueueService {
     }
 
     @discardableResult
+    func correctMemoryCandidate(
+        candidateID: String,
+        correctedValue: String,
+        reason: String,
+        actor: String = "user"
+    ) throws -> CiderReviewCandidateQueueActionResult {
+        try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "memory_candidate",
+            command: "review.memory-candidates.correct",
+            action: "correct",
+            actor: actor
+        ) { service, id in
+            try service.correctMemoryCandidate(
+                id,
+                correctedValue: correctedValue,
+                reason: reason,
+                actor: actor
+            )
+        }
+    }
+
+    @discardableResult
     func approveGraphCandidate(
         candidateID: String,
         actor: String = "user",
@@ -1928,6 +1951,41 @@ final class CiderReviewQueueService {
         }
     }
 
+    @discardableResult
+    func correctGraphCandidate(
+        candidateID: String,
+        targetOptionRef: String,
+        reason: String,
+        actor: String = "user"
+    ) throws -> CiderReviewCandidateQueueActionResult {
+        let selection = try graphCandidateApprovalSelection(
+            candidateID: candidateID,
+            targetOptionRef: targetOptionRef,
+            correctedTargetOwner: nil,
+            correctedRelationType: nil,
+            targetOwner: nil,
+            relationType: nil
+        )
+        guard let targetOwner = selection.targetOwner else {
+            throw CiderReviewCandidateActionService.ReviewCandidateActionError.graphCorrectionNeedsResolvedTarget(candidateID)
+        }
+        return try reviewCandidateAction(
+            candidateID: candidateID,
+            reviewFamily: "graph_candidate",
+            command: "review.graph-candidates.correct",
+            action: "correct",
+            actor: actor
+        ) { service, id in
+            try service.correctGraphCandidate(
+                id,
+                targetOwner: targetOwner,
+                relationType: selection.relationType,
+                reason: reason,
+                actor: actor
+            )
+        }
+    }
+
     private func reviewCandidateAction(
         candidateID rawID: String,
         reviewFamily: String,
@@ -1942,8 +2000,7 @@ final class CiderReviewQueueService {
         guard let before = try outputService.output(id: id) else {
             throw CiderReviewCandidateActionService.ReviewCandidateActionError.candidateNotFound(id)
         }
-        let beforeState = before.reviewState
-        _ = try mutate(CiderReviewCandidateActionService(database: db), id)
+        let mutation = try mutate(CiderReviewCandidateActionService(database: db), id)
         guard let after = try outputService.output(id: id) else {
             throw CiderReviewCandidateActionService.ReviewCandidateActionError.candidateNotFound(id)
         }
@@ -1954,7 +2011,7 @@ final class CiderReviewQueueService {
             reviewFamily: reviewFamily,
             before: before,
             after: after,
-            changed: beforeState != after.reviewState
+            changed: mutation.changed
         )
     }
 

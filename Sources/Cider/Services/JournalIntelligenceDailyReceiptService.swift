@@ -72,6 +72,7 @@ struct JournalIntelligenceProposal: Codable, Equatable, Identifiable {
     var proposalState: String
     var reviewState: String
     var truthBoundary: String
+    var candidateUpdatedAt: Date
     var journalOwner: JournalIntelligenceOwner
     var captureEvent: JournalIntelligenceCaptureEvent
     var section: JournalIntelligenceSection
@@ -109,6 +110,8 @@ struct JournalIntelligenceDailyReceipt: Codable, Equatable {
     var proposalCount: Int
     var countsByCategory: [String: Int]
     var groups: [JournalIntelligenceProposalGroup]
+    var reviewedCount: Int = 0
+    var reviewedGroups: [JournalIntelligenceProposalGroup] = []
     var suppressedCount: Int
     var suppressions: [JournalIntelligenceSuppression]
     var journalOwners: [JournalIntelligenceOwner]
@@ -127,6 +130,15 @@ struct JournalIntelligenceDailyReceipt: Codable, Equatable {
             "proposalCount": proposalCount,
             "countsByCategory": countsByCategory,
             "groups": groups.map { group in
+                [
+                    "category": group.category.rawValue,
+                    "label": group.label,
+                    "count": group.count,
+                    "proposals": group.proposals.map { $0.toDictionary(formatter: formatter) },
+                ] as [String: Any]
+            },
+            "reviewedCount": reviewedCount,
+            "reviewedGroups": reviewedGroups.map { group in
                 [
                     "category": group.category.rawValue,
                     "label": group.label,
@@ -184,6 +196,7 @@ private extension JournalIntelligenceProposal {
             "proposalState": proposalState,
             "reviewState": reviewState,
             "truthBoundary": truthBoundary,
+            "candidateUpdatedAt": formatter.string(from: candidateUpdatedAt),
             "journalOwner": journalOwner.toDictionary(),
             "captureEvent": [
                 "id": captureEvent.id,
@@ -302,6 +315,7 @@ final class JournalIntelligenceDailyReceiptService {
     private struct CandidateDraft {
         var output: SecondBrainEnrichmentOutput
         var proposal: JournalIntelligenceProposal?
+        var reviewedProposal: JournalIntelligenceProposal?
         var suppression: JournalIntelligenceSuppression?
         var capturedAt: Date?
         var stableKey: String?
@@ -338,6 +352,7 @@ final class JournalIntelligenceDailyReceiptService {
         drafts.sort(by: draftOrder)
         var seen = Set<String>()
         var proposals: [JournalIntelligenceProposal] = []
+        var reviewedProposals: [JournalIntelligenceProposal] = []
         var suppressions: [JournalIntelligenceSuppression] = []
         for draft in drafts {
             if var proposal = draft.proposal, let stableKey = draft.stableKey {
@@ -350,6 +365,10 @@ final class JournalIntelligenceDailyReceiptService {
                 }
                 proposal.safeNextCommands = orderedUnique(proposal.safeNextCommands)
                 proposals.append(proposal)
+            } else if var proposal = draft.reviewedProposal, let stableKey = draft.stableKey {
+                guard seen.insert("reviewed:\(proposal.candidateRef):\(stableKey)").inserted else { continue }
+                proposal.safeNextCommands = orderedUnique(proposal.safeNextCommands)
+                reviewedProposals.append(proposal)
             } else if let suppression = draft.suppression {
                 suppressions.append(suppression)
             }
@@ -370,6 +389,7 @@ final class JournalIntelligenceDailyReceiptService {
         }
 
         proposals.sort(by: proposalOrder)
+        reviewedProposals.sort(by: proposalOrder)
         suppressions.sort { $0.candidateRef < $1.candidateRef }
         let groups = JournalIntelligenceCategory.allCases.compactMap { category -> JournalIntelligenceProposalGroup? in
             let matches = proposals.filter { $0.category == category }
@@ -384,6 +404,16 @@ final class JournalIntelligenceDailyReceiptService {
         let counts = Dictionary(uniqueKeysWithValues: JournalIntelligenceCategory.allCases.map { category in
             (category.rawValue, proposals.count { $0.category == category })
         })
+        let reviewedGroups = JournalIntelligenceCategory.allCases.compactMap { category -> JournalIntelligenceProposalGroup? in
+            let matches = reviewedProposals.filter { $0.category == category }
+            guard !matches.isEmpty else { return nil }
+            return JournalIntelligenceProposalGroup(
+                category: category,
+                label: category.label,
+                count: matches.count,
+                proposals: matches
+            )
+        }
         let count = proposals.count
         let noun = count == 1 ? "thing" : "things"
         let safeNextCommands = orderedUnique(
@@ -405,6 +435,8 @@ final class JournalIntelligenceDailyReceiptService {
             proposalCount: count,
             countsByCategory: counts,
             groups: groups,
+            reviewedCount: reviewedProposals.count,
+            reviewedGroups: reviewedGroups,
             suppressedCount: suppressions.count,
             suppressions: suppressions,
             journalOwners: sources.map(\.owner),
@@ -489,7 +521,8 @@ final class JournalIntelligenceDailyReceiptService {
         var reasons: [String] = []
         let family = output.kind
         let normalizedState = output.reviewState.lowercased()
-        if !["suggested", "needs_review", "deferred"].contains(normalizedState) {
+        let isReviewed = ["accepted", "rejected"].contains(normalizedState)
+        if !["suggested", "needs_review", "deferred", "accepted", "rejected"].contains(normalizedState) {
             reasons.append("terminal_review_state")
         }
         guard output.metadata["source_kind"]?.lowercased() == "journal" else {
@@ -562,7 +595,8 @@ final class JournalIntelligenceDailyReceiptService {
             confidenceReason: classification.confidenceReason,
             proposalState: proposalState(reviewState: normalizedState),
             reviewState: normalizedState,
-            truthBoundary: output.metadata["truth_boundary"] ?? "reviewable_candidate_not_truth",
+            truthBoundary: truthBoundary(family: output.kind, reviewState: normalizedState),
+            candidateUpdatedAt: output.updatedAt,
             journalOwner: journal.owner,
             captureEvent: JournalIntelligenceCaptureEvent(
                 id: capture.id,
@@ -586,7 +620,8 @@ final class JournalIntelligenceDailyReceiptService {
         )
         return CandidateDraft(
             output: output,
-            proposal: proposal,
+            proposal: isReviewed ? nil : proposal,
+            reviewedProposal: isReviewed ? proposal : nil,
             suppression: nil,
             capturedAt: capture.createdAt,
             stableKey: stableKey(output: output, classification: classification)
@@ -768,6 +803,7 @@ final class JournalIntelligenceDailyReceiptService {
         CandidateDraft(
             output: output,
             proposal: nil,
+            reviewedProposal: nil,
             suppression: suppression(output: output, reasonCodes: orderedUnique(reasons)),
             capturedAt: capturedAt,
             stableKey: nil
@@ -825,6 +861,17 @@ final class JournalIntelligenceDailyReceiptService {
 
     private func candidateRef(for output: SecondBrainEnrichmentOutput) -> String {
         "\(output.kind == "memory_candidate" ? "memory_candidate" : "graph_candidate"):\(output.id)"
+    }
+
+    private func truthBoundary(family: String, reviewState: String) -> String {
+        switch (family, reviewState) {
+        case (SecondBrainGraphCandidateContract.outputKind, "accepted"):
+            return "accepted_graph_truth"
+        case ("memory_candidate", "accepted"):
+            return "accepted_memory_candidate"
+        default:
+            return "reviewable_candidate_not_truth"
+        }
     }
 
     private func proposalState(reviewState: String) -> String {

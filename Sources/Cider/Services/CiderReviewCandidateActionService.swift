@@ -16,6 +16,8 @@ final class CiderReviewCandidateActionService {
         case wrongCandidateKind(expected: String, actual: String)
         case notReviewable(candidateID: String, reviewState: String)
         case graphAcceptNeedsResolvedTarget(String)
+        case memoryCorrectionNeedsValue(String)
+        case graphCorrectionNeedsResolvedTarget(String)
 
         var errorDescription: String? {
             switch self {
@@ -29,6 +31,10 @@ final class CiderReviewCandidateActionService {
                 return "Review candidate '\(candidateID)' is \(reviewState) and cannot be changed."
             case .graphAcceptNeedsResolvedTarget(let candidateID):
                 return "Graph candidate '\(candidateID)' needs a resolved target before it can be accepted in the app."
+            case .memoryCorrectionNeedsValue(let candidateID):
+                return "Memory candidate '\(candidateID)' needs explicit corrected wording."
+            case .graphCorrectionNeedsResolvedTarget(let candidateID):
+                return "Graph candidate '\(candidateID)' needs an explicit corrected target. Saving a correction does not approve it."
             }
         }
     }
@@ -53,6 +59,9 @@ final class CiderReviewCandidateActionService {
         actor: String = "user"
     ) throws -> CiderReviewCandidateActionResult {
         let output = try memoryCandidateOutput(candidateID)
+        if output.reviewState == "accepted" {
+            return result(candidate: output, action: "accept", refPrefix: "memory_candidate", changed: false)
+        }
         try requireReviewableMemoryCandidate(output)
 
         var accepted = reviewedMemoryCandidate(output, reviewState: "accepted", actor: actor)
@@ -80,7 +89,7 @@ final class CiderReviewCandidateActionService {
             try store.recordAgentAction(action)
         }
 
-        return result(candidate: accepted, action: "accept", refPrefix: "memory_candidate")
+        return result(candidate: accepted, action: "accept", refPrefix: "memory_candidate", changed: true)
     }
 
     @discardableResult
@@ -90,6 +99,9 @@ final class CiderReviewCandidateActionService {
         actor: String = "user"
     ) throws -> CiderReviewCandidateActionResult {
         let output = try memoryCandidateOutput(candidateID)
+        if output.reviewState == "rejected" {
+            return result(candidate: output, action: "reject", refPrefix: "memory_candidate", changed: false)
+        }
         try requireReviewableMemoryCandidate(output)
 
         var rejected = reviewedMemoryCandidate(output, reviewState: "rejected", actor: actor)
@@ -117,7 +129,7 @@ final class CiderReviewCandidateActionService {
             try store.recordAgentAction(action)
         }
 
-        return result(candidate: rejected, action: "reject", refPrefix: "memory_candidate")
+        return result(candidate: rejected, action: "reject", refPrefix: "memory_candidate", changed: true)
     }
 
     @discardableResult
@@ -127,6 +139,9 @@ final class CiderReviewCandidateActionService {
         actor: String = "user"
     ) throws -> CiderReviewCandidateActionResult {
         let output = try memoryCandidateOutput(candidateID)
+        if output.reviewState == "deferred" {
+            return result(candidate: output, action: "defer", refPrefix: "memory_candidate", changed: false)
+        }
         try requireReviewableMemoryCandidate(output)
 
         var deferred = reviewedMemoryCandidate(output, reviewState: "deferred", actor: actor)
@@ -154,7 +169,65 @@ final class CiderReviewCandidateActionService {
             try store.recordAgentAction(action)
         }
 
-        return result(candidate: deferred, action: "defer", refPrefix: "memory_candidate")
+        return result(candidate: deferred, action: "defer", refPrefix: "memory_candidate", changed: true)
+    }
+
+    @discardableResult
+    func correctMemoryCandidate(
+        _ candidateID: String?,
+        correctedValue: String,
+        reason: String = "Corrected from Journal Review.",
+        actor: String = "user"
+    ) throws -> CiderReviewCandidateActionResult {
+        let output = try memoryCandidateOutput(candidateID)
+        try requireReviewableMemoryCandidate(output)
+        let value = correctedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            throw ReviewCandidateActionError.memoryCorrectionNeedsValue(output.id)
+        }
+        let normalizedValue = Self.normalizedMemoryValue(value)
+        if output.reviewState == "needs_review",
+           output.value == value,
+           output.normalizedValue == normalizedValue,
+           output.metadata["corrected_by"] != nil {
+            return result(candidate: output, action: "correct", refPrefix: "memory_candidate", changed: false)
+        }
+
+        var corrected = output
+        corrected.value = value
+        corrected.normalizedValue = normalizedValue
+        corrected.reviewState = "needs_review"
+        corrected.metadata["corrected_at"] = ISO8601DateFormatter().string(from: Date())
+        corrected.metadata["corrected_by"] = actor
+        corrected.metadata["correction_reason"] = normalizedReason(reason)
+        corrected.metadata["corrected_fields"] = DatabaseHelpers.encode(["value"])
+        corrected.updatedAt = Date()
+
+        let action = memoryCandidateAgentAction(
+            output: output,
+            toolName: "item.correct-memory-candidate",
+            actionType: "memory_candidate.correct",
+            source: "memory_candidate.correct",
+            status: "corrected",
+            summary: "Corrected a memory candidate without accepting it.",
+            arguments: [
+                "candidateID": output.id,
+                "actor": actor,
+                "reason": normalizedReason(reason),
+                "changedFields": DatabaseHelpers.encode(["value"]),
+            ],
+            result: [
+                "reviewState": corrected.reviewState,
+                "truthBoundary": "reviewable_candidate_not_truth",
+            ]
+        )
+
+        try database.withTransaction {
+            try outputService.record(corrected)
+            try store.recordAgentAction(action)
+        }
+
+        return result(candidate: corrected, action: "correct", refPrefix: "memory_candidate", changed: true)
     }
 
     @discardableResult
@@ -166,6 +239,9 @@ final class CiderReviewCandidateActionService {
     ) throws -> CiderReviewCandidateActionResult {
         let output = try graphCandidateOutput(candidateID)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        if candidate.reviewState == .accepted {
+            return result(candidate: output, action: "accept", refPrefix: "graph_candidate", changed: false)
+        }
         try requireReviewableGraphCandidate(candidate)
         guard let targetOwner = overrideTargetOwner ?? candidate.acceptedTargetOwner else {
             throw ReviewCandidateActionError.graphAcceptNeedsResolvedTarget(output.id)
@@ -225,7 +301,7 @@ final class CiderReviewCandidateActionService {
             try store.recordAgentAction(action)
         }
 
-        return result(candidate: accepted, action: "accept", refPrefix: "graph_candidate")
+        return result(candidate: accepted, action: "accept", refPrefix: "graph_candidate", changed: true)
     }
 
     @discardableResult
@@ -236,6 +312,9 @@ final class CiderReviewCandidateActionService {
     ) throws -> CiderReviewCandidateActionResult {
         let output = try graphCandidateOutput(candidateID)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        if candidate.reviewState == .rejected {
+            return result(candidate: output, action: "reject", refPrefix: "graph_candidate", changed: false)
+        }
         try requireReviewableGraphCandidate(candidate)
 
         var rejected = output
@@ -269,7 +348,7 @@ final class CiderReviewCandidateActionService {
             try store.recordAgentAction(action)
         }
 
-        return result(candidate: rejected, action: "reject", refPrefix: "graph_candidate")
+        return result(candidate: rejected, action: "reject", refPrefix: "graph_candidate", changed: true)
     }
 
     @discardableResult
@@ -280,6 +359,9 @@ final class CiderReviewCandidateActionService {
     ) throws -> CiderReviewCandidateActionResult {
         let output = try graphCandidateOutput(candidateID)
         let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        if candidate.reviewState == .deferred {
+            return result(candidate: output, action: "defer", refPrefix: "graph_candidate", changed: false)
+        }
         try requireReviewableGraphCandidate(candidate)
 
         var deferred = output
@@ -313,7 +395,76 @@ final class CiderReviewCandidateActionService {
             try store.recordAgentAction(action)
         }
 
-        return result(candidate: deferred, action: "defer", refPrefix: "graph_candidate")
+        return result(candidate: deferred, action: "defer", refPrefix: "graph_candidate", changed: true)
+    }
+
+    @discardableResult
+    func correctGraphCandidate(
+        _ candidateID: String?,
+        targetOwner: SecondBrainOwnerRef?,
+        relationType: String?,
+        reason: String = "Corrected from Journal Review.",
+        actor: String = "user"
+    ) throws -> CiderReviewCandidateActionResult {
+        let output = try graphCandidateOutput(candidateID)
+        let candidate = try SecondBrainGraphCandidateContract.validate(output)
+        try requireReviewableGraphCandidate(candidate)
+        guard let targetOwner else {
+            throw ReviewCandidateActionError.graphCorrectionNeedsResolvedTarget(output.id)
+        }
+        let correctedRelationType = relationType?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let correctedRelationType, !correctedRelationType.isEmpty else {
+            throw ReviewCandidateActionError.graphCorrectionNeedsResolvedTarget(output.id)
+        }
+        let currentTarget = candidate.acceptedTargetOwner
+        let currentRelation = candidate.acceptedRelationType?.rawValue
+            ?? output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType]
+        if candidate.reviewState == .needsReview,
+           currentTarget == targetOwner,
+           currentRelation == correctedRelationType,
+           output.metadata["corrected_by"] != nil {
+            return result(candidate: output, action: "correct", refPrefix: "graph_candidate", changed: false)
+        }
+
+        var corrected = output
+        corrected.reviewState = SecondBrainGraphCandidateContract.ReviewState.needsReview.rawValue
+        corrected.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType] = targetOwner.ownerType
+        corrected.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID] = targetOwner.ownerID
+        corrected.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType] = correctedRelationType
+        corrected.metadata["corrected_at"] = ISO8601DateFormatter().string(from: Date())
+        corrected.metadata["corrected_by"] = actor
+        corrected.metadata["correction_reason"] = normalizedReason(reason)
+        corrected.metadata["corrected_fields"] = DatabaseHelpers.encode(["target_owner", "relation_type"])
+        corrected.updatedAt = Date()
+        _ = try SecondBrainGraphCandidateContract.validate(corrected)
+
+        let action = SecondBrainAgentAction(
+            owner: output.owner,
+            itemID: itemID(for: output.owner),
+            toolName: "item.correct-graph-candidate",
+            actionType: "graph_candidate.correct",
+            source: "graph_candidate.correct",
+            status: "corrected",
+            summary: "Corrected a graph candidate target without accepting it.",
+            argumentsJSON: DatabaseHelpers.encodeJSON([
+                "candidateID": output.id,
+                "actor": actor,
+                "targetOwner": targetOwner.canonicalRef,
+                "relationType": correctedRelationType,
+                "reason": normalizedReason(reason),
+            ]),
+            resultJSON: DatabaseHelpers.encodeJSON([
+                "reviewState": corrected.reviewState,
+                "truthBoundary": "reviewable_candidate_not_truth",
+            ])
+        )
+
+        try database.withTransaction {
+            try outputService.record(corrected)
+            try store.recordAgentAction(action)
+        }
+
+        return result(candidate: corrected, action: "correct", refPrefix: "graph_candidate", changed: true)
     }
 
     private func memoryCandidateOutput(_ rawID: String?) throws -> SecondBrainEnrichmentOutput {
@@ -447,14 +598,22 @@ final class CiderReviewCandidateActionService {
     private func result(
         candidate: SecondBrainEnrichmentOutput,
         action: String,
-        refPrefix: String
+        refPrefix: String,
+        changed: Bool
     ) -> CiderReviewCandidateActionResult {
         CiderReviewCandidateActionResult(
             candidateID: candidate.id,
             candidateRef: "\(refPrefix):\(candidate.id)",
             action: action,
             reviewState: candidate.reviewState,
-            changed: true
+            changed: changed
         )
+    }
+
+    private static func normalizedMemoryValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }

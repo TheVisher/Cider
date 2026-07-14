@@ -91,6 +91,32 @@ struct JournalIntelligencePanelModelTests {
         #expect(snapshot.missingMemoryOpportunities.contains { $0.label == "Work pace mindset" })
     }
 
+    @Test("production Journal Review composes explicit accessible action controls and refresh")
+    func productionJournalReviewComposesAccessibleActionControls() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repositoryRoot
+            .appendingPathComponent("Sources/Cider/Views/JournalIntelligencePanelView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        for requiredComposition in [
+            "JournalIntelligenceReviewActionService().perform(",
+            "TextField(\n                        \"Corrected wording\"",
+            "Menu(selectedTargetLabel(for: proposal) ?? \"Choose exact target\")",
+            ".accessibilityLabel(\"Approve this exact suggestion as a Cider memory\")",
+            ".accessibilityLabel(\"Save selected target as a correction without approving it\")",
+            ".accessibilityLabel(\"Reject \\(proposal.value) without accepting truth\")",
+            ".accessibilityLabel(\"Defer \\(proposal.value) for later review\")",
+            "onReload()",
+        ] {
+            #expect(source.contains(requiredComposition))
+        }
+        #expect(source.contains("Journal Review action blocked"))
+        #expect(source.contains("Durable decisions remain attached to their original timestamped Journal evidence."))
+    }
+
     private func insertJournal(noteID: UUID, title: String, content: String, createdAt: Date, updatedAt: Date, into db: CiderDatabase) throws {
         let item = try db.prepare("""
             INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)

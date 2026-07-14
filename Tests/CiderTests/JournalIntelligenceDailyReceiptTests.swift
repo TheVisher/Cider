@@ -72,7 +72,9 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(first.statement == "Cider found 9 things worth reviewing.")
         #expect(first.groups.map(\.category) == JournalIntelligenceCategory.allCases)
         #expect(first.groups.allSatisfy { $0.proposals.count == 1 })
-        #expect(first.suppressedCount == 7)
+        #expect(first.suppressedCount == 5)
+        #expect(first.reviewedCount == 2)
+        #expect(Set(first.reviewedGroups.flatMap(\.proposals).map(\.reviewState)) == ["accepted", "rejected"])
 
         let proposals = first.groups.flatMap(\.proposals)
         #expect(Set(proposals.map(\.category)) == Set(JournalIntelligenceCategory.allCases))
@@ -90,7 +92,6 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(reasonCodes.contains("low_quality_candidate"))
         #expect(reasonCodes.contains("corrected_later_in_capture"))
         #expect(reasonCodes.contains("duplicate_within_day"))
-        #expect(reasonCodes.contains("terminal_review_state"))
         #expect(reasonCodes.contains("missing_capture_event_provenance"))
     }
 
@@ -284,7 +285,10 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(proposals.count == 9)
         #expect(Set(proposals.map(\.candidateRef)).count == proposals.count)
         #expect(proposals.allSatisfy { $0.truthBoundary == "reviewable_candidate_not_truth" })
-        #expect(proposals.allSatisfy { $0.statusLabel == "Suggestion, not accepted truth" })
+        #expect(proposals.allSatisfy {
+            $0.statusLabel == "Suggestion, not accepted truth"
+                || $0.statusLabel == "Deferred suggestion, not accepted truth"
+        })
         #expect(proposals.allSatisfy { !$0.source.quote.isEmpty })
         #expect(proposals.allSatisfy { $0.source.spanEnd > $0.source.spanStart })
         #expect(proposals.allSatisfy { $0.source.coordinateSpace == "capture_event.source_text" })
@@ -361,6 +365,282 @@ struct JournalIntelligenceDailyReceiptTests {
         })
     }
 
+    @Test("Journal review audits every receipt category against truthful canonical candidate actions")
+    func journalReviewAuditsEveryReceiptCategoryAgainstCanonicalActions() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+
+        let note = Note(
+            id: fixture.noteID,
+            title: "Daily Journal \(JournalIntelligenceCorpus.date)",
+            content: JournalIntelligenceCorpus.journalMarkdown,
+            createdAt: Date(timeIntervalSince1970: 1_784_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_784_000_000),
+            relativePath: "Inbox/Notes/Daily Journal \(JournalIntelligenceCorpus.date).md"
+        )
+        let day = try #require(JournalLibraryReadModel.build(from: [note]).defaultDay)
+        let model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let proposals = model.groups.flatMap(\.proposals)
+
+        #expect(Set(proposals.map(\.category)) == Set(JournalIntelligenceCategory.allCases))
+        #expect(proposals.allSatisfy { proposal in
+            Set(proposal.actions.descriptors.map(\.action)) == Set(JournalIntelligenceReviewAction.allCases)
+        })
+
+        for proposal in proposals {
+            let approve = try #require(proposal.actions.descriptor(for: .approve))
+            let correct = try #require(proposal.actions.descriptor(for: .correct))
+            let reject = try #require(proposal.actions.descriptor(for: .reject))
+            let deferAction = try #require(proposal.actions.descriptor(for: .defer))
+            #expect(reject.availability == .available)
+            #expect(deferAction.availability == (proposal.reviewState == "deferred" ? .alreadyReviewed : .available))
+
+            switch proposal.family {
+            case "memory_candidate":
+                #expect(approve.availability == .available)
+                #expect(approve.preview.localizedCaseInsensitiveContains("memory"))
+                #expect(approve.preview.localizedCaseInsensitiveContains("not create a task"))
+                #expect(correct.availability == .requiresCorrection)
+            case "graph_candidate":
+                #expect(approve.availability == .requiresTarget)
+                #expect(!approve.targetOptions.isEmpty)
+                #expect(approve.guidance.localizedCaseInsensitiveContains("choose"))
+                #expect(correct.availability == .requiresTarget)
+                #expect(correct.preview.localizedCaseInsensitiveContains("does not approve"))
+            default:
+                Issue.record("Receipt emitted unsupported family \(proposal.family)")
+            }
+        }
+
+        let unsupported = JournalIntelligenceReviewActionSet.unsupported(
+            family: "future_candidate",
+            reviewState: "suggested",
+            guidance: "This suggestion family does not have a canonical review service yet."
+        )
+        #expect(unsupported.descriptors.allSatisfy { $0.availability == .unavailable })
+        #expect(unsupported.descriptors.allSatisfy { $0.guidance.localizedCaseInsensitiveContains("does not have") })
+    }
+
+    @Test("Journal review mutations are source preserving fail closed and idempotent in disposable data")
+    func journalReviewMutationsAreSourcePreservingFailClosedAndIdempotent() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-journal-review-source-\(UUID().uuidString).md")
+        try JournalIntelligenceCorpus.journalMarkdown.write(to: sourceURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        let note = Note(
+            id: fixture.noteID,
+            title: "Daily Journal \(JournalIntelligenceCorpus.date)",
+            content: JournalIntelligenceCorpus.journalMarkdown,
+            createdAt: Date(timeIntervalSince1970: 1_784_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_784_000_000),
+            relativePath: sourceURL.path
+        )
+        let day = try #require(JournalLibraryReadModel.build(from: [note]).defaultDay)
+        let sourceBytesBefore = try Data(contentsOf: sourceURL)
+        let captureSourcesBefore = try captureEventSourceTexts(in: fixture.database)
+        let allTablesBefore = try allTableFingerprints(in: fixture.database)
+        let immutableTablesBefore = try tableFingerprints(
+            ["items", "notes", "capture_events", "capture_attachments", "todos", "projects", "bookmarks", "contacts", "vault_files"],
+            in: fixture.database
+        )
+
+        let actionService = JournalIntelligenceReviewActionService(database: fixture.database)
+        var model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+
+        let memoryApprove = try #require(model.proposal(candidateRef: "memory_candidate:people-maya"))
+        let memoryApproveRequest = JournalIntelligenceReviewActionRequest(
+            proposal: memoryApprove,
+            action: .approve
+        )
+        let approvedMemory = try actionService.perform(memoryApproveRequest, actor: "journal-review-test")
+        #expect(approvedMemory.changed)
+        #expect(approvedMemory.reviewState == "accepted")
+        #expect(approvedMemory.truthBoundary == "accepted_memory_candidate")
+
+        let approvedCounts = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(memoryApproveRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == approvedCounts)
+
+        model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let reviewedMemory = try #require(model.reviewedProposal(candidateRef: memoryApprove.candidateRef))
+        #expect(reviewedMemory.reviewState == "accepted")
+        #expect(reviewedMemory.source == memoryApprove.source)
+        #expect(reviewedMemory.statusLabel.localizedCaseInsensitiveContains("approved"))
+        #expect(reviewedMemory.actions.descriptors.allSatisfy { $0.availability == .alreadyReviewed })
+
+        let staleMemory = try #require(model.proposal(candidateRef: "memory_candidate:commitment-map"))
+        var staleRequest = JournalIntelligenceReviewActionRequest(
+            proposal: staleMemory,
+            action: .correct,
+            correctedValue: "Bring Maya the corrected trail map tomorrow."
+        )
+        staleRequest.expectedUpdatedAt = .distantPast
+        let beforeStale = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(staleRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == beforeStale)
+
+        let correctionRequest = JournalIntelligenceReviewActionRequest(
+            proposal: staleMemory,
+            action: .correct,
+            correctedValue: "Bring Maya the corrected trail map tomorrow."
+        )
+        let corrected = try actionService.perform(correctionRequest, actor: "journal-review-test")
+        #expect(corrected.changed)
+        #expect(corrected.reviewState == "needs_review")
+        #expect(corrected.truthBoundary == "reviewable_candidate_not_truth")
+        #expect(try SecondBrainEnrichmentOutputService(database: fixture.database)
+            .output(id: "commitment-map")?.evidence == staleMemory.source.quote)
+        let correctedCounts = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(correctionRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == correctedCounts)
+
+        model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let graphCorrection = try #require(model.proposal(candidateRef: "graph_candidate:place-discovery"))
+        let graphTarget = try #require(
+            graphCorrection.actions.descriptor(for: .correct)?.targetOptions.first
+        )
+        let correctedGraph = try actionService.perform(
+            JournalIntelligenceReviewActionRequest(
+                proposal: graphCorrection,
+                action: .correct,
+                targetOptionRef: graphTarget.id
+            ),
+            actor: "journal-review-test"
+        )
+        #expect(correctedGraph.reviewState == "needs_review")
+        #expect(try SecondBrainStore(database: fixture.database)
+            .outgoingRelations(for: SecondBrainOwnerRef(ownerType: "note", ownerID: fixture.noteID.uuidString))
+            .isEmpty)
+        let correctedGraphCounts = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(
+                JournalIntelligenceReviewActionRequest(
+                    proposal: graphCorrection,
+                    action: .correct,
+                    targetOptionRef: graphTarget.id
+                ),
+                actor: "journal-review-test"
+            )
+        }
+        #expect(try mutationCounts(in: fixture.database) == correctedGraphCounts)
+
+        model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let correctedGraphProposal = try #require(model.proposal(candidateRef: graphCorrection.candidateRef))
+        let approveTarget = try #require(
+            correctedGraphProposal.actions.descriptor(for: .approve)?.targetOptions.first { $0.id == graphTarget.id }
+        )
+        let graphApproveRequest = JournalIntelligenceReviewActionRequest(
+                proposal: correctedGraphProposal,
+                action: .approve,
+                targetOptionRef: approveTarget.id
+        )
+        let approvedGraph = try actionService.perform(graphApproveRequest, actor: "journal-review-test")
+        #expect(approvedGraph.reviewState == "accepted")
+        #expect(approvedGraph.targetOwnerRef == approveTarget.targetOwnerRef)
+        #expect(try SecondBrainStore(database: fixture.database)
+            .outgoingRelations(for: SecondBrainOwnerRef(ownerType: "note", ownerID: fixture.noteID.uuidString))
+            .count == 1)
+        let approvedGraphCounts = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(graphApproveRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == approvedGraphCounts)
+
+        model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let rejectProposal = try #require(model.proposal(candidateRef: "graph_candidate:artifact-arrival"))
+        let rejectRequest = JournalIntelligenceReviewActionRequest(proposal: rejectProposal, action: .reject)
+        let rejected = try actionService.perform(rejectRequest, actor: "journal-review-test")
+        #expect(rejected.reviewState == "rejected")
+        let rejectedCounts = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(rejectRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == rejectedCounts)
+
+        model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let deferProposal = try #require(model.proposal(candidateRef: "memory_candidate:trip-kyoto"))
+        let deferRequest = JournalIntelligenceReviewActionRequest(proposal: deferProposal, action: .defer)
+        let deferred = try actionService.perform(deferRequest, actor: "journal-review-test")
+        #expect(deferred.reviewState == "deferred")
+        #expect(deferred.truthBoundary == "reviewable_candidate_not_truth")
+        let deferredCounts = try mutationCounts(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(deferRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == deferredCounts)
+
+        let beforeInvalid = try mutationCounts(in: fixture.database)
+        let missingRequest = JournalIntelligenceReviewActionRequest(
+            candidateRef: "memory_candidate:missing",
+            family: "memory_candidate",
+            expectedReviewState: "suggested",
+            expectedUpdatedAt: Date(),
+            action: .reject
+        )
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(missingRequest, actor: "journal-review-test")
+        }
+        let unsupportedRequest = JournalIntelligenceReviewActionRequest(
+            candidateRef: "future_candidate:anything",
+            family: "future_candidate",
+            expectedReviewState: "suggested",
+            expectedUpdatedAt: Date(),
+            action: .approve
+        )
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(unsupportedRequest, actor: "journal-review-test")
+        }
+        let missingSourceRequest = JournalIntelligenceReviewActionRequest(
+            candidateRef: "memory_candidate:noise-no-provenance",
+            family: "memory_candidate",
+            expectedReviewState: "suggested",
+            expectedUpdatedAt: try #require(
+                SecondBrainEnrichmentOutputService(database: fixture.database)
+                    .output(id: "noise-no-provenance")?.updatedAt
+            ),
+            action: .reject
+        )
+        #expect(throws: JournalIntelligenceReviewActionError.self) {
+            _ = try actionService.perform(missingSourceRequest, actor: "journal-review-test")
+        }
+        #expect(try mutationCounts(in: fixture.database) == beforeInvalid)
+
+        fixture.database.close()
+        try fixture.database.open(at: fixture.databaseURL)
+        let relaunchedModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        #expect(relaunchedModel.reviewedProposal(candidateRef: memoryApprove.candidateRef)?.reviewState == "accepted")
+        #expect(relaunchedModel.reviewedProposal(candidateRef: rejectProposal.candidateRef)?.reviewState == "rejected")
+        #expect(relaunchedModel.proposal(candidateRef: "memory_candidate:commitment-map")?.reviewState == "needs_review")
+        #expect(relaunchedModel.proposal(candidateRef: deferProposal.candidateRef)?.reviewState == "deferred")
+        #expect(relaunchedModel.reviewedProposal(candidateRef: graphCorrection.candidateRef)?.source == graphCorrection.source)
+
+        #expect(try Data(contentsOf: sourceURL) == sourceBytesBefore)
+        #expect(try captureEventSourceTexts(in: fixture.database) == captureSourcesBefore)
+        #expect(try tableFingerprints(
+            ["items", "notes", "capture_events", "capture_attachments", "todos", "projects", "bookmarks", "contacts", "vault_files"],
+            in: fixture.database
+        ) == immutableTablesBefore)
+        #expect(try scalarCount("action_receipts", in: fixture.database) == 6)
+        #expect(try scalarCount("agent_actions", in: fixture.database) == 6)
+        let allTablesAfter = try allTableFingerprints(in: fixture.database)
+        let changedTables = Set(allTablesAfter.compactMap { table, fingerprint in
+            allTablesBefore[table] == fingerprint ? nil : table
+        })
+        #expect(changedTables == [
+            "action_receipts", "agent_actions", "enrichment_outputs", "owner_label_index",
+            "owner_relations", "review_lifecycle_events", "source_evidence",
+        ])
+    }
+
     @Test("Journal review copy fails closed for every reconciliation and receipt health state")
     func journalReviewCopyFailsClosedForEveryState() throws {
         let matched = JournalIntelligenceReviewReconciliation.make(
@@ -426,6 +706,73 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(JournalIntelligenceDayReviewHealth.partial.message.localizedCaseInsensitiveContains("partial"))
         #expect(JournalIntelligenceDayReviewHealth.stale.message.localizedCaseInsensitiveContains("stale"))
         #expect(JournalIntelligenceDayReviewHealth.unavailable.message.localizedCaseInsensitiveContains("unavailable"))
+    }
+
+    private func captureEventSourceTexts(in database: CiderDatabase) throws -> [String: String] {
+        let statement = try database.prepare("SELECT id, COALESCE(source_text, '') FROM capture_events ORDER BY id;")
+        var result: [String: String] = [:]
+        while try statement.step() {
+            result[statement.string(at: 0)] = statement.string(at: 1)
+        }
+        return result
+    }
+
+    private func mutationCounts(in database: CiderDatabase) throws -> [String: Int] {
+        let tables = [
+            "enrichment_outputs", "owner_relations", "source_evidence",
+            "review_lifecycle_events", "agent_actions", "action_receipts", "owner_label_index",
+        ]
+        return try Dictionary(uniqueKeysWithValues: tables.map { table in
+            (table, try scalarCount(table, in: database))
+        })
+    }
+
+    private func scalarCount(_ table: String, in database: CiderDatabase) throws -> Int {
+        let statement = try database.prepare("SELECT COUNT(*) FROM \(table);")
+        guard try statement.step() else { return 0 }
+        return statement.int(at: 0)
+    }
+
+    private func tableFingerprints(
+        _ tables: [String],
+        in database: CiderDatabase
+    ) throws -> [String: String] {
+        try Dictionary(uniqueKeysWithValues: tables.map { table in
+            let pragma = try database.prepare("PRAGMA table_info(\(table));")
+            var columns: [String] = []
+            while try pragma.step() {
+                columns.append(pragma.string(at: 1))
+            }
+            let pairs = columns.flatMap { column in
+                ["'\(column)'", "\"\(column)\""]
+            }.joined(separator: ", ")
+            let statement = try database.prepare("""
+                SELECT COALESCE(GROUP_CONCAT(row_json, CHAR(10)), '')
+                FROM (
+                    SELECT json_object(\(pairs)) AS row_json
+                    FROM \(table)
+                    ORDER BY rowid
+                );
+                """)
+            _ = try statement.step()
+            return (table, statement.string(at: 0))
+        })
+    }
+
+    private func allTableFingerprints(in database: CiderDatabase) throws -> [String: String] {
+        let statement = try database.prepare("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+              AND name NOT LIKE '%_fts%'
+            ORDER BY name;
+            """)
+        var tables: [String] = []
+        while try statement.step() {
+            tables.append(statement.string(at: 0))
+        }
+        return try tableFingerprints(tables, in: database)
     }
 
     private func reconciliation(
