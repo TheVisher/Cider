@@ -32,6 +32,32 @@ struct JournalIntelligenceCLITests {
         #expect(Set(groups.compactMap { $0["category"] as? String }) == Set(JournalIntelligenceCategory.allCases.map(\.rawValue)))
 
         let proposals = groups.flatMap { $0["proposals"] as? [[String: Any]] ?? [] }
+        #expect(proposals.allSatisfy { proposal in
+            guard let reconciliation = proposal["crossTimeReconciliation"] as? [String: Any],
+                  let likelyMatches = reconciliation["likelyMatches"] as? [[String: Any]],
+                  let canonicalScans = reconciliation["canonicalFamilyScans"] as? [[String: Any]],
+                  let maximum = reconciliation["maxLikelyMatches"] as? Int else { return false }
+            return reconciliation["readOnly"] as? Bool == true
+                && reconciliation["changed"] as? Bool == false
+                && reconciliation["truthBoundary"] as? String == "reviewable_candidate_not_truth"
+                && reconciliation["status"] as? String != nil
+                && reconciliation["reasonCodes"] as? [String] != nil
+                && reconciliation["explanation"] as? String != nil
+                && likelyMatches.count <= maximum
+                && canonicalScans.allSatisfy { scan in
+                    scan["family"] as? String != nil
+                        && scan["limit"] as? Int != nil
+                        && scan["loadedCount"] as? Int != nil
+                        && scan["complete"] as? Bool != nil
+                        && scan["truncated"] as? Bool != nil
+                }
+        })
+        let unsupportedCategories = Set(proposals.compactMap { proposal -> String? in
+            guard let reconciliation = proposal["crossTimeReconciliation"] as? [String: Any],
+                  reconciliation["status"] as? String == "unsupported" else { return nil }
+            return proposal["category"] as? String
+        })
+        #expect(unsupportedCategories == Set(["activities", "commitments"]))
         let requiredQuotes = [
             "Maya started a new job at Alder Labs",
             "I promised Maya I would bring the trail map tomorrow",

@@ -76,6 +76,7 @@ struct JournalIntelligenceProposal: Codable, Equatable, Identifiable {
     var captureEvent: JournalIntelligenceCaptureEvent
     var section: JournalIntelligenceSection
     var source: JournalIntelligenceSourceSpan
+    var crossTimeReconciliation: JournalIntelligenceCrossTimeReconciliation? = nil
     var safeNextCommands: [String]
 }
 
@@ -209,6 +210,53 @@ private extension JournalIntelligenceProposal {
                 "spanEnd": source.spanEnd,
                 "quote": source.quote,
             ] as [String: Any],
+            "crossTimeReconciliation": crossTimeReconciliation?.toDictionary() ?? NSNull(),
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+}
+
+private extension JournalIntelligenceCrossTimeReconciliation {
+    func toDictionary() -> [String: Any] {
+        [
+            "status": status.rawValue,
+            "classification": classification?.rawValue ?? NSNull(),
+            "likelyMatches": likelyMatches.map { $0.toDictionary() },
+            "reasonCodes": reasonCodes,
+            "explanation": explanation,
+            "comparedCanonicalKinds": comparedCanonicalKinds,
+            "canonicalFamilyScans": canonicalFamilyScans.map { $0.toDictionary() },
+            "maxLikelyMatches": maxLikelyMatches,
+            "truthBoundary": truthBoundary,
+            "readOnly": readOnly,
+            "changed": changed,
+            "safeNextCommands": safeNextCommands,
+        ]
+    }
+}
+
+private extension JournalIntelligenceCanonicalFamilyScan {
+    func toDictionary() -> [String: Any] {
+        [
+            "family": family,
+            "limit": limit,
+            "loadedCount": loadedCount,
+            "complete": complete,
+            "truncated": truncated,
+        ]
+    }
+}
+
+private extension JournalIntelligenceLikelyMatch {
+    func toDictionary() -> [String: Any] {
+        [
+            "canonicalRef": canonicalRef,
+            "canonicalKind": canonicalKind,
+            "canonicalLabel": canonicalLabel,
+            "matchStrength": matchStrength.rawValue,
+            "confidence": confidence,
+            "reasonCodes": reasonCodes,
+            "evidence": evidence,
             "safeNextCommands": safeNextCommands,
         ]
     }
@@ -307,6 +355,20 @@ final class JournalIntelligenceDailyReceiptService {
             }
         }
 
+        let outputByCandidateRef = Dictionary(
+            drafts.map { (candidateRef(for: $0.output), $0.output) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let reconciliationService = JournalIntelligenceCrossTimeReconciliationService(database: database)
+        let reconciliation = try reconciliationService.reconcile(proposals.compactMap { proposal in
+            guard let output = outputByCandidateRef[proposal.candidateRef] else { return nil }
+            return JournalIntelligenceCrossTimeReconciliationService.Input(proposal: proposal, output: output)
+        })
+        if let canonicalDataAsOf = reconciliation.dataAsOf { dataDates.append(canonicalDataAsOf) }
+        for index in proposals.indices {
+            proposals[index].crossTimeReconciliation = reconciliation.byCandidateRef[proposals[index].candidateRef]
+        }
+
         proposals.sort(by: proposalOrder)
         suppressions.sort { $0.candidateRef < $1.candidateRef }
         let groups = JournalIntelligenceCategory.allCases.compactMap { category -> JournalIntelligenceProposalGroup? in
@@ -333,6 +395,7 @@ final class JournalIntelligenceDailyReceiptService {
                     ]
                 }
                 + (count > 0 ? ["cider-cli capture review-queue --kind graph_candidate --json", "cider-cli capture review-queue --kind memory_candidate --json"] : [])
+                + proposals.compactMap(\.crossTimeReconciliation).flatMap(\.safeNextCommands)
         )
 
         return JournalIntelligenceDailyReceipt(

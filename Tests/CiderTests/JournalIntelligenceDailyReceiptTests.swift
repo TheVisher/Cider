@@ -94,6 +94,162 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(reasonCodes.contains("missing_capture_event_provenance"))
     }
 
+    @Test("cross-time reconciliation classifies canonical matches and fails closed on ambiguity")
+    func crossTimeReconciliationClassifiesCanonicalMatchesAndAmbiguity() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+        try seedCanonicalReconciliationRecords(in: fixture.database)
+
+        let service = JournalIntelligenceDailyReceiptService(database: fixture.database)
+        let receipt = try service.receipt(date: JournalIntelligenceCorpus.date)
+        let proposals = receipt.groups.flatMap(\.proposals)
+        let byCategory = Dictionary(uniqueKeysWithValues: proposals.map { ($0.category, $0) })
+        let reconciliationMatches = proposals.compactMap(\.crossTimeReconciliation).flatMap(\.likelyMatches)
+        #expect(reconciliationMatches.allSatisfy {
+            !$0.canonicalRef.isEmpty
+                && !$0.canonicalKind.isEmpty
+                && !$0.canonicalLabel.isEmpty
+                && (0...1).contains($0.confidence)
+                && !$0.reasonCodes.isEmpty
+                && !$0.evidence.isEmpty
+        })
+        let supported = proposals.filter { ![JournalIntelligenceCategory.activities, .commitments].contains($0.category) }
+        #expect(supported.allSatisfy { proposal in
+            guard let reconciliation = proposal.crossTimeReconciliation else { return false }
+            return !reconciliation.canonicalFamilyScans.isEmpty
+                && reconciliation.canonicalFamilyScans.allSatisfy { $0.complete && !$0.truncated }
+        })
+
+        let people = try #require(byCategory[.people]?.crossTimeReconciliation)
+        #expect(people.status == .matched)
+        #expect(people.classification == .newUpdate)
+        #expect(people.likelyMatches.contains { $0.canonicalRef == "contact:contact-maya" && $0.canonicalKind == "person" })
+        #expect(people.likelyMatches.count <= people.maxLikelyMatches)
+
+        let places = try #require(byCategory[.places]?.crossTimeReconciliation)
+        #expect(places.status == .noMatch)
+        #expect(places.classification == .genuinelyNew)
+        #expect(places.likelyMatches.isEmpty)
+
+        let tasks = try #require(byCategory[.tasks]?.crossTimeReconciliation)
+        #expect(tasks.classification == .repeated)
+        #expect(tasks.likelyMatches.contains { $0.canonicalRef == "todo:todo-signed-permit" })
+
+        let media = try #require(byCategory[.artifactsMedia]?.crossTimeReconciliation)
+        #expect(media.classification == .newUpdate)
+        #expect(media.likelyMatches.contains { $0.canonicalRef == "media_item:arrival" })
+
+        let trip = try #require(byCategory[.tripPlans]?.crossTimeReconciliation)
+        #expect(trip.classification == .newUpdate)
+        #expect(trip.likelyMatches.contains { $0.canonicalRef == "accepted_memory_fact:accepted-trip-kyoto" })
+
+        let preference = try #require(byCategory[.preferences]?.crossTimeReconciliation)
+        #expect(preference.classification == .correctionOrConflict)
+        #expect(preference.likelyMatches.contains { $0.canonicalRef == "graph_object:cedar-loop-hike" })
+
+        let memory = try #require(byCategory[.durableMemory]?.crossTimeReconciliation)
+        #expect(memory.classification == .repeated)
+        #expect(memory.likelyMatches.contains { $0.canonicalRef == "accepted_memory_fact:accepted-hiking-mood" })
+
+        for category in [JournalIntelligenceCategory.activities, .commitments] {
+            let unsupported = try #require(byCategory[category]?.crossTimeReconciliation)
+            #expect(unsupported.status == .unsupported)
+            #expect(unsupported.classification == nil)
+            #expect(unsupported.likelyMatches.isEmpty)
+            #expect(unsupported.truthBoundary == "reviewable_candidate_not_truth")
+        }
+
+        try insertContact(id: "contact-maya-ambiguous", title: "Maya", into: fixture.database)
+        _ = try SecondBrainOwnerLabelIndexService(database: fixture.database).refreshContact(ownerID: "contact-maya-ambiguous")
+        let ambiguousReceipt = try service.receipt(date: JournalIntelligenceCorpus.date)
+        let ambiguousPeople = try #require(
+            ambiguousReceipt.groups.first { $0.category == .people }?.proposals.first?.crossTimeReconciliation
+        )
+        #expect(ambiguousPeople.status == .ambiguous)
+        #expect(ambiguousPeople.classification == nil)
+        #expect(ambiguousPeople.reasonCodes.contains("multiple_exact_canonical_identities"))
+        #expect(ambiguousPeople.likelyMatches.count == 2)
+        #expect(ambiguousPeople.likelyMatches.count <= ambiguousPeople.maxLikelyMatches)
+    }
+
+    @Test("cross-time reconciliation withholds genuinely new when a relevant canonical scan is truncated")
+    func crossTimeReconciliationWithholdsGenuinelyNewWhenRelevantScanIsTruncated() throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+
+        let labels = SecondBrainOwnerLabelIndexService(database: fixture.database)
+        for index in 0..<800 {
+            _ = try labels.upsertLabel(
+                owner: SecondBrainOwnerRef(ownerType: "place", ownerID: String(format: "place-%04d", index)),
+                ownerKind: "place",
+                canonicalLabel: "Unrelated place \(index)",
+                aliases: [],
+                sourceRefs: ["place:filler-\(index)"],
+                labelSource: "test.truncated_snapshot",
+                confidence: 1
+            )
+        }
+        _ = try labels.upsertLabel(
+            owner: SecondBrainOwnerRef(ownerType: "place", ownerID: "place-zzzz-discovery-park"),
+            ownerKind: "place",
+            canonicalLabel: "Discovery Park",
+            aliases: [],
+            sourceRefs: ["place:place-zzzz-discovery-park"],
+            labelSource: "test.truncated_snapshot",
+            confidence: 1
+        )
+        let outputService = SecondBrainEnrichmentOutputService(database: fixture.database)
+        let fillerOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: "canonical-scan-fillers")
+        for index in 0...500 {
+            try outputService.record(acceptedMemory(
+                id: String(format: "accepted-scan-filler-%04d", index),
+                owner: fillerOwner,
+                value: "Unrelated accepted memory \(index)",
+                kind: "scan_filler"
+            ))
+        }
+
+        let receipt = try JournalIntelligenceDailyReceiptService(database: fixture.database)
+            .receipt(date: JournalIntelligenceCorpus.date)
+        let proposals = receipt.groups.flatMap(\.proposals)
+        let byCategory = Dictionary(uniqueKeysWithValues: proposals.map { ($0.category, $0) })
+        let reconciliation = try #require(byCategory[.places]?.crossTimeReconciliation)
+
+        #expect(reconciliation.status.rawValue == "classification_withheld")
+        #expect(reconciliation.classification == nil)
+        #expect(reconciliation.likelyMatches.isEmpty)
+        #expect(reconciliation.reasonCodes.contains("canonical_scan_truncated"))
+        #expect(reconciliation.reasonCodes.contains("classification_withheld"))
+        #expect(!reconciliation.reasonCodes.contains("no_exact_place_identity"))
+        let labelScan = try #require(reconciliation.canonicalFamilyScans.first { $0.family == "owner_labels" })
+        #expect(labelScan.limit == 800)
+        #expect(labelScan.loadedCount == 800)
+        #expect(!labelScan.complete)
+        #expect(labelScan.truncated)
+
+        let expectedTruncatedFamilies: [JournalIntelligenceCategory: Set<String>] = [
+            .people: ["owner_labels", "accepted_memory_facts"],
+            .places: ["owner_labels"],
+            .preferences: ["accepted_memory_facts"],
+            .tasks: ["accepted_memory_facts"],
+            .artifactsMedia: ["owner_labels", "accepted_memory_facts"],
+            .tripPlans: ["owner_labels", "accepted_memory_facts"],
+            .durableMemory: ["accepted_memory_facts"],
+        ]
+        for (category, expectedFamilies) in expectedTruncatedFamilies {
+            let result = try #require(byCategory[category]?.crossTimeReconciliation)
+            #expect(result.status == .classificationWithheld)
+            #expect(result.classification == nil)
+            #expect(result.reasonCodes.contains("canonical_scan_truncated"))
+            #expect(Set(result.canonicalFamilyScans.filter(\.truncated).map(\.family)) == expectedFamilies)
+        }
+        for category in [JournalIntelligenceCategory.activities, .commitments] {
+            let unsupported = try #require(byCategory[category]?.crossTimeReconciliation)
+            #expect(unsupported.status == .unsupported)
+            #expect(unsupported.classification == nil)
+        }
+    }
+
     private struct Fixture {
         var database: CiderDatabase
         var databaseURL: URL
@@ -308,6 +464,120 @@ struct JournalIntelligenceDailyReceiptTests {
         note.bind(noteID.uuidString, at: 1)
             .bind(JournalIntelligenceCorpus.journalMarkdown, at: 2)
         try note.step()
+    }
+
+    private func seedCanonicalReconciliationRecords(in database: CiderDatabase) throws {
+        try insertContact(id: "contact-maya", title: "Maya", into: database)
+        _ = try SecondBrainOwnerLabelIndexService(database: database).refreshContact(ownerID: "contact-maya")
+
+        let timestamp = Date(timeIntervalSince1970: 1_783_000_000).timeIntervalSince1970
+        let taskItem = try database.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES ('todo-signed-permit', 'todo', 'Email the signed permit', ?, ?, NULL, 'Inbox/Todos/Email the signed permit.ics');
+            """)
+        taskItem.bind(timestamp, at: 1).bind(timestamp, at: 2)
+        try taskItem.step()
+        try database.runSQL("""
+            INSERT INTO todos (item_id, details, due_date, priority, is_completed, completed_at, notes, checklist, surfacing_rules, action_url, snoozed_until)
+            VALUES ('todo-signed-permit', '', NULL, NULL, 0, NULL, '', NULL, NULL, NULL, NULL);
+            """)
+
+        _ = try SecondBrainOwnerLabelIndexService(database: database).upsertLabel(
+            owner: SecondBrainOwnerRef(ownerType: "media_item", ownerID: "arrival"),
+            ownerKind: "media",
+            canonicalLabel: "Arrival",
+            aliases: ["Arrival (2016)"],
+            sourceRefs: ["media_item:arrival"],
+            labelSource: "test.canonical.media",
+            confidence: 0.99
+        )
+
+        let priorOwner = SecondBrainOwnerRef(ownerType: "note", ownerID: "prior-journal")
+        let outputService = SecondBrainEnrichmentOutputService(database: database)
+        try outputService.record(acceptedMemory(
+            id: "accepted-maya-job",
+            owner: priorOwner,
+            value: "Maya started a new job at Beacon Works.",
+            kind: "relationship_event"
+        ))
+        try outputService.record(acceptedMemory(
+            id: "accepted-trip-kyoto",
+            owner: priorOwner,
+            value: "October trip to Kyoto",
+            kind: "trip_plan"
+        ))
+        try outputService.record(acceptedMemory(
+            id: "accepted-hiking-mood",
+            owner: priorOwner,
+            value: "Hiking before work improves Visher's mood.",
+            kind: "pattern"
+        ))
+
+        var acceptedPreference = graph(
+            id: "accepted-dislikes-hike",
+            owner: priorOwner,
+            capture: JournalIntelligenceCorpus.captures[0],
+            quote: "I loved the cedar loop hike.",
+            mention: "cedar loop hike",
+            types: [.object],
+            relations: [.dislikes],
+            confidence: 0.95
+        )
+        acceptedPreference.reviewState = "accepted"
+        acceptedPreference.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType] = "graph_object"
+        acceptedPreference.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID] = "cedar-loop-hike"
+        acceptedPreference.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType] = "dislikes"
+        try outputService.record(acceptedPreference)
+    }
+
+    private func insertContact(id: String, title: String, into database: CiderDatabase) throws {
+        let timestamp = Date(timeIntervalSince1970: 1_783_000_000).timeIntervalSince1970
+        let item = try database.prepare("""
+            INSERT INTO items (id, type, title, created_at, updated_at, folder_id, relative_path)
+            VALUES (?, 'contact', ?, ?, ?, NULL, ?);
+            """)
+        item.bind(id, at: 1)
+            .bind(title, at: 2)
+            .bind(timestamp, at: 3)
+            .bind(timestamp, at: 4)
+            .bind("Inbox/Contacts/\(id).vcf", at: 5)
+        try item.step()
+        let contact = try database.prepare("""
+            INSERT INTO contacts (item_id, relationship_label, birthday, notes, email, phone, address, has_avatar, custom_fields)
+            VALUES (?, '', NULL, '', '', '', '', 0, '[]');
+            """)
+        contact.bind(id, at: 1)
+        try contact.step()
+    }
+
+    private func acceptedMemory(
+        id: String,
+        owner: SecondBrainOwnerRef,
+        value: String,
+        kind: String
+    ) -> SecondBrainEnrichmentOutput {
+        SecondBrainEnrichmentOutput(
+            id: id,
+            owner: owner,
+            chunkID: nil,
+            kind: "memory_candidate",
+            value: value,
+            normalizedValue: value.lowercased(),
+            label: "Accepted memory: \(kind)",
+            evidence: value,
+            source: "test.accepted_memory",
+            confidence: 0.96,
+            reviewState: "accepted",
+            metadata: [
+                "memory_kind": kind,
+                "candidate_kind": kind,
+                "source_kind": "journal",
+                "source_quote": value,
+                "truth_boundary": "accepted_memory_fact",
+            ],
+            createdAt: Date(timeIntervalSince1970: 1_783_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_783_000_000)
+        )
     }
 
     private func insertCapture(_ capture: JournalIntelligenceCorpus.Capture, noteID: UUID, at date: Date, into database: CiderDatabase) throws {
