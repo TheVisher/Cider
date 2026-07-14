@@ -57,7 +57,7 @@ final class AgentRoomsProductionCompositionCompatibilityTests: XCTestCase {
         XCTAssertEqual(sendCountAfterStaging, 0)
 
         await composition.session.startTranscription()
-        composition.transcription.emit(.final("speech stays editable"))
+        composition.transcription.emitFinal("speech stays editable")
         XCTAssertEqual(composition.session.composerText, "Keep  this draft\nexactly speech stays editable")
         let sendCountAfterSpeech = await composition.transport.currentSendCount()
         XCTAssertEqual(sendCountAfterSpeech, 0)
@@ -375,19 +375,53 @@ private final class CompatibilityFixture {
 }
 
 @MainActor
-private final class CompatibilityTranscriptionService: ConversationTranscriptionServicing {
-    let providerID = "compatibility-transcription"
+private final class CompatibilityTranscriptionService: CiderTranscriptionServicing {
+    let provider = TranscriptionProviderMetadata(
+        id: "compatibility-transcription",
+        adapterVersion: "1",
+        execution: .onDevice,
+        supportedInputs: [.liveMicrophone],
+        allowsNetworkFallback: false
+    )
     let authorization: ConversationTranscriptionAuthorization = .authorized
     let readiness: ConversationTranscriptionReadiness = .ready
     private var handler: (@MainActor @Sendable (ConversationTranscriptionEvent) -> Void)?
+    private var request: LiveTranscriptionRequest?
 
-    func requestAuthorization() async -> ConversationTranscriptionAuthorization { authorization }
-    func start(onEvent: @escaping @MainActor @Sendable (ConversationTranscriptionEvent) -> Void) throws {
+    func authorization(for input: TranscriptionInputKind) -> TranscriptionAuthorization { authorization }
+    func readiness(for input: TranscriptionInputKind) -> TranscriptionReadiness { readiness }
+    func requestAuthorization(for input: TranscriptionInputKind) async -> TranscriptionAuthorization { authorization }
+    func startLive(
+        _ request: LiveTranscriptionRequest,
+        onEvent: @escaping @MainActor @Sendable (ConversationTranscriptionEvent) -> Void
+    ) throws {
+        self.request = request
         handler = onEvent
     }
-    func stop() {}
-    func cancel() { handler = nil }
+    func stopLive() {}
+    func cancelLive() { handler = nil }
+    func transcribeStoredAudio(_ request: StoredAudioTranscriptionRequest) async -> TranscriptionResult {
+        .failure(.init(code: .unsupportedInput, message: "Not used by this compatibility fixture."))
+    }
+    func cancelStoredAudio() {}
     func emit(_ event: ConversationTranscriptionEvent) { handler?(event) }
+    func emitFinal(_ text: String) {
+        guard let request else { return }
+        emit(.final(.init(
+            text: text,
+            isFinal: true,
+            provenance: .init(
+                provider: provider,
+                source: request.source,
+                locale: .init(identifier: "en_US"),
+                timing: .init(
+                    startedAt: Date(timeIntervalSince1970: 1),
+                    completedAt: Date(timeIntervalSince1970: 2),
+                    audioDuration: 1
+                )
+            )
+        )))
+    }
 }
 
 private actor CompatibilityTransport: HermesBridgeTransport {

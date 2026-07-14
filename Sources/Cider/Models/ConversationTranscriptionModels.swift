@@ -1,40 +1,11 @@
 import Foundation
 
-enum ConversationTranscriptionAuthorization: String, Equatable, Sendable {
-    case notDetermined
-    case denied
-    case restricted
-    case authorized
-}
-
-enum ConversationTranscriptionReadiness: Equatable, Sendable {
-    case ready
-    case unavailable(reason: String)
-    case offline(reason: String)
-}
-
-enum ConversationTranscriptionEvent: Equatable, Sendable {
-    case level(Double)
-    case partial(String)
-    case final(String)
-    case failure(String)
-}
-
-/// Provider-neutral boundary. Cider owns room and draft state; implementations
-/// own only a bounded, explicitly started transcription session.
-@MainActor
-protocol ConversationTranscriptionServicing: AnyObject {
-    var providerID: String { get }
-    var authorization: ConversationTranscriptionAuthorization { get }
-    var readiness: ConversationTranscriptionReadiness { get }
-
-    func requestAuthorization() async -> ConversationTranscriptionAuthorization
-    func start(
-        onEvent: @escaping @MainActor @Sendable (ConversationTranscriptionEvent) -> Void
-    ) throws
-    func stop()
-    func cancel()
-}
+// Compatibility names for existing Conversation call sites while the production
+// capability now lives in the neutral shared transcription model.
+typealias ConversationTranscriptionAuthorization = TranscriptionAuthorization
+typealias ConversationTranscriptionReadiness = TranscriptionReadiness
+typealias ConversationTranscriptionEvent = TranscriptionEvent
+typealias ConversationTranscriptionServicing = CiderTranscriptionServicing
 
 enum AgentRoomsSpeechInputState: String, Equatable, Sendable {
     case notDetermined
@@ -139,14 +110,7 @@ struct AgentRoomsSpeechDraft: Equatable, Sendable {
     }
 
     static func boundedTranscript(_ text: String) -> String {
-        let safeScalars = text.unicodeScalars.map { scalar -> String in
-            if CharacterSet.controlCharacters.contains(scalar), scalar != "\n", scalar != "\t" {
-                return " "
-            }
-            return String(scalar)
-        }.joined()
-        return String(safeScalars.trimmingCharacters(in: .whitespacesAndNewlines)
-            .prefix(maximumTranscriptLength))
+        String(TranscriptionTranscript.normalize(text).prefix(maximumTranscriptLength))
     }
 
     static func merge(originalDraft: String, transcript: String) -> String {

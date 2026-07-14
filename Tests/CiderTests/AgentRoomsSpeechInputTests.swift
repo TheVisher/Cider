@@ -54,13 +54,14 @@ struct AgentRoomsSpeechInputTests {
         #expect(session.speechPresentation.state == .listening)
         service.emit(.level(9))
         #expect(session.speechPresentation.level == 1)
-        service.emit(.partial(String(repeating: "a", count: AgentRoomsSpeechDraft.maximumTranscriptLength + 40)))
+        service.emitPartial(String(repeating: "a", count: AgentRoomsSpeechDraft.maximumTranscriptLength + 40))
         #expect(session.composerText.count == "Typed first. ".count + AgentRoomsSpeechDraft.maximumTranscriptLength)
-        service.emit(.final("dictated ending"))
+        service.emitFinal("dictated ending")
 
         #expect(session.speechPresentation.state == .completed)
         #expect(session.composerText == "Typed first. dictated ending")
         #expect(session.speechDraft?.roomID == fixture.room.id.uuidString)
+        #expect(session.speechDraft?.providerID == "deterministic-fake")
         #expect(session.speechDraft?.transcript == "dictated ending")
         #expect(session.speechDraft?.isFinal == true)
         #expect(session.speechDraft?.retainsRawAudio == false)
@@ -76,6 +77,27 @@ struct AgentRoomsSpeechInputTests {
         #expect(session.speechDraft == nil)
     }
 
+    @Test("stored-audio results cannot cross into a live Chat draft")
+    func storedAudioResultCannotLeakIntoLiveDraft() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let service = FakeTranscriptionService()
+        let session = fixture.makeSession(transcriptionService: service)
+        session.composerText = "Typed draft"
+
+        await session.startTranscription()
+        service.emitStoredFinal("must stay outside Chat")
+
+        #expect(session.composerText == "Typed draft")
+        #expect(session.speechDraft == nil)
+        #expect(session.speechPresentation.state == .listening)
+        #expect(try fixture.repository.turns(roomID: fixture.room.id).isEmpty)
+        #expect(await fixture.transport.sendCount == 0)
+
+        service.emitFinal("live words")
+        #expect(session.composerText == "Typed draft live words")
+    }
+
     @Test("stop enters bounded processing and cancel restores the original draft without history")
     func stopAndCancelAreDeterministic() async throws {
         let fixture = try Fixture()
@@ -85,11 +107,11 @@ struct AgentRoomsSpeechInputTests {
         session.composerText = "Original  spacing\n"
 
         await session.startTranscription()
-        service.emit(.partial("temporary words"))
+        service.emitPartial("temporary words")
         session.stopTranscription()
         #expect(session.speechPresentation.state == .transcribing)
         #expect(service.stopCount == 1)
-        service.emit(.partial("late partial while finishing"))
+        service.emitPartial("late partial while finishing")
         #expect(session.speechPresentation.state == .transcribing)
         session.cancelTranscription()
 
@@ -101,8 +123,8 @@ struct AgentRoomsSpeechInputTests {
         #expect(await fixture.transport.sendCount == 0)
 
         await session.startTranscription()
-        service.emit(.partial("discard this partial"))
-        service.emit(.failure("provider detail that must not escape"))
+        service.emitPartial("discard this partial")
+        service.emitFailure("provider detail that must not escape")
         #expect(session.speechPresentation.state == .failed)
         #expect(session.speechPresentation.detail == "The original typed draft was preserved. Nothing was sent.")
         #expect(session.composerText == "Original  spacing\n")
@@ -121,13 +143,13 @@ struct AgentRoomsSpeechInputTests {
         session.composerText = "Room one original"
 
         await session.startTranscription()
-        service.emit(.partial("room one partial"))
+        service.emitPartial("room one partial")
         session.selectRoom(id: secondRoom.id.uuidString, persistIfCanonical: true)
 
         #expect(service.cancelCount == 1)
         #expect(session.speechPresentation.state == .cancelled)
         #expect(session.composerText == "")
-        service.emitLate(.final("must not leak"))
+        service.emitLateFinal("must not leak")
         #expect(session.composerText == "")
 
         session.composerText = "Room two draft"
@@ -149,7 +171,7 @@ struct AgentRoomsSpeechInputTests {
         session.composerText = "Plan"
 
         await session.startTranscription()
-        service.emit(.final("the launch"))
+        service.emitFinal("the launch")
         session.composerText = "Plan the quiet launch tomorrow"
 
         #expect(await fixture.transport.sendCount == 0)
@@ -180,7 +202,7 @@ struct AgentRoomsSpeechInputTests {
         )
         first.composerText = "Existing"
         await first.startTranscription()
-        service.emit(.final("durable draft"))
+        service.emitFinal("durable draft")
         #expect(first.composerText == "Existing durable draft")
         #expect(try fixture.repository.turns(roomID: fixture.room.id).isEmpty)
         fixture.database.close()
@@ -233,7 +255,7 @@ struct AgentRoomsSpeechInputTests {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let service = try String(
             contentsOf: repositoryRoot.appendingPathComponent(
-                "Sources/Cider/Services/Conversation/AppleSpeechTranscriptionService.swift"
+                "Sources/Cider/Services/Transcription/AppleSpeechTranscriptionService.swift"
             ),
             encoding: .utf8
         )
@@ -247,10 +269,12 @@ struct AgentRoomsSpeechInputTests {
         )
 
         #expect(service.contains("import Speech"))
-        #expect(service.contains("request.requiresOnDeviceRecognition = true"))
-        #expect(service.contains("func requestAuthorization() async"))
+        #expect(service.contains("speechRequest.requiresOnDeviceRecognition = true"))
+        #expect(service.contains("func requestAuthorization(for input: TranscriptionInputKind) async"))
+        #expect(service.contains("SFSpeechURLRecognitionRequest"))
         #expect(!service.contains("URLSession"))
         #expect(!service.contains("write(to:"))
+        #expect(!service.contains("removeItem"))
         #expect(info.contains("NSMicrophoneUsageDescription"))
         #expect(info.contains("NSSpeechRecognitionUsageDescription"))
         // Speech recognition is authorized at runtime through the usage descriptions.
@@ -287,7 +311,7 @@ private final class Fixture {
     }
 
     func makeSession(
-        transcriptionService: any ConversationTranscriptionServicing,
+        transcriptionService: any CiderTranscriptionServicing,
         selectionStore: (any AgentRoomsSelectionPersisting)? = nil,
         draftStore: (any AgentRoomsDraftPersisting)? = nil
     ) -> AgentRoomsSessionModel {
@@ -311,13 +335,21 @@ private final class Fixture {
 }
 
 @MainActor
-private final class FakeTranscriptionService: ConversationTranscriptionServicing {
-    let providerID = "deterministic-fake"
+private final class FakeTranscriptionService: CiderTranscriptionServicing {
+    let provider = TranscriptionProviderMetadata(
+        id: "deterministic-fake",
+        adapterVersion: "1",
+        execution: .onDevice,
+        supportedInputs: [.liveMicrophone],
+        allowsNetworkFallback: false
+    )
     private(set) var authorization: ConversationTranscriptionAuthorization
     let readiness: ConversationTranscriptionReadiness
     private let requestedAuthorization: ConversationTranscriptionAuthorization
     private var handler: (@MainActor @Sendable (ConversationTranscriptionEvent) -> Void)?
     private var lastHandler: (@MainActor @Sendable (ConversationTranscriptionEvent) -> Void)?
+    private var activeRequest: LiveTranscriptionRequest?
+    private var lastRequest: LiveTranscriptionRequest?
     private(set) var authorizationRequestCount = 0
     private(set) var startCount = 0
     private(set) var stopCount = 0
@@ -333,25 +365,39 @@ private final class FakeTranscriptionService: ConversationTranscriptionServicing
         self.readiness = readiness
     }
 
-    func requestAuthorization() async -> ConversationTranscriptionAuthorization {
+    func authorization(for input: TranscriptionInputKind) -> TranscriptionAuthorization {
+        authorization
+    }
+
+    func readiness(for input: TranscriptionInputKind) -> TranscriptionReadiness {
+        readiness
+    }
+
+    func requestAuthorization(for input: TranscriptionInputKind) async -> TranscriptionAuthorization {
         authorizationRequestCount += 1
         authorization = requestedAuthorization
         return authorization
     }
 
-    func start(onEvent: @escaping @MainActor @Sendable (ConversationTranscriptionEvent) -> Void) throws {
+    func startLive(
+        _ request: LiveTranscriptionRequest,
+        onEvent: @escaping @MainActor @Sendable (TranscriptionEvent) -> Void
+    ) throws {
         startCount += 1
+        activeRequest = request
+        lastRequest = request
         handler = onEvent
         lastHandler = onEvent
     }
 
-    func stop() {
+    func stopLive() {
         stopCount += 1
     }
 
-    func cancel() {
+    func cancelLive() {
         cancelCount += 1
         handler = nil
+        activeRequest = nil
     }
 
     func emit(_ event: ConversationTranscriptionEvent) {
@@ -360,6 +406,93 @@ private final class FakeTranscriptionService: ConversationTranscriptionServicing
 
     func emitLate(_ event: ConversationTranscriptionEvent) {
         lastHandler?(event)
+    }
+
+    func emitPartial(_ text: String) {
+        guard let activeRequest else { return }
+        emit(.partial(transcript(text: text, isFinal: false, request: activeRequest)))
+    }
+
+    func emitFinal(_ text: String) {
+        guard let activeRequest else { return }
+        emit(.final(transcript(text: text, isFinal: true, request: activeRequest)))
+    }
+
+    func emitLateFinal(_ text: String) {
+        guard let lastRequest else { return }
+        emitLate(.final(transcript(text: text, isFinal: true, request: lastRequest)))
+    }
+
+    func emitStoredFinal(_ text: String) {
+        emit(.final(.init(
+            text: text,
+            isFinal: true,
+            provenance: .init(
+                provider: provider,
+                source: .storedAudio(sourceID: "stored-source", displayName: "Voice Note.m4a"),
+                locale: .init(identifier: "en_US"),
+                timing: .init(
+                    startedAt: Date(timeIntervalSince1970: 1),
+                    completedAt: Date(timeIntervalSince1970: 2),
+                    audioDuration: 1
+                )
+            )
+        )))
+    }
+
+    func emitFailure(_ message: String) {
+        guard let activeRequest else { return }
+        emit(.failure(.init(
+            code: .recognitionFailed,
+            message: message,
+            provenance: provenance(request: activeRequest, completedAt: Date(timeIntervalSince1970: 2))
+        )))
+    }
+
+    func transcribeStoredAudio(_ request: StoredAudioTranscriptionRequest) async -> TranscriptionResult {
+        .failure(.init(
+            code: .unsupportedInput,
+            message: "The deterministic live-only test provider does not support stored audio.",
+            provenance: .init(
+                provider: provider,
+                source: request.source,
+                locale: .init(identifier: "en_US"),
+                timing: .init(startedAt: Date(timeIntervalSince1970: 1), completedAt: Date(timeIntervalSince1970: 1), audioDuration: nil)
+            )
+        ))
+    }
+
+    func cancelStoredAudio() {}
+
+    private func transcript(
+        text: String,
+        isFinal: Bool,
+        request: LiveTranscriptionRequest
+    ) -> TranscriptionTranscript {
+        .init(
+            text: text,
+            isFinal: isFinal,
+            provenance: provenance(
+                request: request,
+                completedAt: isFinal ? Date(timeIntervalSince1970: 2) : nil
+            )
+        )
+    }
+
+    private func provenance(
+        request: LiveTranscriptionRequest,
+        completedAt: Date?
+    ) -> TranscriptionProvenance {
+        .init(
+            provider: provider,
+            source: request.source,
+            locale: .init(identifier: "en_US"),
+            timing: .init(
+                startedAt: Date(timeIntervalSince1970: 1),
+                completedAt: completedAt,
+                audioDuration: completedAt == nil ? 0.5 : 1
+            )
+        )
     }
 }
 

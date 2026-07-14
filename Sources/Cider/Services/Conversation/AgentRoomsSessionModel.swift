@@ -20,7 +20,7 @@ final class AgentRoomsSessionModel: ObservableObject {
     private(set) var preferredCanonicalRoomID: String?
     private let selectionStore: (any AgentRoomsSelectionPersisting)?
     private let draftStore: any AgentRoomsDraftPersisting
-    private let transcriptionService: any ConversationTranscriptionServicing
+    private let transcriptionService: any CiderTranscriptionServicing
     private var isRestoringDraft = false
     private var activeSpeech: ActiveSpeech?
     private var completedSpeechOriginalDraft: String?
@@ -29,6 +29,7 @@ final class AgentRoomsSessionModel: ObservableObject {
         let token: UUID
         let roomID: String
         let originalDraft: String
+        let sourceID: String
     }
 
     init(
@@ -37,7 +38,7 @@ final class AgentRoomsSessionModel: ObservableObject {
         draftStore: (any AgentRoomsDraftPersisting)? = nil,
         agentAssignments: (any AgentRoomsAgentAssignmentActing)? = nil,
         participants: AgentRoomsParticipantService? = nil,
-        transcriptionService: any ConversationTranscriptionServicing = AppleSpeechTranscriptionService()
+        transcriptionService: any CiderTranscriptionServicing = CiderTranscriptionProviderSelection.makeDefault()
     ) {
         self.liveChat = liveChat
         self.agentAssignments = agentAssignments
@@ -46,8 +47,8 @@ final class AgentRoomsSessionModel: ObservableObject {
         self.draftStore = draftStore ?? makeAgentRoomsMemoryDraftStore()
         self.transcriptionService = transcriptionService
         self.speechPresentation = AgentRoomsSpeechInputPresentation.initial(
-            authorization: transcriptionService.authorization,
-            readiness: transcriptionService.readiness
+            authorization: transcriptionService.authorization(for: .liveMicrophone),
+            readiness: transcriptionService.readiness(for: .liveMicrophone)
         )
         let restoredSelection = selectionStore?.loadSelectedRoomID()
         self.selectedRoomID = restoredSelection
@@ -79,7 +80,7 @@ final class AgentRoomsSessionModel: ObservableObject {
         vaultRoot: URL = StoragePaths.cachedVaultDirectoryURL,
         selectionStore: any AgentRoomsSelectionPersisting = AgentRoomsSelectionStore.application,
         draftStore: any AgentRoomsDraftPersisting = AgentRoomsDraftStore.application,
-        transcriptionService: any ConversationTranscriptionServicing = AppleSpeechTranscriptionService(),
+        transcriptionService: any CiderTranscriptionServicing = CiderTranscriptionProviderSelection.makeDefault(),
         didMaterializeAttachments: @escaping @MainActor () -> Void = {
             VaultFileService.shared.scan()
         }
@@ -160,12 +161,18 @@ final class AgentRoomsSessionModel: ObservableObject {
         }
         if activeSpeech != nil { cancelTranscription() }
 
-        let context = ActiveSpeech(token: UUID(), roomID: selectedRoomID, originalDraft: composerText)
+        let token = UUID()
+        let context = ActiveSpeech(
+            token: token,
+            roomID: selectedRoomID,
+            originalDraft: composerText,
+            sourceID: "cider-live-transcription:\(token.uuidString)"
+        )
         activeSpeech = context
         completedSpeechOriginalDraft = nil
         speechDraft = nil
 
-        var authorization = transcriptionService.authorization
+        var authorization = transcriptionService.authorization(for: .liveMicrophone)
         if authorization == .notDetermined {
             speechPresentation = .init(
                 state: .requestingPermission,
@@ -173,7 +180,7 @@ final class AgentRoomsSessionModel: ObservableObject {
                 detail: "Cider needs microphone and speech recognition access to dictate into this draft.",
                 level: 0
             )
-            authorization = await transcriptionService.requestAuthorization()
+            authorization = await transcriptionService.requestAuthorization(for: .liveMicrophone)
             guard activeSpeech?.token == context.token,
                   self.selectedRoomID == context.roomID
             else { return }
@@ -183,11 +190,11 @@ final class AgentRoomsSessionModel: ObservableObject {
             activeSpeech = nil
             speechPresentation = AgentRoomsSpeechInputPresentation.initial(
                 authorization: authorization,
-                readiness: transcriptionService.readiness
+                readiness: transcriptionService.readiness(for: .liveMicrophone)
             )
             return
         }
-        let readiness = transcriptionService.readiness
+        let readiness = transcriptionService.readiness(for: .liveMicrophone)
         guard readiness == .ready else {
             activeSpeech = nil
             speechPresentation = AgentRoomsSpeechInputPresentation.readinessPresentation(readiness)
@@ -195,11 +202,11 @@ final class AgentRoomsSessionModel: ObservableObject {
         }
 
         do {
-            try transcriptionService.start { [weak self] event in
+            try transcriptionService.startLive(.init(sourceID: context.sourceID)) { [weak self] event in
                 self?.receiveTranscription(event, token: context.token, roomID: context.roomID)
             }
             guard activeSpeech?.token == context.token else {
-                transcriptionService.cancel()
+                transcriptionService.cancelLive()
                 return
             }
             speechPresentation = .init(
@@ -222,7 +229,7 @@ final class AgentRoomsSessionModel: ObservableObject {
 
     func stopTranscription() {
         guard activeSpeech != nil, speechPresentation.state == .listening else { return }
-        transcriptionService.stop()
+        transcriptionService.stopLive()
         speechPresentation = .init(
             state: .transcribing,
             title: "Finishing transcription",
@@ -233,7 +240,7 @@ final class AgentRoomsSessionModel: ObservableObject {
 
     func cancelTranscription() {
         guard let context = activeSpeech else { return }
-        transcriptionService.cancel()
+        transcriptionService.cancelLive()
         restoreOriginalDraft(context)
         activeSpeech = nil
         speechDraft = nil
@@ -304,11 +311,14 @@ final class AgentRoomsSessionModel: ObservableObject {
                 level: min(1, max(0, level))
             )
         case .partial(let transcript):
+            guard transcript.provenance.source.kind == .liveMicrophone,
+                  transcript.provenance.source.sourceID == context.sourceID
+            else { return }
             let remainsTranscribing = speechPresentation.state == .transcribing
             let draft = AgentRoomsSpeechDraft(
                 roomID: roomID,
-                providerID: transcriptionService.providerID,
-                transcript: transcript,
+                providerID: transcript.provenance.provider.id,
+                transcript: transcript.text,
                 isFinal: false
             )
             speechDraft = draft
@@ -325,10 +335,13 @@ final class AgentRoomsSessionModel: ObservableObject {
                 level: remainsTranscribing ? 0 : speechPresentation.level
             )
         case .final(let transcript):
+            guard transcript.provenance.source.kind == .liveMicrophone,
+                  transcript.provenance.source.sourceID == context.sourceID
+            else { return }
             let draft = AgentRoomsSpeechDraft(
                 roomID: roomID,
-                providerID: transcriptionService.providerID,
-                transcript: transcript,
+                providerID: transcript.provenance.provider.id,
+                transcript: transcript.text,
                 isFinal: true
             )
             speechDraft = draft
@@ -344,8 +357,13 @@ final class AgentRoomsSessionModel: ObservableObject {
                 detail: "Edit or discard it. Cider sends only when you explicitly choose Send.",
                 level: 0
             )
-        case .failure:
-            transcriptionService.cancel()
+        case .failure(let failure):
+            if let source = failure.provenance?.source {
+                guard source.kind == .liveMicrophone,
+                      source.sourceID == context.sourceID
+                else { return }
+            }
+            transcriptionService.cancelLive()
             restoreOriginalDraft(context)
             activeSpeech = nil
             speechDraft = nil
@@ -364,8 +382,8 @@ final class AgentRoomsSessionModel: ObservableObject {
             speechDraft = nil
             completedSpeechOriginalDraft = nil
             speechPresentation = AgentRoomsSpeechInputPresentation.initial(
-                authorization: transcriptionService.authorization,
-                readiness: transcriptionService.readiness
+                authorization: transcriptionService.authorization(for: .liveMicrophone),
+                readiness: transcriptionService.readiness(for: .liveMicrophone)
             )
             return
         }
