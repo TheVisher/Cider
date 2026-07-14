@@ -272,6 +272,18 @@ final class JournalIntelligenceReviewActionService {
         }
 
         let queue = CiderReviewQueueService(database: database)
+        if request.family == "graph_candidate",
+           request.action == .approve || request.action == .correct {
+            guard let targetOptionRef = request.targetOptionRef, !targetOptionRef.isEmpty else {
+                throw JournalIntelligenceReviewActionError.targetRequired(request.candidateRef)
+            }
+            let currentQueueItem = try queue.list(limit: Int.max, includeDeferred: true)
+                .items
+                .first { $0.candidateRef == request.candidateRef }
+            guard currentQueueItem?.targetOptions.contains(where: { $0.optionRef == targetOptionRef }) == true else {
+                throw JournalIntelligenceReviewActionError.targetUnavailable(targetOptionRef)
+            }
+        }
         var actionResult: CiderReviewCandidateQueueActionResult!
         var receiptID: String?
         try database.withTransaction {

@@ -102,13 +102,15 @@ struct JournalIntelligencePanelModelTests {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         for requiredComposition in [
-            "JournalIntelligenceReviewActionService().perform(",
+            "performReviewAction(",
+            "JournalIntelligenceNativeButton(",
+            "ViewThatFits(in: .horizontal)",
             "TextField(\n                        \"Corrected wording\"",
             "Menu(selectedTargetLabel(for: proposal) ?? \"Choose exact target\")",
-            ".accessibilityLabel(\"Approve this exact suggestion as a Cider memory\")",
-            ".accessibilityLabel(\"Save selected target as a correction without approving it\")",
-            ".accessibilityLabel(\"Reject \\(proposal.value) without accepting truth\")",
-            ".accessibilityLabel(\"Defer \\(proposal.value) for later review\")",
+            "accessibilityLabel: \"Approve this exact suggestion as a Cider memory\"",
+            "accessibilityLabel: \"Save selected target as a correction without approving it\"",
+            "accessibilityLabel: \"Reject \\(proposal.value) without accepting truth\"",
+            "accessibilityLabel: \"Defer \\(proposal.value) for later review\"",
             "onReload()",
         ] {
             #expect(source.contains(requiredComposition))

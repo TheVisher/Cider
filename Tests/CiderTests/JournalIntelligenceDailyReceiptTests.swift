@@ -1,4 +1,7 @@
+import AppKit
+import CryptoKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Cider
 
@@ -439,8 +442,8 @@ struct JournalIntelligenceDailyReceiptTests {
             relativePath: sourceURL.path
         )
         let day = try #require(JournalLibraryReadModel.build(from: [note]).defaultDay)
-        let sourceBytesBefore = try Data(contentsOf: sourceURL)
-        let captureSourcesBefore = try captureEventSourceTexts(in: fixture.database)
+        let sourceHashBefore = sha256(try Data(contentsOf: sourceURL))
+        let captureSourceHashesBefore = try captureEventSourceHashes(in: fixture.database)
         let allTablesBefore = try allTableFingerprints(in: fixture.database)
         let immutableTablesBefore = try tableFingerprints(
             ["items", "notes", "capture_events", "capture_attachments", "todos", "projects", "bookmarks", "contacts", "vault_files"],
@@ -449,6 +452,8 @@ struct JournalIntelligenceDailyReceiptTests {
 
         let actionService = JournalIntelligenceReviewActionService(database: fixture.database)
         var model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        var actionTableChanges: [String: Set<String>] = [:]
+        var tablesBeforeAction = allTablesBefore
 
         let memoryApprove = try #require(model.proposal(candidateRef: "memory_candidate:people-maya"))
         let memoryApproveRequest = JournalIntelligenceReviewActionRequest(
@@ -459,6 +464,9 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(approvedMemory.changed)
         #expect(approvedMemory.reviewState == "accepted")
         #expect(approvedMemory.truthBoundary == "accepted_memory_candidate")
+        var tablesAfterAction = try allTableFingerprints(in: fixture.database)
+        actionTableChanges["memory_approve"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
+        tablesBeforeAction = tablesAfterAction
 
         let approvedCounts = try mutationCounts(in: fixture.database)
         #expect(throws: JournalIntelligenceReviewActionError.self) {
@@ -497,6 +505,9 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(corrected.truthBoundary == "reviewable_candidate_not_truth")
         #expect(try SecondBrainEnrichmentOutputService(database: fixture.database)
             .output(id: "commitment-map")?.evidence == staleMemory.source.quote)
+        tablesAfterAction = try allTableFingerprints(in: fixture.database)
+        actionTableChanges["memory_correct"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
+        tablesBeforeAction = tablesAfterAction
         let correctedCounts = try mutationCounts(in: fixture.database)
         #expect(throws: JournalIntelligenceReviewActionError.self) {
             _ = try actionService.perform(correctionRequest, actor: "journal-review-test")
@@ -520,6 +531,9 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(try SecondBrainStore(database: fixture.database)
             .outgoingRelations(for: SecondBrainOwnerRef(ownerType: "note", ownerID: fixture.noteID.uuidString))
             .isEmpty)
+        tablesAfterAction = try allTableFingerprints(in: fixture.database)
+        actionTableChanges["graph_correct"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
+        tablesBeforeAction = tablesAfterAction
         let correctedGraphCounts = try mutationCounts(in: fixture.database)
         #expect(throws: JournalIntelligenceReviewActionError.self) {
             _ = try actionService.perform(
@@ -549,6 +563,9 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(try SecondBrainStore(database: fixture.database)
             .outgoingRelations(for: SecondBrainOwnerRef(ownerType: "note", ownerID: fixture.noteID.uuidString))
             .count == 1)
+        tablesAfterAction = try allTableFingerprints(in: fixture.database)
+        actionTableChanges["graph_approve"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
+        tablesBeforeAction = tablesAfterAction
         let approvedGraphCounts = try mutationCounts(in: fixture.database)
         #expect(throws: JournalIntelligenceReviewActionError.self) {
             _ = try actionService.perform(graphApproveRequest, actor: "journal-review-test")
@@ -560,6 +577,9 @@ struct JournalIntelligenceDailyReceiptTests {
         let rejectRequest = JournalIntelligenceReviewActionRequest(proposal: rejectProposal, action: .reject)
         let rejected = try actionService.perform(rejectRequest, actor: "journal-review-test")
         #expect(rejected.reviewState == "rejected")
+        tablesAfterAction = try allTableFingerprints(in: fixture.database)
+        actionTableChanges["graph_reject"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
+        tablesBeforeAction = tablesAfterAction
         let rejectedCounts = try mutationCounts(in: fixture.database)
         #expect(throws: JournalIntelligenceReviewActionError.self) {
             _ = try actionService.perform(rejectRequest, actor: "journal-review-test")
@@ -572,13 +592,42 @@ struct JournalIntelligenceDailyReceiptTests {
         let deferred = try actionService.perform(deferRequest, actor: "journal-review-test")
         #expect(deferred.reviewState == "deferred")
         #expect(deferred.truthBoundary == "reviewable_candidate_not_truth")
+        tablesAfterAction = try allTableFingerprints(in: fixture.database)
+        actionTableChanges["memory_defer"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
+        tablesBeforeAction = tablesAfterAction
         let deferredCounts = try mutationCounts(in: fixture.database)
         #expect(throws: JournalIntelligenceReviewActionError.self) {
             _ = try actionService.perform(deferRequest, actor: "journal-review-test")
         }
         #expect(try mutationCounts(in: fixture.database) == deferredCounts)
 
-        let beforeInvalid = try mutationCounts(in: fixture.database)
+        model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let targetRequiredProposal = try #require(model.proposal(candidateRef: "graph_candidate:preference-hike"))
+        let targetRequiredRequest = JournalIntelligenceReviewActionRequest(
+            proposal: targetRequiredProposal,
+            action: .approve
+        )
+        let unavailableTargetRequest = JournalIntelligenceReviewActionRequest(
+            proposal: targetRequiredProposal,
+            action: .approve,
+            targetOptionRef: "target-option:unavailable"
+        )
+        let correctionRequiredProposal = try #require(model.proposal(candidateRef: "memory_candidate:memory-hiking-mood"))
+        let correctionRequiredRequest = JournalIntelligenceReviewActionRequest(
+            proposal: correctionRequiredProposal,
+            action: .correct,
+            correctedValue: "   "
+        )
+        let beforeInvalid = try allTableFingerprints(in: fixture.database)
+        #expect(throws: JournalIntelligenceReviewActionError.targetRequired(targetRequiredProposal.candidateRef)) {
+            _ = try actionService.perform(targetRequiredRequest, actor: "journal-review-test")
+        }
+        #expect(throws: JournalIntelligenceReviewActionError.targetUnavailable("target-option:unavailable")) {
+            _ = try actionService.perform(unavailableTargetRequest, actor: "journal-review-test")
+        }
+        #expect(throws: JournalIntelligenceReviewActionError.correctionRequired(correctionRequiredProposal.candidateRef)) {
+            _ = try actionService.perform(correctionRequiredRequest, actor: "journal-review-test")
+        }
         let missingRequest = JournalIntelligenceReviewActionRequest(
             candidateRef: "memory_candidate:missing",
             family: "memory_candidate",
@@ -612,32 +661,52 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(throws: JournalIntelligenceReviewActionError.self) {
             _ = try actionService.perform(missingSourceRequest, actor: "journal-review-test")
         }
-        #expect(try mutationCounts(in: fixture.database) == beforeInvalid)
+        #expect(try allTableFingerprints(in: fixture.database) == beforeInvalid)
 
         fixture.database.close()
-        try fixture.database.open(at: fixture.databaseURL)
-        let relaunchedModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let reconstructedDatabase = CiderDatabase()
+        try reconstructedDatabase.open(at: fixture.databaseURL)
+        defer { reconstructedDatabase.close() }
+        let loadedJournalNote = try loadJournalNote(fixture.noteID, from: reconstructedDatabase)
+        let reconstructedNote = try #require(loadedJournalNote)
+        let reconstructedDay = try #require(JournalLibraryReadModel.build(from: [reconstructedNote]).defaultDay)
+        let relaunchedModel = try JournalIntelligenceDayReviewService(database: reconstructedDatabase)
+            .review(for: reconstructedDay)
         #expect(relaunchedModel.reviewedProposal(candidateRef: memoryApprove.candidateRef)?.reviewState == "accepted")
         #expect(relaunchedModel.reviewedProposal(candidateRef: rejectProposal.candidateRef)?.reviewState == "rejected")
         #expect(relaunchedModel.proposal(candidateRef: "memory_candidate:commitment-map")?.reviewState == "needs_review")
         #expect(relaunchedModel.proposal(candidateRef: deferProposal.candidateRef)?.reviewState == "deferred")
         #expect(relaunchedModel.reviewedProposal(candidateRef: graphCorrection.candidateRef)?.source == graphCorrection.source)
 
-        #expect(try Data(contentsOf: sourceURL) == sourceBytesBefore)
-        #expect(try captureEventSourceTexts(in: fixture.database) == captureSourcesBefore)
+        #expect(reconstructedDay.captureCards.map(\.id) == day.captureCards.map(\.id))
+        #expect(relaunchedModel.reviewedProposal(candidateRef: memoryApprove.candidateRef)?.sourceNavigation.captureCardID == memoryApprove.sectionID)
+        #expect(sha256(try Data(contentsOf: sourceURL)) == sourceHashBefore)
+        #expect(try captureEventSourceHashes(in: reconstructedDatabase) == captureSourceHashesBefore)
         #expect(try tableFingerprints(
             ["items", "notes", "capture_events", "capture_attachments", "todos", "projects", "bookmarks", "contacts", "vault_files"],
-            in: fixture.database
+            in: reconstructedDatabase
         ) == immutableTablesBefore)
-        #expect(try scalarCount("action_receipts", in: fixture.database) == 6)
-        #expect(try scalarCount("agent_actions", in: fixture.database) == 6)
-        let allTablesAfter = try allTableFingerprints(in: fixture.database)
+        #expect(try scalarCount("action_receipts", in: reconstructedDatabase) == 6)
+        #expect(try scalarCount("agent_actions", in: reconstructedDatabase) == 6)
+        let allTablesAfter = try allTableFingerprints(in: reconstructedDatabase)
         let changedTables = Set(allTablesAfter.compactMap { table, fingerprint in
             allTablesBefore[table] == fingerprint ? nil : table
         })
         #expect(changedTables == [
             "action_receipts", "agent_actions", "enrichment_outputs", "owner_label_index",
             "owner_relations", "review_lifecycle_events", "source_evidence",
+        ])
+        let candidateDecisionTables: Set<String> = [
+            "action_receipts", "agent_actions", "enrichment_outputs",
+            "review_lifecycle_events", "source_evidence",
+        ]
+        #expect(actionTableChanges == [
+            "memory_approve": candidateDecisionTables,
+            "memory_correct": candidateDecisionTables,
+            "graph_correct": candidateDecisionTables,
+            "graph_reject": candidateDecisionTables,
+            "memory_defer": candidateDecisionTables,
+            "graph_approve": candidateDecisionTables.union(["owner_label_index", "owner_relations"]),
         ])
     }
 
@@ -706,13 +775,208 @@ struct JournalIntelligenceDailyReceiptTests {
         #expect(JournalIntelligenceDayReviewHealth.partial.message.localizedCaseInsensitiveContains("partial"))
         #expect(JournalIntelligenceDayReviewHealth.stale.message.localizedCaseInsensitiveContains("stale"))
         #expect(JournalIntelligenceDayReviewHealth.unavailable.message.localizedCaseInsensitiveContains("unavailable"))
+        #expect(JournalIntelligenceReviewActionError.missingCandidate("candidate").localizedDescription
+            == "This suggestion no longer exists. Refresh Journal Review; nothing was changed.")
+        #expect(JournalIntelligenceReviewActionError.staleCandidate("candidate").localizedDescription
+            == "This suggestion changed after the page loaded. Refresh Journal Review before acting.")
+        #expect(JournalIntelligenceReviewActionError.alreadyReviewed("candidate", "accepted").localizedDescription
+            == "This suggestion is already accepted. Its source remains available; refresh before choosing another action.")
+        #expect(JournalIntelligenceReviewActionError.unsupportedFamily("future_candidate").localizedDescription
+            == "This future_candidate suggestion does not have a canonical Journal Review action service yet. Nothing was changed.")
+        #expect(JournalIntelligenceReviewActionError.targetRequired("candidate").localizedDescription
+            == "Choose the exact target first. Cider will not guess what to approve or correct.")
+        #expect(JournalIntelligenceReviewActionError.targetUnavailable("target").localizedDescription
+            == "That target is no longer available. Refresh Journal Review and choose again.")
+        #expect(JournalIntelligenceReviewActionError.missingSourceEvidence("candidate").localizedDescription
+            == "Cider cannot verify this suggestion's exact source evidence, so the action was blocked.")
+        #expect(JournalIntelligenceReviewActionError.correctionRequired("candidate").localizedDescription
+            == "Enter explicit corrected wording before saving this correction.")
     }
 
-    private func captureEventSourceTexts(in database: CiderDatabase) throws -> [String: String] {
+    @Test("production Journal Review hosts unclipped wide and narrow actions and opens the exact capture")
+    func productionJournalReviewHostsWideAndNarrowActionsAndExactSource() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.close() }
+
+        let note = Note(
+            id: fixture.noteID,
+            title: "Daily Journal \(JournalIntelligenceCorpus.date)",
+            content: JournalIntelligenceCorpus.journalMarkdown,
+            createdAt: Date(timeIntervalSince1970: 1_784_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_784_000_000),
+            relativePath: "Disposable/Daily Journal \(JournalIntelligenceCorpus.date).md"
+        )
+        let day = try #require(JournalLibraryReadModel.build(from: [note]).defaultDay)
+        let model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+
+        #expect(model.groups.map(\.category) == JournalIntelligenceCategory.allCases)
+        #expect(Set(model.groups.flatMap(\.proposals).map(\.family)) == ["graph_candidate", "memory_candidate"])
+        #expect(model.groups.flatMap(\.proposals).allSatisfy {
+            $0.truthBoundary == "reviewable_candidate_not_truth"
+        })
+
+        let memoryGroup = try #require(model.groups.first { group in
+            group.proposals.contains { $0.family == "memory_candidate" }
+        })
+        let graphGroup = try #require(model.groups.first { group in
+            group.proposals.contains { $0.family == "graph_candidate" }
+        })
+        var hostedModel = model
+        hostedModel.groups = [memoryGroup, graphGroup]
+        hostedModel.reviewedGroups = []
+        hostedModel.statement = "Cider found 2 things worth reviewing."
+
+        let memory = try #require(memoryGroup.proposals.first { $0.family == "memory_candidate" })
+        let graph = try #require(graphGroup.proposals.first { $0.family == "graph_candidate" })
+        var openedSource: JournalIntelligenceSourceNavigation?
+        let actionService = JournalIntelligenceReviewActionService(database: fixture.database)
+
+        for presentation in [
+            JournalReviewHostedPresentation(name: "wide", width: 920),
+            JournalReviewHostedPresentation(name: "narrow", width: 420),
+        ] {
+            let view = JournalIntelligenceDayReviewView(
+                state: .ready(hostedModel),
+                isExpanded: .constant(true),
+                onReload: {},
+                onOpenSource: { openedSource = $0 },
+                performReviewAction: { request in
+                    try actionService.perform(request, actor: "journal-review-production-composition-test")
+                }
+            )
+            .frame(width: presentation.width)
+            .fixedSize(horizontal: false, vertical: true)
+
+            let hosted = await hostJournalReview(view, width: presentation.width)
+            defer {
+                hosted.window.orderOut(nil)
+                hosted.window.contentView = nil
+            }
+
+            let elements = inProcessJournalReviewAccessibilityElements(in: hosted.hostingView)
+            let requiredLabels = [
+                "Approve this exact suggestion as a Cider memory",
+                "Save corrected wording without approving it",
+                "Reject \(memory.value) without accepting truth",
+                "Defer \(memory.value) for later review",
+                "Choose exact target",
+                "Save selected target as a correction without approving it",
+                "Approve the explicitly selected target for \(graph.value)",
+                "Reject \(graph.value) without accepting truth",
+                "Defer \(graph.value) for later review",
+            ]
+            for label in requiredLabels {
+                #expect(elements.contains { $0.label == label }, "Missing native accessibility control: \(label)")
+            }
+            #expect(elements.contains {
+                $0.role == NSAccessibility.Role.textField.rawValue && $0.label == "Corrected wording"
+            })
+
+            let buttonFrames = elements
+                .filter { $0.role == NSAccessibility.Role.button.rawValue && $0.frame != .zero }
+                .map(\.frame)
+            #expect(buttonFrames.count >= 8)
+            #expect(buttonFrames.allSatisfy { frame in
+                frame.width >= 24 && frame.height >= 16 && hosted.screenFrame.contains(frame.insetBy(dx: 0.5, dy: 0.5))
+            })
+            for (index, frame) in buttonFrames.enumerated() {
+                #expect(buttonFrames.dropFirst(index + 1).allSatisfy { !frame.intersects($0) })
+            }
+
+            let evidenceURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cid-830-journal-review-\(presentation.name).png")
+            try writeJournalReviewPNG(hosted.hostingView, to: evidenceURL)
+            #expect(FileManager.default.fileExists(atPath: evidenceURL.path))
+
+            if presentation.name == "wide" {
+                let sourceButton = try #require(elements.first { element in
+                    element.nativeButton?.title == "Show exact capture"
+                }?.nativeButton)
+                let sourceAction = try #require(sourceButton.action)
+                #expect(NSApp.sendAction(sourceAction, to: sourceButton.target, from: sourceButton))
+                #expect(openedSource?.precision == .exactCaptureMoment)
+                #expect(openedSource?.captureCardID == memory.sectionID)
+            }
+        }
+
+        var actionableModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let memoryApproval = try #require(actionableModel.proposal(candidateRef: "memory_candidate:people-maya"))
+        let approvedMemory = try actionService.perform(
+            .init(proposal: memoryApproval, action: .approve),
+            actor: "journal-review-production-composition-test"
+        )
+        #expect(approvedMemory.reviewState == "accepted")
+        #expect(approvedMemory.message == "Approved this exact suggestion as a Cider memory. The Journal source was not changed.")
+
+        actionableModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let memoryCorrection = try #require(actionableModel.proposal(candidateRef: "memory_candidate:commitment-map"))
+        let correctedMemory = try actionService.perform(
+            .init(
+                proposal: memoryCorrection,
+                action: .correct,
+                correctedValue: "Bring Maya the corrected trail map tomorrow."
+            ),
+            actor: "journal-review-production-composition-test"
+        )
+        #expect(correctedMemory.reviewState == "needs_review")
+        #expect(correctedMemory.truthBoundary == "reviewable_candidate_not_truth")
+
+        actionableModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let graphApproval = try #require(actionableModel.proposal(candidateRef: "graph_candidate:place-discovery"))
+        let explicitTarget = try #require(
+            graphApproval.actions.descriptor(for: .approve)?.targetOptions.first
+        )
+        let approvedGraph = try actionService.perform(
+            .init(
+                proposal: graphApproval,
+                action: .approve,
+                targetOptionRef: explicitTarget.id
+            ),
+            actor: "journal-review-production-composition-test"
+        )
+        #expect(approvedGraph.reviewState == "accepted")
+        #expect(approvedGraph.targetOwnerRef == explicitTarget.targetOwnerRef)
+        #expect(approvedGraph.message == "Approved the explicitly selected graph link. The Journal source was not changed.")
+
+        actionableModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let rejection = try #require(actionableModel.proposal(candidateRef: "graph_candidate:artifact-arrival"))
+        #expect(try actionService.perform(
+            .init(proposal: rejection, action: .reject),
+            actor: "journal-review-production-composition-test"
+        ).reviewState == "rejected")
+
+        actionableModel = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
+        let deferral = try #require(actionableModel.proposal(candidateRef: "memory_candidate:trip-kyoto"))
+        let deferredMemory = try actionService.perform(
+            .init(proposal: deferral, action: .defer),
+            actor: "journal-review-production-composition-test"
+        )
+        #expect(deferredMemory.reviewState == "deferred")
+        #expect(deferredMemory.truthBoundary == "reviewable_candidate_not_truth")
+
+        fixture.database.close()
+        let reconstructedDatabase = CiderDatabase()
+        try reconstructedDatabase.open(at: fixture.databaseURL)
+        defer { reconstructedDatabase.close() }
+        let loadedReconstructedNote = try loadJournalNote(fixture.noteID, from: reconstructedDatabase)
+        let reconstructedNote = try #require(loadedReconstructedNote)
+        let reconstructedDay = try #require(JournalLibraryReadModel.build(from: [reconstructedNote]).defaultDay)
+        let reconstructedModel = try JournalIntelligenceDayReviewService(database: reconstructedDatabase)
+            .review(for: reconstructedDay)
+        #expect(reconstructedModel.reviewedProposal(candidateRef: memoryApproval.candidateRef)?.reviewState == "accepted")
+        #expect(reconstructedModel.reviewedProposal(candidateRef: graphApproval.candidateRef)?.reviewState == "accepted")
+        #expect(reconstructedModel.reviewedProposal(candidateRef: rejection.candidateRef)?.reviewState == "rejected")
+        #expect(reconstructedModel.proposal(candidateRef: memoryCorrection.candidateRef)?.reviewState == "needs_review")
+        #expect(reconstructedModel.proposal(candidateRef: deferral.candidateRef)?.reviewState == "deferred")
+        #expect(reconstructedModel.reviewedProposal(candidateRef: memoryApproval.candidateRef)?
+            .sourceNavigation.captureCardID == memoryApproval.sectionID)
+    }
+
+    private func captureEventSourceHashes(in database: CiderDatabase) throws -> [String: String] {
         let statement = try database.prepare("SELECT id, COALESCE(source_text, '') FROM capture_events ORDER BY id;")
         var result: [String: String] = [:]
         while try statement.step() {
-            result[statement.string(at: 0)] = statement.string(at: 1)
+            result[statement.string(at: 0)] = sha256(Data(statement.string(at: 1).utf8))
         }
         return result
     }
@@ -744,19 +1008,48 @@ struct JournalIntelligenceDailyReceiptTests {
                 columns.append(pragma.string(at: 1))
             }
             let pairs = columns.flatMap { column in
-                ["'\(column)'", "\"\(column)\""]
+                ["'\(column)'", "quote(\"\(column)\")"]
             }.joined(separator: ", ")
-            let statement = try database.prepare("""
-                SELECT COALESCE(GROUP_CONCAT(row_json, CHAR(10)), '')
-                FROM (
-                    SELECT json_object(\(pairs)) AS row_json
-                    FROM \(table)
-                    ORDER BY rowid
-                );
-                """)
-            _ = try statement.step()
-            return (table, statement.string(at: 0))
+            let statement = try database.prepare("SELECT json_object(\(pairs)) FROM \(table);")
+            var rows: [String] = []
+            while try statement.step() {
+                rows.append(statement.string(at: 0))
+            }
+            rows.sort()
+            let content = rows.joined(separator: "\n")
+            return (table, "count=\(rows.count);sha256=\(sha256(Data(content.utf8)))")
         })
+    }
+
+    private func changedTables(
+        from before: [String: String],
+        to after: [String: String]
+    ) -> Set<String> {
+        Set((Set(before.keys).union(after.keys)).filter { before[$0] != after[$0] })
+    }
+
+    private func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func loadJournalNote(_ id: UUID, from database: CiderDatabase) throws -> Note? {
+        let statement = try database.prepare("""
+            SELECT i.title, n.content, i.created_at, i.updated_at, COALESCE(i.relative_path, '')
+            FROM items i
+            JOIN notes n ON n.item_id = i.id
+            WHERE i.id = ? AND i.type = 'note'
+            LIMIT 1;
+            """)
+        statement.bind(id.uuidString, at: 1)
+        guard try statement.step() else { return nil }
+        return Note(
+            id: id,
+            title: statement.string(at: 0),
+            content: statement.string(at: 1),
+            createdAt: DatabaseHelpers.decodeDate(statement.double(at: 2)),
+            modifiedAt: DatabaseHelpers.decodeDate(statement.double(at: 3)),
+            relativePath: statement.string(at: 4)
+        )
     }
 
     private func allTableFingerprints(in database: CiderDatabase) throws -> [String: String] {
@@ -765,7 +1058,6 @@ struct JournalIntelligenceDailyReceiptTests {
             FROM sqlite_master
             WHERE type = 'table'
               AND name NOT LIKE 'sqlite_%'
-              AND name NOT LIKE '%_fts%'
             ORDER BY name;
             """)
         var tables: [String] = []
@@ -801,6 +1093,119 @@ struct JournalIntelligenceDailyReceiptTests {
             maxLikelyMatches: 3,
             safeNextCommands: []
         )
+    }
+
+    private struct JournalReviewHostedPresentation {
+        var name: String
+        var width: CGFloat
+    }
+
+    private struct JournalReviewAccessibilityElement {
+        var role: String?
+        var label: String?
+        var frame: CGRect
+        var nativeButton: NSButton?
+    }
+
+    private struct HostedJournalReview<Content: View> {
+        var window: NSWindow
+        var hostingView: CiderMainWindowHostingView<Content>
+        var screenFrame: CGRect
+    }
+
+    private func hostJournalReview<Content: View>(
+        _ view: Content,
+        width: CGFloat
+    ) async -> HostedJournalReview<Content> {
+        let hostingView = CiderMainWindowHostingView(rootView: view)
+        hostingView.frame = NSRect(x: 0, y: 0, width: width, height: 1)
+        hostingView.layoutSubtreeIfNeeded()
+        let fitting = hostingView.fittingSize
+        let height = max(1, fitting.height)
+        let window = CiderMainWindow()
+        window.setFrame(NSRect(x: 40, y: 40, width: width, height: height), display: false)
+        window.title = "CID-830 disposable Journal Review \(UUID().uuidString)"
+        hostingView.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(150))
+        hostingView.layoutSubtreeIfNeeded()
+        let frameInWindow = hostingView.convert(hostingView.bounds, to: nil)
+        return HostedJournalReview(
+            window: window,
+            hostingView: hostingView,
+            screenFrame: window.convertToScreen(frameInWindow)
+        )
+    }
+
+    private func inProcessJournalReviewAccessibilityElements(
+        in root: NSView
+    ) -> [JournalReviewAccessibilityElement] {
+        var elements: [JournalReviewAccessibilityElement] = []
+        var visited = Set<ObjectIdentifier>()
+
+        func collect(_ object: NSObject) {
+            guard visited.insert(ObjectIdentifier(object)).inserted else { return }
+            let role = object.perform(NSSelectorFromString("accessibilityRole"))?
+                .takeUnretainedValue() as? String
+            let label = object.perform(NSSelectorFromString("accessibilityLabel"))?
+                .takeUnretainedValue() as? String
+            let button = object as? any NSAccessibilityButton
+            elements.append(.init(
+                role: role,
+                label: label,
+                frame: button?.accessibilityFrame() ?? .zero,
+                nativeButton: object as? NSButton
+            ))
+            if let children = object.perform(NSSelectorFromString("accessibilityChildren"))?
+                .takeUnretainedValue() as? NSArray {
+                for child in children {
+                    if let child = child as? NSObject { collect(child) }
+                }
+            }
+        }
+
+        func collectView(_ view: NSView) {
+            collect(view)
+            if let button = view as? NSButton {
+                let customLabel = button.accessibilityLabel()
+                elements.append(.init(
+                    role: NSAccessibility.Role.button.rawValue,
+                    label: customLabel?.isEmpty == false ? customLabel : button.title,
+                    frame: button.accessibilityFrame(),
+                    nativeButton: button
+                ))
+            }
+            if let field = view as? NSTextField,
+               let object = field.accessibilityChildren()?.first as? NSObject,
+               let role = object.perform(NSSelectorFromString("accessibilityRole"))?
+                .takeUnretainedValue() as? String {
+                elements.append(.init(
+                    role: role,
+                    label: field.accessibilityLabel() ?? field.placeholderString,
+                    frame: field.accessibilityFrame(),
+                    nativeButton: nil
+                ))
+            }
+            for child in view.accessibilityChildren() ?? [] {
+                if let child = child as? NSObject { collect(child) }
+            }
+            for subview in view.subviews { collectView(subview) }
+        }
+        collectView(root)
+        return elements
+    }
+
+    private func writeJournalReviewPNG(_ view: NSView, to url: URL) throws {
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try data.write(to: url, options: .atomic)
     }
 
     private struct Fixture {

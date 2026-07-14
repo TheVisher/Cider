@@ -1,15 +1,37 @@
+import AppKit
 import SwiftUI
+
+typealias JournalIntelligenceReviewActionPerformer = @MainActor (
+    JournalIntelligenceReviewActionRequest
+) throws -> JournalIntelligenceReviewActionOutcome
 
 struct JournalIntelligenceDayReviewView: View {
     let state: JournalIntelligenceDayReviewLoadState
     @Binding var isExpanded: Bool
     let onReload: () -> Void
     let onOpenSource: (JournalIntelligenceSourceNavigation) -> Void
+    let performReviewAction: JournalIntelligenceReviewActionPerformer
     @State private var correctionDrafts: [String: String] = [:]
     @State private var selectedTargets: [String: String] = [:]
     @State private var actionMessages: [String: String] = [:]
     @State private var actionErrors: [String: String] = [:]
     @State private var activeActionCandidateRef: String?
+
+    init(
+        state: JournalIntelligenceDayReviewLoadState,
+        isExpanded: Binding<Bool>,
+        onReload: @escaping () -> Void,
+        onOpenSource: @escaping (JournalIntelligenceSourceNavigation) -> Void,
+        performReviewAction: @escaping JournalIntelligenceReviewActionPerformer = { request in
+            try JournalIntelligenceReviewActionService().perform(request, actor: "user")
+        }
+    ) {
+        self.state = state
+        _isExpanded = isExpanded
+        self.onReload = onReload
+        self.onOpenSource = onOpenSource
+        self.performReviewAction = performReviewAction
+    }
 
     var body: some View {
         Group {
@@ -26,7 +48,6 @@ struct JournalIntelligenceDayReviewView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CiderColors.accentSubtle.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        .accessibilityElement(children: .contain)
     }
 
     private var loadingView: some View {
@@ -127,8 +148,6 @@ struct JournalIntelligenceDayReviewView: View {
                             reviewGroup(group)
                         }
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Reviewed Journal suggestions with preserved source evidence")
                 }
             }
         }
@@ -217,12 +236,13 @@ struct JournalIntelligenceDayReviewView: View {
                     .foregroundColor(CiderColors.tertiary)
 
                 if proposal.sourceNavigation.captureCardID != nil {
-                    Button(proposal.sourceNavigation.actionLabel) {
+                    JournalIntelligenceNativeButton(
+                        title: proposal.sourceNavigation.actionLabel,
+                        accessibilityLabel: "\(proposal.sourceNavigation.actionLabel) at \(proposal.source.timestamp24Hour)",
+                        accessibilityHint: proposal.sourceNavigation.boundaryCopy
+                    ) {
                         onOpenSource(proposal.sourceNavigation)
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("\(proposal.sourceNavigation.actionLabel) at \(proposal.source.timestamp24Hour)")
-                    .accessibilityHint(proposal.sourceNavigation.boundaryCopy)
                 } else {
                     Text(proposal.sourceNavigation.boundaryCopy)
                         .font(CiderFont.captionMedium)
@@ -244,8 +264,6 @@ struct JournalIntelligenceDayReviewView: View {
             RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
                 .stroke(CiderColors.separatorSubtle, lineWidth: 1)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(proposal.statusLabel). \(proposal.value). \(proposal.reconciliation.label). Source at \(proposal.source.timestamp24Hour).")
     }
 
     @ViewBuilder
@@ -271,13 +289,15 @@ struct JournalIntelligenceDayReviewView: View {
 
             if proposal.family == "memory_candidate" {
                 if approve?.availability == .available {
-                    Button(approve?.label ?? "Approve memory") {
+                    JournalIntelligenceNativeButton(
+                        title: approve?.label ?? "Approve memory",
+                        accessibilityLabel: "Approve this exact suggestion as a Cider memory",
+                        accessibilityHint: approve?.preview ?? "",
+                        isEnabled: !isBusy,
+                        isProminent: true
+                    ) {
                         performAction(.approve, proposal: proposal)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isBusy)
-                    .accessibilityLabel("Approve this exact suggestion as a Cider memory")
-                    .accessibilityHint(approve?.preview ?? "")
                 }
 
                 if correct?.availability == .requiresCorrection {
@@ -292,21 +312,20 @@ struct JournalIntelligenceDayReviewView: View {
                         .font(CiderFont.captionMedium)
                         .foregroundColor(CiderColors.secondary)
 
-                    Button(correct?.label ?? "Correct wording") {
+                    JournalIntelligenceNativeButton(
+                        title: correct?.label ?? "Correct wording",
+                        accessibilityLabel: "Save corrected wording without approving it",
+                        accessibilityHint: correct?.preview ?? "",
+                        isEnabled: !isBusy
+                            && correctionDrafts[proposal.candidateRef]?
+                                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ) {
                         performAction(
                             .correct,
                             proposal: proposal,
                             correctedValue: correctionDrafts[proposal.candidateRef]
                         )
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(
-                        isBusy
-                            || correctionDrafts[proposal.candidateRef]?
-                                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-                    )
-                    .accessibilityLabel("Save corrected wording without approving it")
-                    .accessibilityHint(correct?.preview ?? "")
                 }
             } else if proposal.family == "graph_candidate",
                       let targetDescriptor = approve,
@@ -322,56 +341,50 @@ struct JournalIntelligenceDayReviewView: View {
                 .accessibilityLabel("Choose exact target for \(proposal.value)")
                 .accessibilityHint(targetDescriptor.guidance)
 
-                HStack(spacing: Spacing.sm) {
-                    Button(correct?.label ?? "Correct target") {
-                        performAction(
-                            .correct,
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.sm) {
+                        graphCorrectionButton(
                             proposal: proposal,
-                            targetOptionRef: selectedTargets[proposal.candidateRef]
+                            descriptor: correct,
+                            isBusy: isBusy
+                        )
+                        graphApprovalButton(
+                            proposal: proposal,
+                            descriptor: targetDescriptor,
+                            isBusy: isBusy
                         )
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(isBusy || selectedTargets[proposal.candidateRef] == nil)
-                    .accessibilityLabel("Save selected target as a correction without approving it")
-                    .accessibilityHint(correct?.preview ?? "")
-
-                    Button(targetDescriptor.label) {
-                        performAction(
-                            .approve,
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        graphCorrectionButton(
                             proposal: proposal,
-                            targetOptionRef: selectedTargets[proposal.candidateRef]
+                            descriptor: correct,
+                            isBusy: isBusy
+                        )
+                        graphApprovalButton(
+                            proposal: proposal,
+                            descriptor: targetDescriptor,
+                            isBusy: isBusy
                         )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isBusy || selectedTargets[proposal.candidateRef] == nil)
-                    .accessibilityLabel("Approve the explicitly selected target for \(proposal.value)")
-                    .accessibilityHint(targetDescriptor.preview)
                 }
             }
 
-            HStack(spacing: Spacing.sm) {
-                if reject?.availability == .available {
-                    Button(reject?.label ?? "Reject") {
-                        performAction(.reject, proposal: proposal)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isBusy)
-                    .accessibilityLabel("Reject \(proposal.value) without accepting truth")
-                    .accessibilityHint(reject?.preview ?? "")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Spacing.sm) {
+                    terminalDecisionButtons(
+                        proposal: proposal,
+                        reject: reject,
+                        deferAction: deferAction,
+                        isBusy: isBusy
+                    )
                 }
-                if deferAction?.availability == .available {
-                    Button(deferAction?.label ?? "Defer") {
-                        performAction(.defer, proposal: proposal)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isBusy)
-                    .accessibilityLabel("Defer \(proposal.value) for later review")
-                    .accessibilityHint(deferAction?.preview ?? "")
-                }
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Saving Journal Review decision")
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    terminalDecisionButtons(
+                        proposal: proposal,
+                        reject: reject,
+                        deferAction: deferAction,
+                        isBusy: isBusy
+                    )
                 }
             }
 
@@ -398,7 +411,79 @@ struct JournalIntelligenceDayReviewView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CiderColors.accentSubtle.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
-        .accessibilityElement(children: .contain)
+    }
+
+    private func graphCorrectionButton(
+        proposal: JournalIntelligenceReviewProposal,
+        descriptor: JournalIntelligenceReviewActionDescriptor?,
+        isBusy: Bool
+    ) -> some View {
+        JournalIntelligenceNativeButton(
+            title: descriptor?.label ?? "Correct target",
+            accessibilityLabel: "Save selected target as a correction without approving it",
+            accessibilityHint: descriptor?.preview ?? "",
+            isEnabled: !isBusy && selectedTargets[proposal.candidateRef] != nil
+        ) {
+            performAction(
+                .correct,
+                proposal: proposal,
+                targetOptionRef: selectedTargets[proposal.candidateRef]
+            )
+        }
+    }
+
+    private func graphApprovalButton(
+        proposal: JournalIntelligenceReviewProposal,
+        descriptor: JournalIntelligenceReviewActionDescriptor,
+        isBusy: Bool
+    ) -> some View {
+        JournalIntelligenceNativeButton(
+            title: descriptor.label,
+            accessibilityLabel: "Approve the explicitly selected target for \(proposal.value)",
+            accessibilityHint: descriptor.preview,
+            isEnabled: !isBusy && selectedTargets[proposal.candidateRef] != nil,
+            isProminent: true
+        ) {
+            performAction(
+                .approve,
+                proposal: proposal,
+                targetOptionRef: selectedTargets[proposal.candidateRef]
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func terminalDecisionButtons(
+        proposal: JournalIntelligenceReviewProposal,
+        reject: JournalIntelligenceReviewActionDescriptor?,
+        deferAction: JournalIntelligenceReviewActionDescriptor?,
+        isBusy: Bool
+    ) -> some View {
+        if reject?.availability == .available {
+            JournalIntelligenceNativeButton(
+                title: reject?.label ?? "Reject",
+                accessibilityLabel: "Reject \(proposal.value) without accepting truth",
+                accessibilityHint: reject?.preview ?? "",
+                isEnabled: !isBusy
+            ) {
+                performAction(.reject, proposal: proposal)
+            }
+        }
+        if deferAction?.availability == .available {
+            JournalIntelligenceNativeButton(
+                title: deferAction?.label ?? "Defer",
+                accessibilityLabel: "Defer \(proposal.value) for later review",
+                accessibilityHint: deferAction?.preview ?? "",
+                isEnabled: !isBusy
+            ) {
+                performAction(.defer, proposal: proposal)
+            }
+        }
+        if isBusy {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("Saving Journal Review decision")
+        }
     }
 
     private func selectedTargetLabel(for proposal: JournalIntelligenceReviewProposal) -> String? {
@@ -436,14 +521,13 @@ struct JournalIntelligenceDayReviewView: View {
         actionErrors[proposal.candidateRef] = nil
         actionMessages[proposal.candidateRef] = nil
         do {
-            let result = try JournalIntelligenceReviewActionService().perform(
+            let result = try performReviewAction(
                 JournalIntelligenceReviewActionRequest(
                     proposal: proposal,
                     action: action,
                     correctedValue: correctedValue,
                     targetOptionRef: targetOptionRef
-                ),
-                actor: "user"
+                )
             )
             actionMessages[proposal.candidateRef] = result.message
             correctionDrafts[proposal.candidateRef] = nil
@@ -453,6 +537,61 @@ struct JournalIntelligenceDayReviewView: View {
             actionErrors[proposal.candidateRef] = error.localizedDescription
         }
         activeActionCandidateRef = nil
+    }
+}
+
+private struct JournalIntelligenceNativeButton: NSViewRepresentable {
+    var title: String
+    var accessibilityLabel: String
+    var accessibilityHint: String
+    var isEnabled: Bool = true
+    var isProminent: Bool = false
+    var action: @MainActor () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.activate))
+        button.bezelStyle = .rounded
+        button.controlSize = .regular
+        button.setAccessibilityLabel(accessibilityLabel)
+        button.setAccessibilityHelp(accessibilityHint)
+        button.bezelColor = isProminent ? .controlAccentColor : nil
+        button.sizeToFit()
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.title = title
+        button.isEnabled = isEnabled
+        button.setAccessibilityLabel(accessibilityLabel)
+        button.setAccessibilityHelp(accessibilityHint)
+        button.bezelColor = isProminent ? .controlAccentColor : nil
+        button.sizeToFit()
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView button: NSButton,
+        context: Context
+    ) -> CGSize? {
+        button.fittingSize
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: @MainActor () -> Void
+
+        init(action: @escaping @MainActor () -> Void) {
+            self.action = action
+        }
+
+        @objc func activate() {
+            action()
+        }
     }
 }
 
