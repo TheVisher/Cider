@@ -931,9 +931,16 @@ struct CiderReviewQueueActionResult: Equatable {
     var message: String
     var actor: String
     var safeActions: [String]
+    var candidateRef: String? = nil
+    var expectedVersionSelector: String? = nil
+    var actionReceiptID: String? = nil
+    var changed: Bool? = nil
+    var truthBoundary: String? = nil
+    var queueDisposition: CiderBookmarkEnrichmentQueueScheduleDisposition? = nil
+    var safeVerificationCommands: [String] = []
 
     func toDictionary() -> [String: Any] {
-        [
+        var dictionary: [String: Any] = [
             "action": action,
             "itemID": itemID.uuidString,
             "itemType": itemType,
@@ -943,6 +950,35 @@ struct CiderReviewQueueActionResult: Equatable {
             "actor": actor,
             "safeActions": safeActions,
         ]
+        if let candidateRef { dictionary["candidateRef"] = candidateRef }
+        if let expectedVersionSelector { dictionary["expectedVersionSelector"] = expectedVersionSelector }
+        if let actionReceiptID { dictionary["actionReceiptID"] = actionReceiptID }
+        if let changed { dictionary["changed"] = changed }
+        if let truthBoundary { dictionary["truthBoundary"] = truthBoundary }
+        if let queueDisposition { dictionary["queueDisposition"] = queueDisposition.rawValue }
+        if !safeVerificationCommands.isEmpty { dictionary["safeVerificationCommands"] = safeVerificationCommands }
+        return dictionary
+    }
+}
+
+struct CiderReviewEnrichmentCandidateSelection: Equatable, Sendable {
+    var itemID: UUID
+    var candidateRef: String
+    var expectedReviewState: String
+    var expectedUpdatedAt: Date
+
+    init?(item: CiderReviewQueueItem) {
+        guard item.kind == "enrichment",
+              item.itemType == "bookmark",
+              item.safeActions.contains("enrich"),
+              let candidateRef = item.candidateRef,
+              let expectedUpdatedAt = item.candidateUpdatedAt else {
+            return nil
+        }
+        self.itemID = item.itemID
+        self.candidateRef = candidateRef
+        self.expectedReviewState = item.reviewState
+        self.expectedUpdatedAt = expectedUpdatedAt
     }
 }
 
@@ -1068,10 +1104,12 @@ struct CiderReviewQueueBatchEnrichmentResult: Equatable {
     var scheduledCount: Int
     var excludedCount: Int
     var skippedCount: Int
+    var reusedCount: Int = 0
     var failedCount: Int
     var exclusionsByReason: [String: Int]
     var failures: [CiderReviewQueueBatchEnrichmentFailure]
     var safeActions: [String]
+    var scheduledItemIDs: [UUID] = []
 
     func toDictionary() -> [String: Any] {
         let formatter = ISO8601DateFormatter()
@@ -1085,6 +1123,7 @@ struct CiderReviewQueueBatchEnrichmentResult: Equatable {
             "scheduledCount": scheduledCount,
             "excludedCount": excludedCount,
             "skippedCount": skippedCount,
+            "reusedCount": reusedCount,
             "failedCount": failedCount,
             "exclusionsByReason": exclusionsByReason,
             "failures": failures.map { $0.toDictionary() },
@@ -1171,6 +1210,8 @@ enum CiderReviewQueueActionError: Error, LocalizedError {
     case itemNotFound(UUID)
     case unsupportedItemType(String)
     case noEnrichmentIssue(UUID)
+    case malformedExpectedVersion
+    case actionFailed(CiderReviewActionErrorClassification, String)
 
     var errorDescription: String? {
         switch self {
@@ -1180,6 +1221,10 @@ enum CiderReviewQueueActionError: Error, LocalizedError {
             return "Review enrichment is only supported for bookmarks, not \(type)."
         case .noEnrichmentIssue(let id):
             return "No active enrichment review issue found for \(id.uuidString)."
+        case .malformedExpectedVersion:
+            return "Expected version must use <review-state>@<16-hex-bit-pattern>."
+        case .actionFailed(_, let message):
+            return message
         }
     }
 }
@@ -1188,7 +1233,7 @@ enum CiderReviewQueueActionError: Error, LocalizedError {
 final class CiderReviewQueueService {
     private let database: CiderDatabase?
     private let routingDecisionService: CiderRoutingDecisionService
-    private let enrichmentScheduler: (UUID) -> Void
+    private let enrichmentActionCoordinator: CiderReviewActionCoordinator
     private let duplicateFindingsProvider: () -> [VaultDuplicateAuditor.Finding]
 
     private var resolvedDatabase: CiderDatabase? {
@@ -1198,14 +1243,33 @@ final class CiderReviewQueueService {
     init(
         database: CiderDatabase? = nil,
         routingDecisionService: CiderRoutingDecisionService? = nil,
-        enrichmentScheduler: ((UUID) -> Void)? = nil,
+        enrichmentScheduler: (@MainActor @Sendable (UUID) -> Void)? = nil,
+        enrichmentReviewScheduler: CiderBookmarkEnrichmentSchedulingService.Scheduler? = nil,
+        enrichmentScheduleCanceller: CiderBookmarkEnrichmentSchedulingService.ScheduleCanceller? = nil,
+        enrichmentFailureInjector: (@MainActor (CiderBookmarkEnrichmentSchedulingCheckpoint) throws -> Void)? = nil,
         duplicateFindingsProvider: (() -> [VaultDuplicateAuditor.Finding])? = nil
     ) {
         self.database = database
         self.routingDecisionService = routingDecisionService ?? CiderRoutingDecisionService(database: database)
-        self.enrichmentScheduler = enrichmentScheduler ?? { bookmarkID in
-            VaultBookmarkService.shared.refetchMetadata(for: bookmarkID)
+        let coordinatorDatabase = database ?? CiderDatabase.shared
+        let adaptedScheduler: CiderBookmarkEnrichmentSchedulingService.Scheduler?
+        if let enrichmentReviewScheduler {
+            adaptedScheduler = enrichmentReviewScheduler
+        } else if let enrichmentScheduler {
+            adaptedScheduler = { @MainActor @Sendable bookmarkID, _ in
+                enrichmentScheduler(bookmarkID)
+                return .scheduled
+            }
+        } else {
+            adaptedScheduler = nil
         }
+        enrichmentActionCoordinator = CiderReviewActionCoordinator(
+            database: coordinatorDatabase,
+            bookmarkService: .shared,
+            enrichmentScheduler: adaptedScheduler,
+            enrichmentScheduleCanceller: enrichmentScheduleCanceller,
+            enrichmentFailureInjector: enrichmentFailureInjector
+        )
         self.duplicateFindingsProvider = duplicateFindingsProvider ?? {
             if let database, database !== CiderDatabase.shared {
                 return []
@@ -2288,7 +2352,12 @@ final class CiderReviewQueueService {
     }
 
     @discardableResult
-    func enrich(itemID: UUID, actor: String = "user") throws -> CiderReviewQueueActionResult {
+    func enrich(
+        itemID: UUID,
+        actor: String = "user",
+        surface: CiderReviewInvokingSurface = .reviewQueue,
+        expectedVersionSelector: String? = nil
+    ) throws -> CiderReviewQueueActionResult {
         guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let items = try itemSummaries(in: db)
         guard let item = items[itemID] else {
@@ -2300,66 +2369,136 @@ final class CiderReviewQueueService {
 
         let bookmarkDetails = try bookmarkDetails(in: db)
         guard let details = bookmarkDetails[itemID],
-              enrichmentReviewItem(item: item, details: details, now: Date()) != nil else {
+              let reviewItem = enrichmentReviewItem(item: item, details: details, now: Date()),
+              var selection = CiderReviewEnrichmentCandidateSelection(item: reviewItem) else {
             throw CiderReviewQueueActionError.noEnrichmentIssue(itemID)
         }
+        if let expectedVersionSelector {
+            guard let expected = CiderBookmarkEnrichmentSchedulingService.decodeExpectedVersionSelector(expectedVersionSelector) else {
+                throw CiderReviewQueueActionError.malformedExpectedVersion
+            }
+            selection.expectedReviewState = expected.reviewState
+            selection.expectedUpdatedAt = expected.updatedAt
+        }
+        return try enrich(
+            selection: selection,
+            item: item,
+            actor: actor,
+            surface: surface,
+            batchContext: nil
+        )
+    }
 
-        enrichmentScheduler(itemID)
+    private func enrich(
+        selection: CiderReviewEnrichmentCandidateSelection,
+        item: CiderRoutingItemSummary,
+        actor: String,
+        surface: CiderReviewInvokingSurface,
+        batchContext: CiderBookmarkEnrichmentBatchContext?
+    ) throws -> CiderReviewQueueActionResult {
+        let outcome = enrichmentActionCoordinator.perform(
+            CiderReviewActionRequest(
+                identity: .init(candidateRef: selection.candidateRef, family: .enrichment),
+                expectedVersion: .init(
+                    reviewState: selection.expectedReviewState,
+                    updatedAt: selection.expectedUpdatedAt
+                ),
+                action: .enrich,
+                enrichmentItemID: selection.itemID,
+                enrichmentBatchContext: batchContext,
+                actor: actor,
+                surface: surface,
+                exactEvidenceRequirement: .required,
+                mutationAuthority: .directUserAction
+            )
+        )
+        if let failure = outcome.error {
+            throw CiderReviewQueueActionError.actionFailed(failure.classification, failure.message)
+        }
         return CiderReviewQueueActionResult(
             action: "review.enrich",
             itemID: item.id,
             itemType: item.type,
             title: item.title,
             status: "scheduled",
-            message: "Scheduled bookmark enrichment. The review item remains until metadata completes.",
+            message: outcome.message,
             actor: actor,
-            safeActions: ["review list", "bookmark get"]
+            safeActions: ["review list", "bookmark get"],
+            candidateRef: selection.candidateRef,
+            expectedVersionSelector: CiderBookmarkEnrichmentSchedulingService.expectedVersionSelector(
+                reviewState: selection.expectedReviewState,
+                updatedAt: selection.expectedUpdatedAt
+            ),
+            actionReceiptID: outcome.actionReceiptID,
+            changed: outcome.changed,
+            truthBoundary: outcome.truthBoundary,
+            queueDisposition: outcome.enrichmentQueueDisposition,
+            safeVerificationCommands: [
+                outcome.actionReceiptID.map { "cider-cli item action-ledger inspect \($0) --json" },
+                "cider-cli item get bookmark \(item.id.uuidString) --json",
+                "cider-cli review list --kind enrichment --json",
+            ].compactMap { $0 }
         )
     }
 
     func enrichBatch(
         actor: String = "user",
         sampleFailureLimit: Int = 10,
-        now: Date = Date()
+        now: Date = Date(),
+        surface: CiderReviewInvokingSurface = .reviewQueue,
+        candidates exactCandidates: [CiderReviewEnrichmentCandidateSelection]? = nil
     ) throws -> CiderReviewQueueBatchEnrichmentResult {
+        guard let db = resolvedDatabase else { throw CiderRoutingDecisionError.databaseUnavailable }
         let items = try list(limit: Int.max, now: now).items
-        let candidates = items.filter { item in
+        let currentCandidates = items.filter { item in
             item.kind == "enrichment"
                 && item.itemType == "bookmark"
                 && item.safeActions.contains("enrich")
         }
+        let candidates = exactCandidates ?? currentCandidates.compactMap(CiderReviewEnrichmentCandidateSelection.init(item:))
         let exclusions = items.compactMap { batchEnrichmentExclusionReason(for: $0) }
-        let batchID = UUID()
-        let failureLimit = max(0, sampleFailureLimit)
+        let batchID = CiderBookmarkEnrichmentSchedulingService.batchID(
+            candidateBindings: candidates.map {
+                "\($0.candidateRef)|\($0.itemID.uuidString)|\($0.expectedReviewState)|\($0.expectedUpdatedAt.timeIntervalSinceReferenceDate.bitPattern)"
+            },
+            actor: actor
+        )
+        let failureLimit = min(max(0, sampleFailureLimit), 100)
         var scheduledCount = 0
+        var reusedCount = 0
         var failures: [CiderReviewQueueBatchEnrichmentFailure] = []
+        var scheduledItemIDs: [UUID] = []
+        let itemSummaries = try itemSummaries(in: db)
+        let currentItemsByID = Dictionary(uniqueKeysWithValues: currentCandidates.map { ($0.itemID, $0) })
+        let batchContext = CiderBookmarkEnrichmentBatchContext(
+            batchID: batchID,
+            candidateCount: candidates.count,
+            excludedCount: exclusions.count
+        )
 
         for candidate in candidates {
             do {
-                _ = try enrich(itemID: candidate.itemID, actor: actor)
-                MutationAuditService(database: resolvedDatabase).record(
-                    action: "review.enrich.batch.schedule",
-                    itemType: candidate.itemType,
-                    itemID: candidate.itemID,
-                    after: [
-                        "reviewAction": "enrich",
-                        "status": "scheduled",
-                    ],
-                    metadata: [
-                        "batchID": batchID.uuidString,
-                        "candidateCount": String(candidates.count),
-                        "excludedCount": String(exclusions.count),
-                    ],
-                    source: mutationAuditSource(for: actor)
+                guard let item = itemSummaries[candidate.itemID] else {
+                    throw CiderReviewQueueActionError.itemNotFound(candidate.itemID)
+                }
+                let result = try enrich(
+                    selection: candidate,
+                    item: item,
+                    actor: actor,
+                    surface: surface,
+                    batchContext: batchContext
                 )
+                if result.changed == false { reusedCount += 1 }
                 scheduledCount += 1
+                scheduledItemIDs.append(candidate.itemID)
             } catch {
                 if failures.count < failureLimit {
+                    let current = currentItemsByID[candidate.itemID]
                     failures.append(
                         CiderReviewQueueBatchEnrichmentFailure(
                             itemID: candidate.itemID,
-                            itemType: candidate.itemType,
-                            title: candidate.title,
+                            itemType: current?.itemType ?? "bookmark",
+                            title: current?.title ?? candidate.itemID.uuidString,
                             reason: error.localizedDescription
                         )
                     )
@@ -2377,10 +2516,12 @@ final class CiderReviewQueueService {
             scheduledCount: scheduledCount,
             excludedCount: exclusions.count,
             skippedCount: 0,
+            reusedCount: reusedCount,
             failedCount: candidates.count - scheduledCount,
             exclusionsByReason: groupedCounts(exclusions),
             failures: failures,
-            safeActions: ["review summary", "review list", "bookmark get"]
+            safeActions: ["review summary", "review list", "bookmark get"],
+            scheduledItemIDs: scheduledItemIDs
         )
     }
 
@@ -2685,6 +2826,10 @@ final class CiderReviewQueueService {
         details: BookmarkReviewDetails,
         now: Date
     ) -> CiderReviewQueueItem? {
+        guard let updatedAt = item.updatedAt,
+              CiderBookmarkEnrichmentSchedulingService.isEligibleSourceURL(details.url) else {
+            return nil
+        }
         let status = details.enrichmentStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard status != "complete" || details.lastEnrichedAt == nil else { return nil }
         let failed = status == "failed" || status == "error"
@@ -2704,7 +2849,18 @@ final class CiderReviewQueueService {
             routingDecisionID: nil,
             target: nil,
             createdAt: now,
-            safeActions: ["enrich", "correct", "defer"]
+            safeActions: ["enrich", "correct", "defer"],
+            candidateID: item.id.uuidString,
+            candidateRef: CiderBookmarkEnrichmentSchedulingService.candidateRef(for: item.id),
+            candidateUpdatedAt: updatedAt,
+            safeNextCommands: [
+                "cider-cli review enrich \(item.id.uuidString) --expected-version \(CiderBookmarkEnrichmentSchedulingService.expectedVersionSelector(reviewState: failed ? "needs_review" : "pending", updatedAt: updatedAt)) --json",
+                "cider-cli item get bookmark \(item.id.uuidString) --json",
+                "cider-cli review list --kind enrichment --json",
+            ],
+            reviewFamily: "enrichment",
+            sourceItemRef: "bookmark:\(item.id.uuidString)",
+            truthState: "source_backed_enrichment_candidate_not_completion"
         )
     }
 

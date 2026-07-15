@@ -330,6 +330,29 @@ struct CiderCLI {
 
         if command == "review",
            let subcommand,
+           ["enrich", "enrich-batch"].contains(subcommand),
+           hasHelpArg(args) {
+            let usage = subcommand == "enrich"
+                ? "cider-cli review enrich <item-id> [--actor user|agent] [--expected-version <state@bits>] [--timeout <seconds>|--no-wait] [--json]"
+                : "cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]"
+            if args.contains("--json") {
+                outputJSON([
+                    "ok": true,
+                    "command": "review.\(subcommand).help",
+                    "usage": usage,
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "help_contract_only_not_vault_truth",
+                    "safeVerificationCommands": ["cider-cli review \(subcommand) --help --json"],
+                ])
+            } else {
+                print("Usage: \(usage)")
+            }
+            return true
+        }
+
+        if command == "review",
+           let subcommand,
            ["approve", "reject", "defer", "correct"].contains(subcommand),
            hasHelpArg(args) {
             let usage: String
@@ -3183,7 +3206,7 @@ struct CiderCLI {
 
         case "enrich":
             guard let itemRef = args.first else {
-                printCLIError("Usage: cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]")
+                printCLIError("Usage: cider-cli review enrich <item-id> [--actor user|agent] [--expected-version <state@bits>] [--timeout <seconds>|--no-wait] [--json]")
                 return
             }
             do {
@@ -3192,17 +3215,25 @@ struct CiderCLI {
                 let before = bookmarkService.bookmarks.first(where: { $0.id == itemID })
                 let result: CiderReviewQueueActionResult
                 do {
-                    result = try service.enrich(itemID: itemID, actor: actor)
+                    result = try service.enrich(
+                        itemID: itemID,
+                        actor: actor,
+                        surface: .cli,
+                        expectedVersionSelector: parseFlag("--expected-version", from: args)
+                    )
                 } catch CiderReviewQueueActionError.noEnrichmentIssue {
+                    guard parseFlag("--expected-version", from: args) == nil else {
+                        throw CiderReviewQueueActionError.noEnrichmentIssue(itemID)
+                    }
                     guard let before else { throw CiderReviewQueueActionError.itemNotFound(itemID) }
                     bookmarkService.refetchMetadata(for: itemID)
                     result = CiderReviewQueueActionResult(
-                        action: "review.enrich",
+                        action: "bookmark.refetch",
                         itemID: itemID,
                         itemType: "bookmark",
                         title: before.title,
                         status: "scheduled",
-                        message: "Scheduled bookmark enrichment for an explicit bookmark refetch.",
+                        message: "Scheduled an explicit bookmark refetch outside the active review-candidate family.",
                         actor: actor,
                         safeActions: ["review list", "item get"]
                     )
@@ -3240,7 +3271,9 @@ struct CiderCLI {
                         && item.safeActions.contains("enrich")
                 }
                 let result = try service.enrichBatch(
-                    actor: parseFlag("--actor", from: args) ?? "user"
+                    actor: parseFlag("--actor", from: args) ?? "user",
+                    surface: .cli,
+                    candidates: candidates.compactMap(CiderReviewEnrichmentCandidateSelection.init(item:))
                 )
                 if let timeout = reviewBatchWaitTimeout(from: args) {
                     await recordReviewBatchEnrichmentResults(
@@ -3281,7 +3314,7 @@ struct CiderCLI {
               cider-cli review reject <candidate-id> --reason <text> [--actor user|agent] [--json]
               cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
               cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
-              cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
+              cider-cli review enrich <item-id> [--actor user|agent] [--expected-version <state@bits>] [--timeout <seconds>|--no-wait] [--json]
               cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
               cider-cli review jobs [--limit <n>] [--json]
             """)
@@ -14350,19 +14383,28 @@ struct CiderCLI {
         bookmarkService: VaultBookmarkService
     ) async {
         let audit = MutationAuditService(database: CiderDatabase.shared)
-        for candidate in candidates {
+        let scheduledItemIDs = Set(result.scheduledItemIDs)
+        for candidate in candidates where scheduledItemIDs.contains(candidate.itemID) {
             let waitResult = await waitForBookmarkEnrichmentCompletion(
                 candidate.itemID,
                 in: bookmarkService,
                 timeout: timeout
             )
+            let status = waitResult.completed ? "completed" : "timed_out"
+            let alreadyRecorded = audit.loadEntries().contains { entry in
+                entry.action == "review.enrich.batch.result"
+                    && entry.itemID == candidate.itemID
+                    && entry.metadata["batchID"] == result.batchID.uuidString
+                    && entry.afterState["status"] == status
+            }
+            guard !alreadyRecorded else { continue }
             audit.record(
                 action: "review.enrich.batch.result",
                 itemType: candidate.itemType,
                 itemID: candidate.itemID,
                 after: [
                     "reviewAction": "enrich",
-                    "status": waitResult.completed ? "completed" : "timed_out",
+                    "status": status,
                     "elapsedSeconds": String(format: "%.1f", waitResult.elapsedSeconds),
                 ],
                 metadata: [
@@ -15396,6 +15438,9 @@ struct CiderCLI {
         print("  Type: \(result.itemType)")
         print("  Actor: \(result.actor)")
         print("  Message: \(result.message)")
+        if !result.safeVerificationCommands.isEmpty {
+            print("  Verify: \(result.safeVerificationCommands.joined(separator: ", "))")
+        }
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
     }
 
@@ -15417,11 +15462,12 @@ struct CiderCLI {
         let safeActions = reviewEnrichmentLifecycleSafeActions(
             itemID: scheduledResult.itemID,
             status: status,
-            reviewResolved: reviewResolved
+            reviewResolved: reviewResolved,
+            expectedVersionSelector: scheduledResult.expectedVersionSelector
         )
 
         if jsonOutput {
-            outputJSON([
+            var payload: [String: Any] = [
                 "action": scheduledResult.action,
                 "itemID": scheduledResult.itemID.uuidString,
                 "itemType": scheduledResult.itemType,
@@ -15443,7 +15489,15 @@ struct CiderCLI {
                 "changedFields": changedFields,
                 "reviewResolved": reviewResolved,
                 "safeActions": safeActions,
-            ])
+            ]
+            if let candidateRef = scheduledResult.candidateRef { payload["candidateRef"] = candidateRef }
+            if let expectedVersionSelector = scheduledResult.expectedVersionSelector { payload["expectedVersionSelector"] = expectedVersionSelector }
+            if let actionReceiptID = scheduledResult.actionReceiptID { payload["actionReceiptID"] = actionReceiptID }
+            if let changed = scheduledResult.changed { payload["changed"] = changed }
+            if let truthBoundary = scheduledResult.truthBoundary { payload["truthBoundary"] = truthBoundary }
+            if let queueDisposition = scheduledResult.queueDisposition { payload["queueDisposition"] = queueDisposition.rawValue }
+            if !scheduledResult.safeVerificationCommands.isEmpty { payload["safeVerificationCommands"] = scheduledResult.safeVerificationCommands }
+            outputJSON(payload)
             return
         }
 
@@ -15456,6 +15510,12 @@ struct CiderCLI {
         print("  Changed: \(changedFields.isEmpty ? "none" : changedFields.joined(separator: ", "))")
         print("  Review resolved: \(reviewResolved ? "yes" : "no")")
         print("  Message: \(reviewEnrichmentLifecycleMessage(status: status, reason: reason, changedFields: changedFields, reviewResolved: reviewResolved))")
+        if let receiptID = scheduledResult.actionReceiptID {
+            print("  Scheduling receipt: \(receiptID)")
+        }
+        if !scheduledResult.safeVerificationCommands.isEmpty {
+            print("  Verify: \(scheduledResult.safeVerificationCommands.joined(separator: ", "))")
+        }
         print("  Safe actions: \(safeActions.joined(separator: ", "))")
     }
 
@@ -15496,14 +15556,16 @@ struct CiderCLI {
     static func reviewEnrichmentLifecycleSafeActions(
         itemID: UUID,
         status: String,
-        reviewResolved: Bool
+        reviewResolved: Bool,
+        expectedVersionSelector: String? = nil
     ) -> [String] {
         var actions = [
             "item get \(itemID.uuidString)",
             "review list --kind enrichment",
         ]
         if status == "timed_out" || !reviewResolved {
-            actions.insert("review enrich \(itemID.uuidString) --timeout 20", at: 0)
+            let versionArgument = expectedVersionSelector.map { " --expected-version \($0)" } ?? ""
+            actions.insert("review enrich \(itemID.uuidString)\(versionArgument) --timeout 20", at: 0)
         }
         return actions
     }
@@ -32395,7 +32457,7 @@ struct CiderCLI {
               cider-cli review approve <item-id|candidate-id> [--item-id <exact-bookmark-uuid> --destination date|todo --expected-version <state@version>] [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
-          cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
+          cider-cli review enrich <item-id> [--actor user|agent] [--expected-version <state@bits>] [--timeout <seconds>|--no-wait] [--json]
           cider-cli review enrich-batch --confirm [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]
           cider-cli review jobs [--limit <n>] [--json]
 

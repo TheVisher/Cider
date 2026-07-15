@@ -1100,6 +1100,11 @@ enum HomeOverviewDataProvider {
             if safeActions.contains("reject") { actions.append(.reject) }
             if safeActions.contains("defer") { actions.append(.deferReview) }
 
+        case "enrichment":
+            if reviewable, hasCandidateID, safeActions.contains("enrich") {
+                actions.append(.enrich)
+            }
+
         default:
             if hasRoutingDecision && safeActions.contains("approve") {
                 actions.append(.accept)

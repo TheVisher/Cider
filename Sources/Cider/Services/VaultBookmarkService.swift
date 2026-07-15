@@ -29,6 +29,9 @@ final class VaultBookmarkService: ObservableObject {
     private let originalImagesDirectoryName = ".originals"
     private let thumbnailMaxPixelDimension: CGFloat = 720
     private var enrichmentTasks: [UUID: Task<Void, Never>] = [:]
+    private var enrichmentTaskTokens: [UUID: UUID] = [:]
+    private var enrichmentTaskSchedulingIdentities: [UUID: String] = [:]
+    private var enrichmentTaskSchedulingOrigins: [UUID: CiderBookmarkEnrichmentQueueScheduleDisposition] = [:]
     /// URLs recently deleted — adoption skips these to prevent zombie re-adoption from duplicate files.
     /// Entries expire after 30 seconds so the dictionary doesn't grow forever.
     private var recentlyDeletedURLs: [String: Date] = [:]
@@ -42,12 +45,13 @@ final class VaultBookmarkService: ObservableObject {
     // MARK: - Computed Paths
 
     private var vaultRoot: URL {
-        StoragePaths.cachedVaultDirectoryURL
+        vaultRootOverride ?? StoragePaths.cachedVaultDirectoryURL
     }
 
     /// The `.cider/bookmarks/` directory for index cache + thumbnails + originals.
     private var bookmarksMetaDir: URL {
-        StoragePaths.cachedDirectoryURL(for: .bookmarks)
+        vaultRootOverride?.appendingPathComponent(".cider/bookmarks", isDirectory: true)
+            ?? StoragePaths.cachedDirectoryURL(for: .bookmarks)
     }
 
     private var indexFileURL: URL {
@@ -64,7 +68,8 @@ final class VaultBookmarkService: ObservableObject {
 
     /// The default inbox directory for unfiled bookmarks.
     private var inboxBookmarksDir: URL {
-        StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
+        vaultRootOverride?.appendingPathComponent("Inbox/Bookmarks", isDirectory: true)
+            ?? StoragePaths.cachedInboxSubdirectoryURL(for: .bookmarks)
     }
 
     private var inboxRelativePath: String {
@@ -83,12 +88,18 @@ final class VaultBookmarkService: ObservableObject {
     private var database: CiderDatabase?
     private let writesVaultCaches: Bool
     private let schedulesEnrichment: Bool
+    private let vaultRootOverride: URL?
+    private let enrichmentPayloadFetcher: @MainActor (URL) async -> BookmarkEnrichmentPayload?
+    private let aiEnrichmentScheduler: @MainActor (Bookmark) -> Void
 
     // MARK: - Init
 
     private init() {
         writesVaultCaches = true
         schedulesEnrichment = true
+        vaultRootOverride = nil
+        enrichmentPayloadFetcher = { await VaultBookmarkService.fetchEnrichmentPayload(for: $0) }
+        aiEnrichmentScheduler = { BookmarkAIEnrichment.shared.schedule(for: $0) }
         ensureDirectories()
         loadBookmarks()
     }
@@ -98,11 +109,19 @@ final class VaultBookmarkService: ObservableObject {
     init(
         database: CiderDatabase,
         schedulesEnrichment: Bool = true,
-        writesVaultCaches: Bool = false
+        writesVaultCaches: Bool = false,
+        vaultRootOverride: URL? = nil,
+        enrichmentPayloadFetcher: (@MainActor (URL) async -> BookmarkEnrichmentPayload?)? = nil,
+        aiEnrichmentScheduler: (@MainActor (Bookmark) -> Void)? = nil
     ) {
         self.database = database
         self.writesVaultCaches = writesVaultCaches
         self.schedulesEnrichment = schedulesEnrichment
+        self.vaultRootOverride = vaultRootOverride
+        self.enrichmentPayloadFetcher = enrichmentPayloadFetcher
+            ?? { await VaultBookmarkService.fetchEnrichmentPayload(for: $0) }
+        self.aiEnrichmentScheduler = aiEnrichmentScheduler
+            ?? { BookmarkAIEnrichment.shared.schedule(for: $0) }
     }
 
     /// Testing-only: clear the orphan adoption debounce so shared-singleton
@@ -1931,6 +1950,100 @@ final class VaultBookmarkService: ObservableObject {
         )
     }
 
+    /// Canonical queue writer for review-backed enrichment scheduling.
+    /// The durable receipt identity is supplied by the review scheduling service;
+    /// this method owns only the in-memory task and never writes review receipts.
+    func scheduleReviewEnrichment(
+        for bookmarkID: UUID,
+        schedulingIdentity: String
+    ) throws -> CiderBookmarkEnrichmentQueueScheduleDisposition {
+        guard schedulesEnrichment else {
+            throw CiderBookmarkEnrichmentSchedulingError.schedulerFailure
+        }
+        guard bookmarks.contains(where: { $0.id == bookmarkID }) else {
+            throw CiderBookmarkEnrichmentSchedulingError.candidateUnavailable
+        }
+        if enrichmentTasks[bookmarkID] != nil {
+            if let activeIdentity = enrichmentTaskSchedulingIdentities[bookmarkID],
+               activeIdentity != schedulingIdentity {
+                throw CiderBookmarkEnrichmentSchedulingError.schedulingConflict
+            }
+            if enrichmentTaskSchedulingIdentities[bookmarkID] == schedulingIdentity {
+                return .reused
+            }
+            enrichmentTaskSchedulingIdentities[bookmarkID] = schedulingIdentity
+            enrichmentTaskSchedulingOrigins[bookmarkID] = .adopted
+            return .adopted
+        }
+        guard startEnrichmentIfNeeded(
+            for: bookmarkID,
+            force: true,
+            allowThumbnailReplacement: false
+        ) else {
+            throw CiderBookmarkEnrichmentSchedulingError.schedulerFailure
+        }
+        enrichmentTaskSchedulingIdentities[bookmarkID] = schedulingIdentity
+        enrichmentTaskSchedulingOrigins[bookmarkID] = .scheduled
+        return .scheduled
+    }
+
+    @discardableResult
+    func cancelReviewEnrichment(
+        for bookmarkID: UUID,
+        schedulingIdentity: String
+    ) -> CiderBookmarkEnrichmentQueueCancellationDisposition {
+        guard enrichmentTaskSchedulingIdentities[bookmarkID] == schedulingIdentity else {
+            return .identityNotFound
+        }
+        if enrichmentTaskSchedulingOrigins[bookmarkID] == .adopted {
+            enrichmentTaskSchedulingIdentities.removeValue(forKey: bookmarkID)
+            enrichmentTaskSchedulingOrigins.removeValue(forKey: bookmarkID)
+            return .detachedAdoptedTask
+        }
+        guard enrichmentTaskSchedulingOrigins[bookmarkID] == .scheduled,
+              let task = enrichmentTasks[bookmarkID] else {
+            return .identityNotFound
+        }
+        task.cancel()
+        enrichmentTasks.removeValue(forKey: bookmarkID)
+        enrichmentTaskTokens.removeValue(forKey: bookmarkID)
+        enrichmentTaskSchedulingIdentities.removeValue(forKey: bookmarkID)
+        enrichmentTaskSchedulingOrigins.removeValue(forKey: bookmarkID)
+        if let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }),
+           bookmarks[index].isEnriching {
+            bookmarks[index].isEnriching = false
+            objectWillChange.send()
+        }
+        return .canceledScheduledTask
+    }
+
+    struct EnrichmentTaskStateForTesting: Equatable {
+        var taskCount: Int
+        var hasTask: Bool
+        var taskIsCancelled: Bool?
+        var taskToken: UUID?
+        var schedulingIdentity: String?
+        var schedulingOrigin: CiderBookmarkEnrichmentQueueScheduleDisposition?
+    }
+
+    func _enrichmentTaskStateForTesting(bookmarkID: UUID) -> EnrichmentTaskStateForTesting {
+        EnrichmentTaskStateForTesting(
+            taskCount: enrichmentTasks.count,
+            hasTask: enrichmentTasks[bookmarkID] != nil,
+            taskIsCancelled: enrichmentTasks[bookmarkID]?.isCancelled,
+            taskToken: enrichmentTaskTokens[bookmarkID],
+            schedulingIdentity: enrichmentTaskSchedulingIdentities[bookmarkID],
+            schedulingOrigin: enrichmentTaskSchedulingOrigins[bookmarkID]
+        )
+    }
+
+    func _cancelAllEnrichmentTasksForTesting() {
+        cancelAllEnrichmentTasks()
+        for index in bookmarks.indices where bookmarks[index].isEnriching {
+            bookmarks[index].isEnriching = false
+        }
+    }
+
     // MARK: - Carousel Image Management
 
     private static let maxCarouselImages = 10
@@ -2147,11 +2260,25 @@ final class VaultBookmarkService: ObservableObject {
     private func cancelAllEnrichmentTasks() {
         for task in enrichmentTasks.values { task.cancel() }
         enrichmentTasks.removeAll()
+        enrichmentTaskTokens.removeAll()
+        enrichmentTaskSchedulingIdentities.removeAll()
+        enrichmentTaskSchedulingOrigins.removeAll()
     }
 
     private func cancelEnrichment(for bookmarkID: UUID) {
         enrichmentTasks[bookmarkID]?.cancel()
         enrichmentTasks.removeValue(forKey: bookmarkID)
+        enrichmentTaskTokens.removeValue(forKey: bookmarkID)
+        enrichmentTaskSchedulingIdentities.removeValue(forKey: bookmarkID)
+        enrichmentTaskSchedulingOrigins.removeValue(forKey: bookmarkID)
+    }
+
+    private func finishEnrichmentTask(for bookmarkID: UUID, token: UUID) {
+        guard enrichmentTaskTokens[bookmarkID] == token else { return }
+        enrichmentTasks.removeValue(forKey: bookmarkID)
+        enrichmentTaskTokens.removeValue(forKey: bookmarkID)
+        enrichmentTaskSchedulingIdentities.removeValue(forKey: bookmarkID)
+        enrichmentTaskSchedulingOrigins.removeValue(forKey: bookmarkID)
     }
 
     private func scheduleEnrichmentForIncompleteBookmarks() {
@@ -2181,19 +2308,23 @@ final class VaultBookmarkService: ObservableObject {
                   let remoteURL = URL(string: remoteURLString) else { continue }
 
             let bookmarkID = bookmark.id
+            let taskToken = UUID()
             let task = Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer { self.finishEnrichmentTask(for: bookmarkID, token: taskToken) }
+                guard !Task.isCancelled else { return }
                 let imageAssets = await self.cacheImageAssets(from: remoteURL, for: bookmarkID)
+                guard !Task.isCancelled else { return }
                 await self.applyRecoveredThumbnail(bookmarkID: bookmarkID, imageAssets: imageAssets)
             }
             enrichmentTasks[bookmarkID] = task
+            enrichmentTaskTokens[bookmarkID] = taskToken
         }
     }
 
     private func applyRecoveredThumbnail(bookmarkID: UUID, imageAssets: BookmarkImageAssets?) async {
-        defer { enrichmentTasks.removeValue(forKey: bookmarkID) }
-
-        guard let imageAssets,
+        guard !Task.isCancelled,
+              let imageAssets,
               let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
 
         removeImageIfPresent(relativePath: bookmarks[index].thumbnailRelativePath)
@@ -2212,24 +2343,28 @@ final class VaultBookmarkService: ObservableObject {
         logger.info("Recovered thumbnail for bookmark \(bookmarkID)")
     }
 
+    @discardableResult
     private func startEnrichmentIfNeeded(
         for bookmarkID: UUID,
         force: Bool = false,
         allowThumbnailReplacement: Bool = false
-    ) {
-        guard schedulesEnrichment else { return }
-        guard enrichmentTasks[bookmarkID] == nil else { return }
-        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
-        guard let url = URL(string: bookmarks[index].urlString) else { return }
+    ) -> Bool {
+        guard schedulesEnrichment else { return false }
+        guard enrichmentTasks[bookmarkID] == nil else { return false }
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
+        guard let url = URL(string: bookmarks[index].urlString) else { return false }
 
         let bookmark = bookmarks[index]
-        guard force || shouldEnrich(bookmark, for: url) else { return }
+        guard force || shouldEnrich(bookmark, for: url) else { return false }
 
         bookmarks[index].isEnriching = true
         objectWillChange.send()
 
+        let taskToken = UUID()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.finishEnrichmentTask(for: bookmarkID, token: taskToken) }
+            guard !Task.isCancelled else { return }
             let hasUsableLocalThumbnail = self.bookmarks
                 .first(where: { $0.id == bookmarkID })
                 .map { self.localThumbnailExists(relativePath: $0.thumbnailRelativePath) } ?? false
@@ -2241,9 +2376,11 @@ final class VaultBookmarkService: ObservableObject {
 
             // Direct image URL
             if Self.isDirectImageURL(url) {
+                guard !Task.isCancelled else { return }
                 let imageAssets = allowsThumbnailReplacement
                     ? await self.cacheImageAssets(from: url, for: bookmarkID)
                     : nil
+                guard !Task.isCancelled else { return }
                 await self.completeEnrichment(
                     for: bookmarkID,
                     sourceURL: url,
@@ -2253,24 +2390,30 @@ final class VaultBookmarkService: ObservableObject {
                 return
             }
 
-            let payload = await Self.fetchEnrichmentPayload(for: url)
+            guard !Task.isCancelled else { return }
+            let payload = await self.enrichmentPayloadFetcher(url)
+            guard !Task.isCancelled else { return }
             let trustedThumbnailURL = payload?.thumbnailURL.flatMap { candidate in
                 Self.isLowConfidenceThumbnailURL(candidate) ? nil : candidate
             }
 
             var imageAssets: BookmarkImageAssets?
             if allowsThumbnailReplacement, let thumbnailURL = trustedThumbnailURL {
+                guard !Task.isCancelled else { return }
                 imageAssets = await self.cacheImageAssets(from: thumbnailURL, for: bookmarkID, pageURL: url)
+                guard !Task.isCancelled else { return }
             }
 
             if allowsThumbnailReplacement,
                imageAssets == nil,
                let fallbackData = payload?.thumbnailFallbackData {
+                guard !Task.isCancelled else { return }
                 imageAssets = self.cacheImageAssets(
                     from: fallbackData,
                     for: bookmarkID,
                     preferredFileExtension: "png"
                 )
+                guard !Task.isCancelled else { return }
             }
 
             // Screenshot fallback only when native metadata did not find a provider
@@ -2283,13 +2426,16 @@ final class VaultBookmarkService: ObservableObject {
                 isExplicitUserRefresh: allowThumbnailReplacement
                ),
                let screenshotData = payload?.screenshotData {
+                guard !Task.isCancelled else { return }
                 imageAssets = self.cacheImageAssets(
                     from: screenshotData,
                     for: bookmarkID,
                     preferredFileExtension: "jpg"
                 )
+                guard !Task.isCancelled else { return }
             }
 
+            guard !Task.isCancelled else { return }
             await self.completeEnrichment(
                 for: bookmarkID,
                 sourceURL: url,
@@ -2299,6 +2445,8 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         enrichmentTasks[bookmarkID] = task
+        enrichmentTaskTokens[bookmarkID] = taskToken
+        return true
     }
 
     func completeMetadataEnrichment(
@@ -2320,9 +2468,8 @@ final class VaultBookmarkService: ObservableObject {
         payload: BookmarkEnrichmentPayload?,
         imageAssets: BookmarkImageAssets?
     ) async {
-        defer { enrichmentTasks.removeValue(forKey: bookmarkID) }
-
-        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        guard !Task.isCancelled,
+              let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return }
 
         let previous = bookmarks[index]
         var bookmark = bookmarks[index]
@@ -2425,7 +2572,7 @@ final class VaultBookmarkService: ObservableObject {
             var seenCarouselURLs = Set<String>()
             var downloadedCarouselImageData: [Data] = []
             for carouselURL in carouselURLs {
-                guard !Task.isCancelled else { break }
+                guard !Task.isCancelled else { return }
                 guard seenCarouselURLs.insert(carouselURL.absoluteString).inserted else { continue }
                 // Only fetch HTTPS URLs from known Reddit CDN hosts (SSRF prevention)
                 guard let scheme = carouselURL.scheme?.lowercased(), scheme == "https",
@@ -2435,6 +2582,7 @@ final class VaultBookmarkService: ObservableObject {
                     var request = URLRequest(url: carouselURL)
                     request.timeoutInterval = 8
                     let (imageData, _) = try await URLSession.shared.data(for: request)
+                    guard !Task.isCancelled else { return }
                     guard imageData.count <= 12_000_000 else { continue } // Align with addCarouselImage's internal limit
                     downloadedCarouselImageData.append(imageData)
                 } catch {
@@ -2442,6 +2590,7 @@ final class VaultBookmarkService: ObservableObject {
                 }
             }
             if !downloadedCarouselImageData.isEmpty {
+                guard !Task.isCancelled else { return }
                 _ = replaceCarouselImagesForEnrichment(
                     for: bookmarkID,
                     imageDataList: downloadedCarouselImageData
@@ -2450,8 +2599,9 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         // Re-fetch bookmark safely — index may have shifted during carousel await loop
+        guard !Task.isCancelled else { return }
         if let current = bookmarks.first(where: { $0.id == bookmarkID }) {
-            BookmarkAIEnrichment.shared.schedule(for: current)
+            aiEnrichmentScheduler(current)
         }
     }
 
@@ -2558,21 +2708,28 @@ final class VaultBookmarkService: ObservableObject {
 
     private func cacheImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
+        guard !Task.isCancelled else { return nil }
 
         // If .webp, try .gif variant first
         if remoteURL.pathExtension.lowercased() == "webp" {
             let gifURL = remoteURL.deletingPathExtension().appendingPathExtension("gif")
             if let gifAssets = await downloadImageAssets(from: gifURL, for: bookmarkID, pageURL: pageURL) {
+                guard !Task.isCancelled else { return nil }
                 enrichLog.info("Found GIF variant at \(gifURL.lastPathComponent, privacy: .public) for \(remoteURL.host ?? "?", privacy: .public)")
                 return gifAssets
             }
+            guard !Task.isCancelled else { return nil }
         }
 
-        return await downloadImageAssets(from: remoteURL, for: bookmarkID, pageURL: pageURL)
+        guard !Task.isCancelled else { return nil }
+        let imageAssets = await downloadImageAssets(from: remoteURL, for: bookmarkID, pageURL: pageURL)
+        guard !Task.isCancelled else { return nil }
+        return imageAssets
     }
 
     private func downloadImageAssets(from remoteURL: URL, for bookmarkID: UUID, pageURL: URL? = nil) async -> BookmarkImageAssets? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
+        guard !Task.isCancelled else { return nil }
 
         var downloadURL = remoteURL
         if var components = URLComponents(url: remoteURL, resolvingAgainstBaseURL: false),
@@ -2592,6 +2749,7 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         do {
+            guard !Task.isCancelled else { return nil }
             let (data, response) = try await URLSession.shared.data(for: request)
             guard !Task.isCancelled else { return nil }
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -2610,6 +2768,7 @@ final class VaultBookmarkService: ObservableObject {
         for bookmarkID: UUID,
         preferredFileExtension: String?
     ) -> BookmarkImageAssets? {
+        guard !Task.isCancelled else { return nil }
         guard data.count > 128, data.count < 12_000_000 else { return nil }
         guard NSImage(data: data) != nil else { return nil }
         guard !BookmarkImageQuality.isLowInformationImageData(data) else { return nil }
@@ -2618,9 +2777,11 @@ final class VaultBookmarkService: ObservableObject {
             || Self.isGIFData(data)
             || Self.isAnimatedImageData(data)
         if isAnimated {
+            guard !Task.isCancelled else { return nil }
             setMediaType(.gif, for: bookmarkID)
         }
 
+        guard !Task.isCancelled else { return nil }
         return persistImageAssets(
             for: bookmarkID,
             sourceData: data,
@@ -2633,6 +2794,7 @@ final class VaultBookmarkService: ObservableObject {
         sourceData: Data,
         preferredFileExtension: String?
     ) -> BookmarkImageAssets? {
+        guard !Task.isCancelled else { return nil }
         guard let thumbnailData = Self.downsampledThumbnailData(
             from: sourceData,
             maxDimension: thumbnailMaxPixelDimension
@@ -2647,6 +2809,7 @@ final class VaultBookmarkService: ObservableObject {
         let thumbnailFileURL = bookmarksMetaDir.appendingPathComponent(thumbnailRelativePath)
 
         do {
+            guard !Task.isCancelled else { return nil }
             try FileManager.default.createDirectory(at: thumbnailsDirectoryURL, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: originalImagesDirectoryURL, withIntermediateDirectories: true)
             deleteExistingThumbnailFiles(for: bookmarkID)
@@ -2745,13 +2908,17 @@ final class VaultBookmarkService: ObservableObject {
     private static func fetchEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         let host = pageURL.host?.lowercased() ?? ""
+        guard !Task.isCancelled else { return nil }
 
         // Reddit
         if host.contains("reddit.com") {
+            guard !Task.isCancelled else { return nil }
             if let redditResult = await fetchRedditJSONPayload(for: pageURL) {
+                guard !Task.isCancelled else { return nil }
                 enrichLog.info("Reddit JSON enrichment succeeded for \(pageURL.host ?? "?", privacy: .public)")
                 return redditResult
             }
+            guard !Task.isCancelled else { return nil }
         }
 
         // Amazon — extract ASIN and product title from URL (page scraping is blocked)
@@ -2766,7 +2933,9 @@ final class VaultBookmarkService: ObservableObject {
         if host.contains("youtube.com") || host.contains("youtu.be") {
             if let videoID = extractYouTubeVideoID(from: pageURL) {
                 let thumbURL = URL(string: "https://img.youtube.com/vi/\(videoID)/maxresdefault.jpg")
+                guard !Task.isCancelled else { return nil }
                 let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
+                guard !Task.isCancelled else { return nil }
                 return BookmarkEnrichmentPayload(
                     title: htmlResult?.title,
                     thumbnailURL: thumbURL ?? htmlResult?.thumbnailURL,
@@ -2776,7 +2945,9 @@ final class VaultBookmarkService: ObservableObject {
             }
         }
 
+        guard !Task.isCancelled else { return nil }
         let htmlResult = await fetchHTMLEnrichmentPayload(for: pageURL)
+        guard !Task.isCancelled else { return nil }
         let githubFallbackData = githubRepositoryFallbackCardData(for: pageURL, title: htmlResult?.title)
 
         let hasRealThumbnail = htmlResult?.thumbnailURL != nil
@@ -2800,7 +2971,9 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         // oEmbed fallback
+        guard !Task.isCancelled else { return nil }
         if let oembedResult = await BookmarkMetadataParser.fetchOEmbedPayload(for: pageURL) {
+            guard !Task.isCancelled else { return nil }
             return BookmarkEnrichmentPayload(
                 title: htmlResult?.title ?? oembedResult.title,
                 thumbnailURL: oembedResult.thumbnailURL,
@@ -2808,11 +2981,14 @@ final class VaultBookmarkService: ObservableObject {
                 recipeExtractionText: htmlResult?.recipeExtractionText
             )
         }
+        guard !Task.isCancelled else { return nil }
 
         // WebView fallback
         if needsWebView {
             enrichLog.info("Trying WebView fallback for \(pageURL.host ?? "?", privacy: .public)")
+            guard !Task.isCancelled else { return nil }
             let extracted = await WebViewMetadataExtractor.extract(from: pageURL)
+            guard !Task.isCancelled else { return nil }
             let hasResult = extracted.title != nil || extracted.imageURL != nil
             if hasResult || extracted.screenshotData != nil {
                 return BookmarkEnrichmentPayload(
@@ -2826,6 +3002,7 @@ final class VaultBookmarkService: ObservableObject {
         }
 
         if let htmlResult, githubFallbackData != nil {
+            guard !Task.isCancelled else { return nil }
             return BookmarkEnrichmentPayload(
                 title: htmlResult.title,
                 thumbnailURL: htmlResult.thumbnailURL,
@@ -2836,6 +3013,7 @@ final class VaultBookmarkService: ObservableObject {
             )
         }
 
+        guard !Task.isCancelled else { return nil }
         return htmlResult
     }
 
@@ -3032,7 +3210,8 @@ final class VaultBookmarkService: ObservableObject {
     private static func fetchRedditJSONPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
 
-        guard pageURL.path.contains("/comments/") else { return nil }
+        guard !Task.isCancelled,
+              pageURL.path.contains("/comments/") else { return nil }
 
         var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false)
         components?.query = nil
@@ -3050,7 +3229,9 @@ final class VaultBookmarkService: ObservableObject {
         let data: Data
         let response: URLResponse
         do {
+            guard !Task.isCancelled else { return nil }
             (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled else { return nil }
         } catch {
             enrichLog.warning("Reddit JSON: network error: \(error.localizedDescription, privacy: .public)")
             return nil
@@ -3175,7 +3356,8 @@ final class VaultBookmarkService: ObservableObject {
     }
 
     private static func fetchHTMLEnrichmentPayload(for pageURL: URL) async -> BookmarkEnrichmentPayload? {
-        guard let scheme = pageURL.scheme?.lowercased(),
+        guard !Task.isCancelled,
+              let scheme = pageURL.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else { return nil }
 
         var request = URLRequest(url: pageURL)
@@ -3185,7 +3367,9 @@ final class VaultBookmarkService: ObservableObject {
 
         let enrichLog = Logger(subsystem: "com.cider.app", category: "Enrichment")
         do {
+            guard !Task.isCancelled else { return nil }
             let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled else { return nil }
             guard let http = response as? HTTPURLResponse,
                   (200..<400).contains(http.statusCode) else { return nil }
             guard let html = decodeHTML(data: data) else { return nil }

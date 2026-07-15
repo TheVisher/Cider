@@ -6,11 +6,13 @@ struct ReviewQueueDashboardView: View {
     let onOpenItem: (LibraryItemV2) -> Void
     let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
     let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction, CiderRoutingDecisionTarget?) -> HomeReviewActionResult
-    let onEnrichReviewBatch: () -> Bool
+    let onEnrichReviewBatch: () -> CiderReviewQueueBatchEnrichmentResult?
 
     @State private var reviewActionState = HomeReviewActionState()
     @State private var batchEnrichmentIsConfirming = false
     @State private var scheduledBatchEnrichmentCount: Int?
+    @State private var batchEnrichmentErrors: [UUID: String] = [:]
+    @State private var batchEnrichmentErrorMessage: String?
     @State private var selectedLaneLabel: String?
     @State private var selectedDetailItemID: String?
     @ObservedObject private var folderService = VaultFolderService.shared
@@ -173,8 +175,17 @@ struct ReviewQueueDashboardView: View {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     Button {
                         if batchEnrichmentIsConfirming {
-                            if onEnrichReviewBatch() {
-                                scheduledBatchEnrichmentCount = preview.candidateCount
+                            if let result = onEnrichReviewBatch() {
+                                scheduledBatchEnrichmentCount = result.scheduledCount
+                                batchEnrichmentErrors = Dictionary(
+                                    uniqueKeysWithValues: result.failures.map { ($0.itemID, $0.reason) }
+                                )
+                                batchEnrichmentErrorMessage = result.failedCount > result.failures.count
+                                    ? "Some enrichment rows could not be scheduled. Refresh the queue for the remaining exact failures."
+                                    : nil
+                                batchEnrichmentIsConfirming = false
+                            } else {
+                                batchEnrichmentErrorMessage = "Cider could not schedule this batch. Every review row was kept; refresh and try again."
                             }
                         } else {
                             batchEnrichmentIsConfirming = true
@@ -196,6 +207,11 @@ struct ReviewQueueDashboardView: View {
                             .font(CiderFont.caption)
                             .foregroundColor(CiderColors.tertiary)
                     }
+                }
+                if let batchEnrichmentErrorMessage {
+                    Text(batchEnrichmentErrorMessage)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.warning)
                 }
             }
         }
@@ -357,7 +373,8 @@ struct ReviewQueueDashboardView: View {
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.secondary)
             }
-            if let error = reviewActionState.errorMessage(for: reviewItem.id) {
+            if let error = batchEnrichmentErrors[reviewItem.itemID]
+                ?? reviewActionState.errorMessage(for: reviewItem.id) {
                 Text(error)
                     .font(CiderFont.caption)
                     .foregroundColor(CiderColors.warning)
@@ -422,7 +439,7 @@ struct ReviewQueueDashboardView: View {
             .disabled(reviewActionState.pendingReviewIDs.contains(reviewItem.id))
             .help(action.helpLabel(for: reviewItem))
             .accessibilityLabel(action.helpLabel(for: reviewItem))
-        case .accept, .reject, .deferReview, .createDateCard, .createTodo:
+        case .accept, .reject, .deferReview, .createDateCard, .createTodo, .enrich:
             Button {
                 performReviewAction(action, for: reviewItem, destination: nil)
             } label: {

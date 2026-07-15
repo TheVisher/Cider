@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import Cider
@@ -27,6 +28,34 @@ struct CiderReviewQueueServiceTests {
         try? fm.removeItem(at: url)
         try? fm.removeItem(atPath: url.path + "-wal")
         try? fm.removeItem(atPath: url.path + "-shm")
+    }
+
+    private func scalarCount(_ table: String, in database: CiderDatabase) throws -> Int {
+        let statement = try database.prepare("SELECT COUNT(*) FROM \(table);")
+        guard try statement.step() else { return 0 }
+        return statement.int(at: 0)
+    }
+
+    private func allTableFingerprints(in database: CiderDatabase) throws -> [String: String] {
+        let tableStatement = try database.prepare("""
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name;
+            """)
+        var tables: [String] = []
+        while try tableStatement.step() { tables.append(tableStatement.string(at: 0)) }
+        return try Dictionary(uniqueKeysWithValues: tables.map { table in
+            let pragma = try database.prepare("PRAGMA table_info(\(table));")
+            var columns: [String] = []
+            while try pragma.step() { columns.append(pragma.string(at: 1)) }
+            let pairs = columns.flatMap { ["'\($0)'", "quote(\"\($0)\")"] }.joined(separator: ", ")
+            let statement = try database.prepare("SELECT json_object(\(pairs)) FROM \(table);")
+            var rows: [String] = []
+            while try statement.step() { rows.append(statement.string(at: 0)) }
+            let data = Data(rows.sorted().joined(separator: "\n").utf8)
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            return (table, "count=\(rows.count);sha256=\(digest)")
+        })
     }
 
     private func bookmarkEnrichmentState(_ db: CiderDatabase, itemID: UUID) throws -> (status: String?, lastEnrichedAt: Date?) {
@@ -2698,7 +2727,8 @@ struct CiderReviewQueueServiceTests {
         var scheduledIDs: [UUID] = []
         let queue = CiderReviewQueueService(
             database: db,
-            enrichmentScheduler: { scheduledIDs.append($0) }
+            enrichmentScheduler: { scheduledIDs.append($0) },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
         )
 
         let result = try queue.enrich(itemID: bookmarkID, actor: "agent")
@@ -2711,6 +2741,162 @@ struct CiderReviewQueueServiceTests {
         #expect(result.actor == "agent")
         #expect(result.safeActions.contains("review list"))
         #expect(result.safeActions.contains("bookmark get"))
+        #expect(result.candidateRef == "enrichment:\(bookmarkID.uuidString)")
+        #expect(result.actionReceiptID != nil)
+        #expect(result.changed == true)
+        #expect(result.truthBoundary == "durable_enrichment_schedule_not_enrichment_completion")
+        #expect(try scalarCount("action_receipts", in: db) == 1)
+        #expect(try scalarCount("mutation_audit", in: db) == 1)
+    }
+
+    @Test("custom enrichment scheduler without compensation fails closed before durable or task mutation")
+    func customEnrichmentSchedulerWithoutCompensationFailsClosed() throws {
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let bookmarkID = try insertBookmark(
+            db,
+            title: "Needs Metadata",
+            relativePath: "Inbox/Bookmarks/Needs Metadata.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        var schedulerCalls = 0
+        var activeSchedulingIdentities = Set<String>()
+        let queue = CiderReviewQueueService(
+            database: db,
+            enrichmentReviewScheduler: { _, identity in
+                schedulerCalls += 1
+                activeSchedulingIdentities.insert(identity)
+                return .scheduled
+            }
+        )
+        let tablesBefore = try allTableFingerprints(in: db)
+
+        do {
+            _ = try queue.enrich(itemID: bookmarkID, actor: "agent")
+            Issue.record("Expected the missing compensation boundary to fail closed.")
+        } catch let CiderReviewQueueActionError.actionFailed(classification, message) {
+            #expect(classification == .writerFailure)
+            #expect(message.contains("explicit compensation boundary"))
+        }
+
+        #expect(schedulerCalls == 0)
+        #expect(activeSchedulingIdentities.isEmpty)
+        #expect(try allTableFingerprints(in: db) == tablesBefore)
+    }
+
+    @Test("single and batch enrichment use the same exact per-item scheduling receipt")
+    func singleAndBatchEnrichmentAreEquivalent() throws {
+        let bookmarkID = UUID(uuidString: "BF94FCEA-0D8C-4E58-B504-73C58847EB80")!
+        let updatedAt = Date(timeIntervalSinceReferenceDate: 678_901.5)
+        let (singleDB, singleURL) = try makeTempDB()
+        defer { singleDB.close(); cleanup(singleURL) }
+        _ = try insertBookmark(
+            singleDB,
+            id: bookmarkID,
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil,
+            updatedAt: updatedAt
+        )
+        let singleQueue = CiderReviewQueueService(
+            database: singleDB,
+            enrichmentReviewScheduler: { _, _ in .scheduled },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
+        )
+        let single = try singleQueue.enrich(itemID: bookmarkID, actor: "agent", surface: .cli)
+
+        let (batchDB, batchURL) = try makeTempDB()
+        defer { batchDB.close(); cleanup(batchURL) }
+        _ = try insertBookmark(
+            batchDB,
+            id: bookmarkID,
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil,
+            updatedAt: updatedAt
+        )
+        var activeSchedulingIdentities = Set<String>()
+        let batchQueue = CiderReviewQueueService(
+            database: batchDB,
+            enrichmentReviewScheduler: { _, identity in
+                activeSchedulingIdentities.insert(identity).inserted ? .scheduled : .reused
+            },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
+        )
+        let candidates = try batchQueue.list(limit: Int.max).items.compactMap(CiderReviewEnrichmentCandidateSelection.init(item:))
+        let batch = try batchQueue.enrichBatch(
+            actor: "agent",
+            surface: .home,
+            candidates: candidates
+        )
+        let exactRetry = try batchQueue.enrichBatch(
+            actor: "agent",
+            surface: .reviewQueue,
+            candidates: candidates
+        )
+        let batchReceipt = try #require(
+            SecondBrainActionReceiptLedgerService(database: batchDB).list(
+                filter: .init(command: "review.enrich", limit: 10)
+            ).first
+        )
+
+        #expect(batch.candidateCount == 1)
+        #expect(batch.scheduledCount == 1)
+        #expect(batch.failedCount == 0)
+        #expect(exactRetry.batchID == batch.batchID)
+        #expect(exactRetry.scheduledCount == 1)
+        #expect(exactRetry.reusedCount == 1)
+        #expect(single.actionReceiptID == batchReceipt.id)
+        #expect(single.truthBoundary == "durable_enrichment_schedule_not_enrichment_completion")
+        #expect(activeSchedulingIdentities.count == 1)
+        #expect(try scalarCount("action_receipts", in: batchDB) == 1)
+        #expect(try scalarCount("mutation_audit", in: batchDB) == 1)
+    }
+
+    @Test("batch enrichment bounds exact per-item scheduler failures without partial durable rows")
+    func batchEnrichmentBoundsPerItemSchedulerFailures() throws {
+        enum SchedulerFailure: Error { case injected }
+        let (db, url) = try makeTempDB()
+        defer { db.close(); cleanup(url) }
+        let firstID = try insertBookmark(
+            db,
+            title: "First",
+            relativePath: "Inbox/Bookmarks/First.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        let secondID = try insertBookmark(
+            db,
+            title: "Second",
+            relativePath: "Inbox/Bookmarks/Second.webloc",
+            enrichmentStatus: "failed",
+            lastEnrichedAt: nil
+        )
+        var callCount = 0
+        let queue = CiderReviewQueueService(
+            database: db,
+            enrichmentReviewScheduler: { _, _ in
+                callCount += 1
+                if callCount == 2 { throw SchedulerFailure.injected }
+                return .scheduled
+            },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
+        )
+        let exactCandidates = try queue.list(limit: Int.max).items.compactMap(CiderReviewEnrichmentCandidateSelection.init(item:))
+
+        let result = try queue.enrichBatch(
+            actor: "user",
+            sampleFailureLimit: 10,
+            surface: .reviewQueue,
+            candidates: exactCandidates
+        )
+
+        #expect(result.candidateCount == 2)
+        #expect(result.scheduledCount == 1)
+        #expect(result.failedCount == 1)
+        #expect(result.scheduledItemIDs == [firstID])
+        #expect(result.failures.map(\.itemID) == [secondID])
+        #expect(try scalarCount("action_receipts", in: db) == 1)
+        #expect(try scalarCount("mutation_audit", in: db) == 1)
     }
 
     @Test("review queue enrich action rejects bookmarks without enrichment issue")
@@ -2775,7 +2961,8 @@ struct CiderReviewQueueServiceTests {
         let queue = CiderReviewQueueService(
             database: db,
             routingDecisionService: routing,
-            enrichmentScheduler: { scheduledIDs.append($0) }
+            enrichmentScheduler: { scheduledIDs.append($0) },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
         )
 
         let result = try queue.enrichBatch(actor: "agent", sampleFailureLimit: 3)
@@ -2847,7 +3034,8 @@ struct CiderReviewQueueServiceTests {
         let queue = CiderReviewQueueService(
             database: db,
             routingDecisionService: routing,
-            enrichmentScheduler: { _ in }
+            enrichmentScheduler: { _ in },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
         )
         let batch = try queue.enrichBatch(actor: "agent", sampleFailureLimit: 3)
 
@@ -2898,7 +3086,8 @@ struct CiderReviewQueueServiceTests {
         )
         let queue = CiderReviewQueueService(
             database: db,
-            enrichmentScheduler: { _ in }
+            enrichmentScheduler: { _ in },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
         )
         let batch = try queue.enrichBatch(actor: "agent", sampleFailureLimit: 3)
         let audit = MutationAuditService(database: db)
@@ -2968,7 +3157,8 @@ struct CiderReviewQueueServiceTests {
         let queue = CiderReviewQueueService(
             database: db,
             routingDecisionService: routing,
-            enrichmentScheduler: { _ in }
+            enrichmentScheduler: { _ in },
+            enrichmentScheduleCanceller: { _, _ in .identityNotFound }
         )
         let batch = try queue.enrichBatch(actor: "agent")
         let routingResult = try queue.approve(itemID: routingID, actor: "agent")

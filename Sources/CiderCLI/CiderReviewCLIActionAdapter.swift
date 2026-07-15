@@ -220,6 +220,7 @@ struct CiderRoutingReviewCLIActionAdapterResult {
         case .defer: status = "deferred"
         case .correct: status = "corrected"
         case .reject: status = "rejected"
+        case .enrich: status = "scheduled"
         }
         return CiderReviewRoutingActionResult(
             action: "review.routing.\(request.action.rawValue)",

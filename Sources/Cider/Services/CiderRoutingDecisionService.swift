@@ -335,6 +335,8 @@ final class CiderRoutingDecisionService {
                 truthBoundary = "corrected_routing_destination"
             case .reject:
                 throw CiderRoutingReviewActionError.unsupportedAction
+            case .enrich:
+                throw CiderRoutingReviewActionError.unsupportedAction
             }
 
             if action == .correct {

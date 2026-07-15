@@ -35,6 +35,7 @@ enum CiderReviewAction: String, CaseIterable, Equatable, Sendable {
     case reject
     case `defer`
     case correct
+    case enrich
 }
 
 enum CiderReviewMutationAuthority: String, Equatable, Sendable {
@@ -83,6 +84,8 @@ enum CiderReviewActionErrorClassification: String, Equatable, Sendable {
     case routingUnauthorized = "routing_unauthorized"
     case unsupportedRoutingCorrection = "unsupported_routing_correction"
     case reviewApprovalRequired = "review_approval_required"
+    case unauthorizedActor = "unauthorized_actor"
+    case schedulingConflict = "scheduling_conflict"
     case databaseFailure = "database_failure"
     case writerFailure = "writer_failure"
 }
@@ -109,6 +112,8 @@ struct CiderReviewActionRequest: Equatable, Sendable {
     var bookmarkDateItemID: UUID?
     var bookmarkDateDestination: CiderBookmarkDateSuggestionDestination?
     var bookmarkDateExactEvidence: CiderBookmarkDateSuggestion?
+    var enrichmentItemID: UUID?
+    var enrichmentBatchContext: CiderBookmarkEnrichmentBatchContext?
     var actor: String
     var surface: CiderReviewInvokingSurface
     var exactEvidenceRequirement: CiderReviewExactEvidenceRequirement
@@ -126,6 +131,8 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         bookmarkDateItemID: UUID? = nil,
         bookmarkDateDestination: CiderBookmarkDateSuggestionDestination? = nil,
         bookmarkDateExactEvidence: CiderBookmarkDateSuggestion? = nil,
+        enrichmentItemID: UUID? = nil,
+        enrichmentBatchContext: CiderBookmarkEnrichmentBatchContext? = nil,
         actor: String,
         surface: CiderReviewInvokingSurface,
         exactEvidenceRequirement: CiderReviewExactEvidenceRequirement,
@@ -142,6 +149,8 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         self.bookmarkDateItemID = bookmarkDateItemID
         self.bookmarkDateDestination = bookmarkDateDestination
         self.bookmarkDateExactEvidence = bookmarkDateExactEvidence
+        self.enrichmentItemID = enrichmentItemID
+        self.enrichmentBatchContext = enrichmentBatchContext
         self.actor = actor
         self.surface = surface
         self.exactEvidenceRequirement = exactEvidenceRequirement
@@ -168,6 +177,7 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
     var routingDestination: CiderRoutingDecisionTarget?
     var bookmarkDateDestination: CiderBookmarkDateSuggestionDestination?
     var bookmarkDateApprovalAction: CiderBookmarkDateSuggestionApprovalAction?
+    var enrichmentQueueDisposition: CiderBookmarkEnrichmentQueueScheduleDisposition? = nil
     var message: String
     var error: CiderReviewActionFailure?
 
@@ -191,6 +201,7 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
             && routingDestination == other.routingDestination
             && bookmarkDateDestination == other.bookmarkDateDestination
             && bookmarkDateApprovalAction == other.bookmarkDateApprovalAction
+            && enrichmentQueueDisposition == other.enrichmentQueueDisposition
             && error == other.error
     }
 }
@@ -304,6 +315,34 @@ struct CiderBookmarkDateSuggestionReviewActionAdapter {
 }
 
 @MainActor
+struct CiderBookmarkEnrichmentReviewActionAdapter {
+    private let service: CiderBookmarkEnrichmentSchedulingService
+
+    init(service: CiderBookmarkEnrichmentSchedulingService) {
+        self.service = service
+    }
+
+    func perform(
+        _ request: CiderReviewActionRequest
+    ) throws -> CiderBookmarkEnrichmentSchedulingMutationResult {
+        guard request.action == .enrich,
+              let bookmarkID = request.enrichmentItemID else {
+            throw CiderBookmarkEnrichmentSchedulingError.invalidCandidateIdentity
+        }
+        return try service.perform(
+            CiderBookmarkEnrichmentSchedulingRequest(
+                candidateRef: request.identity.candidateRef,
+                bookmarkID: bookmarkID,
+                expectedReviewState: request.expectedVersion.reviewState,
+                expectedUpdatedAt: request.expectedVersion.updatedAt,
+                actor: request.actor,
+                batchContext: request.enrichmentBatchContext
+            )
+        )
+    }
+}
+
+@MainActor
 final class CiderReviewActionCoordinator {
     typealias MutationBoundary = @MainActor (
         JournalIntelligenceReviewActionRequest,
@@ -322,10 +361,15 @@ final class CiderReviewActionCoordinator {
         CiderReviewActionRequest
     ) throws -> CiderBookmarkDateSuggestionApprovalMutationResult
 
+    typealias EnrichmentMutationBoundary = @MainActor (
+        CiderReviewActionRequest
+    ) throws -> CiderBookmarkEnrichmentSchedulingMutationResult
+
     private let performMutation: MutationBoundary
     private let performEventDateMutation: EventDateMutationBoundary
     private let performRoutingMutation: RoutingMutationBoundary
     private let performBookmarkDateMutation: BookmarkDateMutationBoundary
+    private let performEnrichmentMutation: EnrichmentMutationBoundary
 
     init(
         database: CiderDatabase = .shared,
@@ -333,7 +377,10 @@ final class CiderReviewActionCoordinator {
         dateCardStorage: DateCardStorage = .shared,
         todoStorage: TodoCardStorage = .shared,
         routingFailureInjector: (@MainActor (CiderRoutingReviewMutationCheckpoint) throws -> Void)? = nil,
-        bookmarkDateFailureInjector: (@MainActor (CiderBookmarkDateSuggestionMutationCheckpoint) throws -> Void)? = nil
+        bookmarkDateFailureInjector: (@MainActor (CiderBookmarkDateSuggestionMutationCheckpoint) throws -> Void)? = nil,
+        enrichmentScheduler: CiderBookmarkEnrichmentSchedulingService.Scheduler? = nil,
+        enrichmentScheduleCanceller: CiderBookmarkEnrichmentSchedulingService.ScheduleCanceller? = nil,
+        enrichmentFailureInjector: (@MainActor (CiderBookmarkEnrichmentSchedulingCheckpoint) throws -> Void)? = nil
     ) {
         let service = JournalIntelligenceReviewActionService(database: database)
         performMutation = { request, actor in
@@ -361,6 +408,25 @@ final class CiderReviewActionCoordinator {
         performBookmarkDateMutation = { request in
             try bookmarkDateAdapter.perform(request)
         }
+        let enrichmentService: CiderBookmarkEnrichmentSchedulingService
+        if let enrichmentScheduler {
+            enrichmentService = CiderBookmarkEnrichmentSchedulingService(
+                database: database,
+                scheduler: enrichmentScheduler,
+                scheduleCanceller: enrichmentScheduleCanceller,
+                failureInjector: enrichmentFailureInjector
+            )
+        } else {
+            enrichmentService = CiderBookmarkEnrichmentSchedulingService(
+                database: database,
+                bookmarkService: bookmarkService,
+                failureInjector: enrichmentFailureInjector
+            )
+        }
+        let enrichmentAdapter = CiderBookmarkEnrichmentReviewActionAdapter(service: enrichmentService)
+        performEnrichmentMutation = { request in
+            try enrichmentAdapter.perform(request)
+        }
     }
 
     init(_ performMutation: @escaping MutationBoundary) {
@@ -373,6 +439,9 @@ final class CiderReviewActionCoordinator {
         }
         performBookmarkDateMutation = { _ in
             throw CiderBookmarkDateSuggestionApprovalError.unsupportedAction
+        }
+        performEnrichmentMutation = { _ in
+            throw CiderBookmarkEnrichmentSchedulingError.schedulerFailure
         }
     }
 
@@ -389,6 +458,9 @@ final class CiderReviewActionCoordinator {
         let adapter = CiderBookmarkDateSuggestionReviewActionAdapter(service: bookmarkDateService)
         performBookmarkDateMutation = { request in
             try adapter.perform(request)
+        }
+        performEnrichmentMutation = { _ in
+            throw CiderBookmarkEnrichmentSchedulingError.schedulerFailure
         }
     }
 
@@ -473,13 +545,44 @@ final class CiderReviewActionCoordinator {
                     error: nil
                 )
             }
+            if request.identity.family == .enrichment {
+                let delegated = try performEnrichmentMutation(request)
+                return CiderReviewActionOutcome(
+                    identity: request.identity,
+                    action: request.action,
+                    actor: request.actor,
+                    surface: request.surface,
+                    availability: .available,
+                    exactEvidenceRequirement: request.exactEvidenceRequirement,
+                    evidenceStatus: .verifiedExactEvidence,
+                    mutationAuthority: request.mutationAuthority,
+                    changed: delegated.changed,
+                    resultingReviewState: delegated.reviewState,
+                    truthBoundary: delegated.truthBoundary,
+                    actionReceiptID: delegated.receiptID,
+                    targetOwnerRef: "bookmark:\(request.enrichmentItemID?.uuidString ?? "")",
+                    routingItemID: nil,
+                    routingDecisionID: nil,
+                    routingDestination: nil,
+                    bookmarkDateDestination: nil,
+                    bookmarkDateApprovalAction: nil,
+                    enrichmentQueueDisposition: delegated.queueDisposition,
+                    message: delegated.changed
+                        ? "Scheduled bookmark enrichment. Completion remains asynchronous."
+                        : "Reused the existing bookmark enrichment schedule. Completion remains asynchronous.",
+                    error: nil
+                )
+            }
+            guard let journalAction = request.action.journalAction else {
+                throw JournalIntelligenceReviewActionError.unsupportedFamily(request.identity.family.rawValue)
+            }
             let delegated = try performMutation(
                 JournalIntelligenceReviewActionRequest(
                     candidateRef: request.identity.candidateRef,
                     family: request.identity.family.rawValue,
                     expectedReviewState: request.expectedVersion.reviewState,
                     expectedUpdatedAt: request.expectedVersion.updatedAt,
-                    action: request.action.journalAction,
+                    action: journalAction,
                     correctedValue: request.correction,
                     targetOptionRef: request.targetOptionRef,
                     reason: request.reason
@@ -514,18 +617,27 @@ final class CiderReviewActionCoordinator {
     }
 
     private func preflightFailure(for request: CiderReviewActionRequest) -> CiderReviewActionFailure? {
-        guard request.mutationAuthority == .reviewApprovedCandidate else {
-            return failure(.reviewApprovalRequired)
+        if request.identity.family == .enrichment {
+            guard request.mutationAuthority == .directUserAction else {
+                return failure(.reviewApprovalRequired)
+            }
+        } else {
+            guard request.mutationAuthority == .reviewApprovedCandidate else {
+                return failure(.reviewApprovalRequired)
+            }
         }
         guard request.identity.family == .memoryCandidate
                 || request.identity.family == .graphCandidate
                 || request.identity.family == .eventDateFact
                 || request.identity.family == .routingDecision
-                || request.identity.family == .bookmarkDateSuggestion else {
+                || request.identity.family == .bookmarkDateSuggestion
+                || request.identity.family == .enrichment else {
             return failure(.unsupportedFamily)
         }
         let supportedSurfaces: [CiderReviewInvokingSurface] = request.identity.family == .eventDateFact
             ? [.home, .journal, .reviewQueue, .cli]
+            : request.identity.family == .enrichment
+                ? [.home, .reviewQueue, .cli]
             : request.identity.family == .routingDecision || request.identity.family == .bookmarkDateSuggestion
                 ? [.home, .reviewQueue, .cli]
                 : [.home, .journal, .cli]
@@ -567,6 +679,17 @@ final class CiderReviewActionCoordinator {
             }
             guard request.bookmarkDateExactEvidence != nil else {
                 return failure(.missingExactEvidence)
+            }
+        } else if request.identity.family == .enrichment {
+            guard request.exactEvidenceRequirement == .required else {
+                return failure(.exactEvidenceRequired)
+            }
+            guard request.action == .enrich else {
+                return failure(.unsupportedActionForSurface)
+            }
+            guard request.enrichmentItemID != nil,
+                  request.identity.candidateRef == request.enrichmentItemID.map(CiderBookmarkEnrichmentSchedulingService.candidateRef(for:)) else {
+                return failure(.invalidCandidateIdentity)
             }
         } else if request.exactEvidenceRequirement != .required {
             return failure(.exactEvidenceRequired)
@@ -729,6 +852,29 @@ final class CiderReviewActionCoordinator {
                 )
             }
         }
+        if let error = error as? CiderBookmarkEnrichmentSchedulingError {
+            switch error {
+            case .databaseUnavailable:
+                return failure(.databaseFailure)
+            case .invalidCandidateIdentity, .unsupportedItemType:
+                return failure(.invalidCandidateIdentity)
+            case .candidateUnavailable:
+                return failure(.candidateUnavailable)
+            case .staleCandidate:
+                return failure(.staleExpectedVersion)
+            case .missingSource:
+                return failure(.missingExactEvidence)
+            case .unauthorizedActor:
+                return failure(.unauthorizedActor)
+            case .schedulingConflict:
+                return failure(.schedulingConflict)
+            case .schedulerFailure, .compensationUnavailable, .compensationFailed:
+                return CiderReviewActionFailure(
+                    classification: .writerFailure,
+                    message: error.localizedDescription
+                )
+            }
+        }
         return failure(.writerFailure)
     }
 
@@ -738,6 +884,7 @@ final class CiderReviewActionCoordinator {
         case .defer: return "Deferred the routing decision for later review."
         case .correct: return "Applied the explicitly selected routing destination."
         case .reject: return "Routing rejection is unavailable."
+        case .enrich: return "Enrichment is not a routing action."
         }
     }
 
@@ -751,6 +898,8 @@ final class CiderReviewActionCoordinator {
             return "Deferred the event/date fact for later review without accepting truth."
         case .correct:
             return "Event/date fact correction remains unavailable."
+        case .enrich:
+            return "Enrichment is not an event/date fact action."
         }
     }
 
@@ -809,6 +958,10 @@ final class CiderReviewActionCoordinator {
             return "Use the item's Move action to correct this non-bookmark destination. Nothing was changed."
         case .reviewApprovalRequired:
             return "Inferred proposals must remain in review until a user explicitly approves them."
+        case .unauthorizedActor:
+            return "This actor cannot schedule enrichment. Nothing was changed."
+        case .schedulingConflict:
+            return "This enrichment candidate already has scheduled work under a different exact request. Refresh before retrying."
         case .databaseFailure:
             return "Cider could not safely update this suggestion. Nothing was changed; try again after reopening the review list."
         case .writerFailure:
@@ -818,12 +971,13 @@ final class CiderReviewActionCoordinator {
 }
 
 private extension CiderReviewAction {
-    var journalAction: JournalIntelligenceReviewAction {
+    var journalAction: JournalIntelligenceReviewAction? {
         switch self {
         case .approve: .approve
         case .reject: .reject
         case .defer: .defer
         case .correct: .correct
+        case .enrich: nil
         }
     }
 }

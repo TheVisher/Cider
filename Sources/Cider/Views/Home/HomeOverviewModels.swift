@@ -160,6 +160,7 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
     case correctRoute
     case createDateCard
     case createTodo
+    case enrich
 
     var id: String { rawValue }
 
@@ -172,6 +173,7 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .correctRoute: return "folder.badge.gearshape"
         case .createDateCard: return "calendar.badge.plus"
         case .createTodo: return "checklist"
+        case .enrich: return "sparkles"
         }
     }
 
@@ -194,6 +196,8 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
             return "Create Date Card"
         case .createTodo:
             return "Create Todo"
+        case .enrich:
+            return "Enrich"
         }
     }
 
@@ -218,6 +222,8 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
             return "Approve to the explicit Date Card destination"
         case .createTodo:
             return "Approve to the explicit Todo destination"
+        case .enrich:
+            return "Schedule this exact source-backed bookmark for enrichment"
         }
     }
 
@@ -228,15 +234,24 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .deferReview: .defer
         case .openSource: nil
         case .correctRoute: .correct
+        case .enrich: .enrich
         }
     }
 }
 
 enum HomeReviewActionResult: Equatable {
     case succeeded
+    case scheduled
     case failed(message: String)
 
     var succeeded: Bool {
+        switch self {
+        case .succeeded, .scheduled: true
+        case .failed: false
+        }
+    }
+
+    var resolvesRow: Bool {
         if case .succeeded = self { return true }
         return false
     }
@@ -260,7 +275,9 @@ struct HomeReviewActionState: Equatable {
     mutating func reconcile(rowID: String, result: HomeReviewActionResult) {
         pendingReviewIDs.remove(rowID)
         if result.succeeded {
-            resolvedReviewIDs.insert(rowID)
+            if result.resolvesRow {
+                resolvedReviewIDs.insert(rowID)
+            }
             actionErrors[rowID] = nil
         } else {
             resolvedReviewIDs.remove(rowID)

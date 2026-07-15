@@ -320,6 +320,8 @@ final class SecondBrainEventDateFactReviewService {
                 mutated = try deferReview(candidateID: id, actor: actor, reason: normalizedReason)
             case .correct:
                 throw EventDateFactReviewError.unsupportedReviewAction(action.rawValue)
+            case .enrich:
+                throw EventDateFactReviewError.unsupportedReviewAction(action.rawValue)
             }
 
             let canonicalCommand = Self.canonicalCommand(for: action)
@@ -760,6 +762,7 @@ final class SecondBrainEventDateFactReviewService {
         case .reject: return "Rejected event/date fact."
         case .defer: return "Deferred event/date fact."
         case .correct: return "Corrected event/date fact."
+        case .enrich: return "Enrichment is not an event/date fact action."
         }
     }
 

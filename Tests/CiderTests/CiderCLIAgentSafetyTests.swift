@@ -5469,6 +5469,157 @@ struct CiderCLIAgentSafetyTests {
         #expect(payload["after"] as? [String: Any] != nil)
         #expect(payload["changedFields"] as? [String] != nil)
         #expect(payload["reviewResolved"] as? Bool != nil)
+        #expect(payload["candidateRef"] as? String == "enrichment:\(itemID)")
+        #expect((payload["expectedVersionSelector"] as? String)?.contains("@") == true)
+        #expect((payload["actionReceiptID"] as? String)?.hasPrefix("bookmark-enrichment-schedule:enrich:") == true)
+        #expect(payload["truthBoundary"] as? String == "durable_enrichment_schedule_not_enrichment_completion")
+        let verificationCommands = try #require(payload["safeVerificationCommands"] as? [String])
+        #expect(verificationCommands.contains("cider-cli item get bookmark \(itemID) --json"))
+        let receiptID = try #require(payload["actionReceiptID"] as? String)
+        let receiptVerification = try runCLI(
+            args: ["item", "action-ledger", "inspect", receiptID, "--json"],
+            vault: vault
+        )
+        let receiptPayload = try parseJSONObject(receiptVerification.stdout)
+        #expect(receiptVerification.status == 0)
+        #expect(receiptPayload["ok"] as? Bool == true)
+        let itemVerification = try runCLI(
+            args: ["item", "get", "bookmark", itemID, "--json"],
+            vault: vault
+        )
+        #expect(itemVerification.status == 0)
+        #expect(try parseJSONObject(itemVerification.stdout)["ok"] as? Bool == true)
+    }
+
+    @Test("review enrichment batch no-wait preserves JSON shape and one per-item receipt")
+    func reviewEnrichBatchNoWaitJSONCompatibility() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-enrich-batch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        var bookmarkIDs: [String] = []
+        for index in 1...2 {
+            let capture = try runCLI(
+                args: [
+                    "capture", "add", "--kind", "bookmark",
+                    "--url", "https://example.com/review-enrich-batch-\(index)-\(UUID().uuidString)",
+                    "--title", "Batch enrichment \(index)",
+                    "--no-wait", "--json",
+                ],
+                vault: vault
+            )
+            #expect(capture.status == 0)
+            let capturePayload = try parseJSONObject(capture.stdout)
+            let bookmark = try #require(capturePayload["bookmark"] as? [String: Any])
+            bookmarkIDs.append(try #require(bookmark["id"] as? String))
+        }
+        let prepareDatabase = CiderDatabase()
+        try prepareDatabase.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        for bookmarkID in bookmarkIDs {
+            let resetCandidate = try prepareDatabase.prepare("""
+                UPDATE bookmarks
+                SET enrichment_status = 'failed', last_enriched_at = NULL
+                WHERE item_id = ?;
+                """)
+            resetCandidate.bind(bookmarkID, at: 1)
+            try resetCandidate.step()
+        }
+        prepareDatabase.close()
+
+        let result = try runCLI(
+            args: ["review", "enrich-batch", "--actor", "agent", "--confirm", "--no-wait", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+
+        #expect(result.status == 0)
+        #expect(payload["action"] as? String == "review.enrich.batch")
+        #expect(payload["isMutating"] as? Bool == true)
+        #expect(payload["candidateCount"] as? Int == 2)
+        #expect(payload["scheduledCount"] as? Int == 2)
+        #expect(payload["failedCount"] as? Int == 0)
+        #expect(payload["reusedCount"] as? Int == 0)
+        #expect(payload["batchID"] as? String != nil)
+
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let receipts = try database.prepare("SELECT COUNT(*) FROM action_receipts WHERE command = 'review.enrich';")
+        #expect(try receipts.step())
+        #expect(receipts.int(at: 0) == 2)
+        let audits = try database.prepare("SELECT COUNT(*) FROM mutation_audit WHERE action = 'review.enrich.batch.schedule';")
+        #expect(try audits.step())
+        #expect(audits.int(at: 0) == 2)
+    }
+
+    @Test("review enrichment help is read only before vault bootstrap")
+    func reviewEnrichmentHelpIsReadOnly() throws {
+        for subcommand in ["enrich", "enrich-batch"] {
+            let vault = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cider-review-\(subcommand)-help-\(UUID().uuidString)", isDirectory: true)
+            let result = try runCLI(
+                args: ["review", subcommand, "--help", "--json"],
+                vault: vault
+            )
+            let payload = try parseJSONObject(result.stdout)
+
+            #expect(result.status == 0)
+            #expect(payload["command"] as? String == "review.\(subcommand).help")
+            #expect(payload["readOnly"] as? Bool == true)
+            #expect(payload["changed"] as? Bool == false)
+            #expect(!FileManager.default.fileExists(atPath: vault.path))
+        }
+    }
+
+    @Test("explicit bookmark refetch stays outside enrichment review receipts")
+    func explicitBookmarkRefetchBoundaryIsTruthful() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-explicit-bookmark-refetch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add", "--kind", "bookmark",
+                "--url", "https://example.com/explicit-refetch-\(UUID().uuidString)",
+                "--title", "Explicit refetch boundary",
+                "--no-wait", "--json",
+            ],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let bookmark = try #require(capture["bookmark"] as? [String: Any])
+        let itemID = try #require(bookmark["id"] as? String)
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let markComplete = try database.prepare("""
+            UPDATE bookmarks
+            SET enrichment_status = 'complete', last_enriched_at = ?
+            WHERE item_id = ?;
+            """)
+        markComplete.bind(Date().timeIntervalSince1970, at: 1)
+            .bind(itemID, at: 2)
+        try markComplete.step()
+        let receiptsBefore = try scalarCount("action_receipts", in: database)
+        let auditBefore = try scalarCount("mutation_audit", in: database)
+        database.close()
+
+        let result = try runCLI(
+            args: ["review", "enrich", itemID, "--actor", "agent", "--no-wait", "--json"],
+            vault: vault
+        )
+        let payload = try parseJSONObject(result.stdout)
+        #expect(payload["action"] as? String == "bookmark.refetch")
+        #expect(payload["status"] as? String == "scheduled")
+        #expect(payload["candidateRef"] == nil)
+        #expect(payload["actionReceiptID"] == nil)
+        #expect((payload["message"] as? String)?.contains("outside the active review-candidate family") == true)
+
+        let verifyDB = CiderDatabase()
+        try verifyDB.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { verifyDB.close() }
+        #expect(try scalarCount("action_receipts", in: verifyDB) == receiptsBefore)
+        #expect(try scalarCount("mutation_audit", in: verifyDB) == auditBefore)
     }
 
     @Test("legacy bookmark enrich is removed with review replacement")
@@ -12755,6 +12906,12 @@ struct CiderCLIAgentSafetyTests {
         let database = CiderDatabase()
         try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
         defer { database.close() }
+        let statement = try database.prepare("SELECT COUNT(*) FROM \(table);")
+        guard try statement.step() else { return 0 }
+        return statement.int(at: 0)
+    }
+
+    private func scalarCount(_ table: String, in database: CiderDatabase) throws -> Int {
         let statement = try database.prepare("SELECT COUNT(*) FROM \(table);")
         guard try statement.step() else { return 0 }
         return statement.int(at: 0)

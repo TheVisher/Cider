@@ -598,7 +598,10 @@ extension CiderPanelView {
                 performHomeReviewAction(reviewItem, action: action, routingDestination: destination, surface: .home)
             },
             onEnrichReviewBatch: {
-                enrichHomeReviewBatch()
+                enrichHomeReviewBatch(
+                    candidates: reviewModel?.items.items ?? [],
+                    surface: .home
+                )
             },
             onOpenSettings: {
                 NotificationCenter.default.post(name: .openCiderSettings, object: nil)
@@ -644,7 +647,10 @@ extension CiderPanelView {
                 performHomeReviewAction(reviewItem, action: action, routingDestination: destination, surface: .reviewQueue)
             },
             onEnrichReviewBatch: {
-                enrichHomeReviewBatch()
+                enrichHomeReviewBatch(
+                    candidates: reviewModel?.items.items ?? [],
+                    surface: .reviewQueue
+                )
             }
         )
     }
@@ -681,7 +687,7 @@ extension CiderPanelView {
             let outcome = CiderReviewActionCoordinator().perform(coordinatorRequest)
             if outcome.isSuccessful {
                 refreshHomeReviewModel()
-                return .succeeded
+                return action == .enrich ? .scheduled : .succeeded
             }
             return .failed(message: outcome.error?.message ?? outcome.message)
         }
@@ -697,6 +703,8 @@ extension CiderPanelView {
         case .deferReview:
             didChange = deferHomeReviewItem(reviewItem)
         case .correctRoute:
+            didChange = false
+        case .enrich:
             didChange = false
         case .openSource:
             return openDashboardReviewSource(reviewItem)
@@ -729,6 +737,8 @@ extension CiderPanelView {
             family = .routingDecision
         case "Date Suggestion":
             family = .bookmarkDateSuggestion
+        case "Enrichment":
+            family = .enrichment
         default:
             return nil
         }
@@ -752,10 +762,11 @@ extension CiderPanelView {
                 bookmarkDateItemID: family == .bookmarkDateSuggestion ? dateApproval?.bookmarkID : nil,
                 bookmarkDateDestination: bookmarkDateDestination,
                 bookmarkDateExactEvidence: family == .bookmarkDateSuggestion ? dateApproval?.exactEvidence : nil,
+                enrichmentItemID: family == .enrichment ? reviewItem.itemID : nil,
                 actor: "user",
                 surface: surface,
                 exactEvidenceRequirement: family == .routingDecision ? .notRequired : .required,
-                mutationAuthority: .reviewApprovedCandidate
+                mutationAuthority: family == .enrichment ? .directUserAction : .reviewApprovedCandidate
             )
         }
         return CiderReviewActionRequest(
@@ -772,10 +783,11 @@ extension CiderPanelView {
             bookmarkDateItemID: family == .bookmarkDateSuggestion ? dateApproval?.bookmarkID : nil,
             bookmarkDateDestination: bookmarkDateDestination,
             bookmarkDateExactEvidence: family == .bookmarkDateSuggestion ? dateApproval?.exactEvidence : nil,
+            enrichmentItemID: family == .enrichment ? reviewItem.itemID : nil,
             actor: "user",
             surface: surface,
             exactEvidenceRequirement: family == .routingDecision ? .notRequired : .required,
-            mutationAuthority: .reviewApprovedCandidate
+            mutationAuthority: family == .enrichment ? .directUserAction : .reviewApprovedCandidate
         )
     }
 
@@ -808,15 +820,23 @@ extension CiderPanelView {
         }
     }
 
-    private func enrichHomeReviewBatch() -> Bool {
+    private func enrichHomeReviewBatch(
+        candidates: [CiderReviewQueueItem],
+        surface: CiderReviewInvokingSurface
+    ) -> CiderReviewQueueBatchEnrichmentResult? {
         do {
-            _ = try CiderReviewQueueService().enrichBatch(actor: "user")
+            let result = try CiderReviewQueueService().enrichBatch(
+                actor: "user",
+                sampleFailureLimit: min(candidates.count, 100),
+                surface: surface,
+                candidates: candidates.compactMap(CiderReviewEnrichmentCandidateSelection.init(item:))
+            )
             homeDashboardReviewLoader.invalidate()
             Task { await homeDashboardReviewLoader.loadIfNeeded() }
-            return true
+            return result
         } catch {
             print("Failed to schedule Home review enrichment batch: \(error.localizedDescription)")
-            return false
+            return nil
         }
     }
 
