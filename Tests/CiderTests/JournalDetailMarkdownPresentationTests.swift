@@ -103,8 +103,13 @@ struct JournalDetailMarkdownPresentationTests {
 
         #expect(journalViews.contains(".environment(\\.openURL, OpenURLAction"))
         #expect(journalViews.contains("CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))"))
-        #expect(journalViews.contains("isCanonicalItemResolvable: isCanonicalItemResolvable"))
+        #expect(journalViews.contains("resolveCanonicalItem: resolveCanonicalItem"))
         #expect(journalViews.contains("onOpenCanonicalItem(ref)"))
         #expect(journalViews.contains("return .discarded"))
+
+        let detailManagementURL = repoRoot.appendingPathComponent("Sources/Cider/Views/CiderPanelView+DetailManagement.swift")
+        let detailManagement = try String(contentsOf: detailManagementURL, encoding: .utf8)
+        #expect(detailManagement.contains("ItemLinkService.shared.resolve(type: type, ref: selector)"))
+        #expect(detailManagement.contains("isLinkedRefResolvable(ref)"))
     }
 }

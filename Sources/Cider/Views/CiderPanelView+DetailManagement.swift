@@ -260,6 +260,14 @@ extension CiderPanelView {
         }
     }
 
+    func resolveLinkedRef(type: LibraryEntityType, selector: String) -> LibraryEntityRef? {
+        guard let ref = try? ItemLinkService.shared.resolve(type: type, ref: selector),
+              isLinkedRefResolvable(ref) else {
+            return nil
+        }
+        return ref
+    }
+
     func openHubNavigationTarget(_ target: LibraryHubNavigationTarget) {
         guard target.readOnly, !target.promotesTruth else { return }
         switch target {

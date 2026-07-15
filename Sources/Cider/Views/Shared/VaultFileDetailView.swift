@@ -73,7 +73,7 @@ struct VaultFileDetailView: View {
 
         case .video, .audio:
             switch VaultFileMediaPreviewPolicy.presentation(for: file) {
-            case .inlineVideo:
+            case .inlineVideo, .inlineAudio:
                 if let avPlayer {
                 VideoPlayer(player: avPlayer)
                     .frame(maxWidth: .infinity)
@@ -214,7 +214,7 @@ struct VaultFileDetailView: View {
             pdfDocument = PDFDocument(url: url)
 
         case .video, .audio:
-            if VaultFileMediaPreviewPolicy.presentation(for: file) == .inlineVideo {
+            if VaultFileMediaPreviewPolicy.presentation(for: file).usesAVPlayer {
                 avPlayer = AVPlayer(url: url)
             }
 
@@ -233,15 +233,26 @@ struct VaultFileDetailView: View {
 
 enum VaultFileMediaPreviewPresentation: Equatable {
     case inlineVideo
+    case inlineAudio
     case externalAudio
     case other
+
+    var usesAVPlayer: Bool {
+        self == .inlineVideo || self == .inlineAudio
+    }
 }
 
 enum VaultFileMediaPreviewPolicy {
+    private static let nativelyPlayableAudioExtensions: Set<String> = [
+        "aac", "aif", "aiff", "alac", "caf", "m4a", "mp3", "wav"
+    ]
+
     static func presentation(for file: VaultFile) -> VaultFileMediaPreviewPresentation {
         switch file.fileType {
         case .video: return .inlineVideo
-        case .audio: return .externalAudio
+        case .audio:
+            let ext = (file.filename as NSString).pathExtension.lowercased()
+            return nativelyPlayableAudioExtensions.contains(ext) ? .inlineAudio : .externalAudio
         default: return .other
         }
     }

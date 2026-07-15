@@ -259,7 +259,7 @@ extension CiderPanelView {
                 projection: projection,
                 notesViewModel: notesViewModel,
                 selectedEntryID: $selectedJournalEntryID,
-                isCanonicalItemResolvable: isLinkedRefResolvable,
+                resolveCanonicalItem: resolveLinkedRef,
                 onOpenCanonicalItem: openLinkedRef
             )
 

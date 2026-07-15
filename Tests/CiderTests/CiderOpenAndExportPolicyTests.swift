@@ -23,6 +23,25 @@ struct CiderOpenAndExportPolicyTests {
         #expect(workspace.actions.isEmpty)
     }
 
+    @Test("untrusted web requires a well formed host and rejects authority tricks")
+    func malformedWebFailsClosed() throws {
+        let workspace = RecordingWorkspaceOpener()
+        let policy = CiderOpenPolicy(workspace: workspace)
+
+        for raw in [
+            "https:///missing-host",
+            "https://user:password@example.com/private",
+            "https://example.com\\@attacker.invalid/path",
+        ] {
+            let url = try #require(URL(string: raw))
+            #expect(throws: CiderOpenError.unsupportedWebScheme) {
+                try policy.open(.untrustedWeb(url))
+            }
+        }
+
+        #expect(workspace.actions.isEmpty)
+    }
+
     @Test("web local Finder Preview and system destinations remain typed")
     func typedDestinationsUseTheirOwnOperations() throws {
         let workspace = RecordingWorkspaceOpener()

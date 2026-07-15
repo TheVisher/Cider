@@ -18,6 +18,28 @@ final class VaultFileMediaPreviewPolicyTests: XCTestCase {
         XCTAssertEqual(VaultFileMediaPreviewPolicy.presentation(for: file), .externalAudio)
     }
 
+    func testM4AAudioUsesNativeAVPlayerPreview() {
+        let file = VaultFile(
+            id: UUID(),
+            filename: "driving-reflection.m4a",
+            relativePath: "Journal/Audio/driving-reflection.m4a",
+            fileType: .audio,
+            fileSize: 1,
+            createdAt: Date(),
+            modifiedAt: Date(),
+            folderID: nil
+        )
+
+        XCTAssertEqual(VaultFileMediaPreviewPolicy.presentation(for: file), .inlineAudio)
+        XCTAssertTrue(VaultFileMediaPreviewPolicy.presentation(for: file).usesAVPlayer)
+    }
+
+    func testSupportedJournalAudioExtensionsAreClassifiedAsAudio() {
+        XCTAssertEqual(VaultFileType.from(extension: "caf"), .audio)
+        XCTAssertEqual(VaultFileType.from(extension: "aif"), .audio)
+        XCTAssertEqual(VaultFileType.from(extension: "m4a"), .audio)
+    }
+
     func testVideoKeepsInlineAVKitPreview() {
         let file = VaultFile(
             id: UUID(),

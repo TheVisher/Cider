@@ -128,7 +128,7 @@ enum VaultFileType: String, Codable, Hashable {
         }
 
         // Audio
-        if ["mp3", "m4a", "wav", "aac", "flac", "ogg", "wma", "aiff", "alac"].contains(lower) {
+        if ["mp3", "m4a", "wav", "aac", "flac", "ogg", "wma", "aif", "aiff", "alac", "caf"].contains(lower) {
             return .audio
         }
 

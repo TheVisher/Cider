@@ -57,21 +57,21 @@ struct JournalCaptureCard: Identifiable, Hashable {
 
     func preparedMarkdown(
         timestampFormat: JournalTimestampFormat,
-        isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+        resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     ) -> String {
         let formatted = preparedMarkdown(timestampFormat: timestampFormat)
         return JournalCaptureLink.markdownForRendering(
             formatted,
-            isCanonicalItemResolvable: isCanonicalItemResolvable
+            resolveCanonicalItem: resolveCanonicalItem
         )
     }
 
     func links(
-        isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+        resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     ) -> [JournalCaptureLink] {
         JournalCaptureLink.links(
             in: sourceContent,
-            isCanonicalItemResolvable: isCanonicalItemResolvable
+            resolveCanonicalItem: resolveCanonicalItem
         )
     }
 }
@@ -110,22 +110,43 @@ struct JournalCaptureLink: Hashable {
 
     static func target(
         for destination: URL,
-        isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+        resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     ) -> Target? {
         switch destination.scheme?.lowercased() {
         case "http", "https":
-            return .external(destination)
+            return CiderOpenPolicy.isAllowedUntrustedWebURL(destination) ? .external(destination) : nil
         case "cider":
-            guard destination.host?.lowercased() == "item" else { return nil }
-            let parts = destination.pathComponents.filter { $0 != "/" }
-            guard parts.count == 2,
-                  let type = LibraryEntityType(rawValue: parts[0]),
-                  LibraryEntityType.activeCases.contains(type),
-                  let itemID = UUID(uuidString: parts[1]) else {
+            guard let components = URLComponents(url: destination, resolvingAgainstBaseURL: false),
+                  components.host?.lowercased() == "item",
+                  components.user == nil,
+                  components.password == nil,
+                  components.port == nil,
+                  components.query == nil,
+                  components.fragment == nil else {
                 return nil
             }
-            let ref = LibraryEntityRef(type: type, entityID: itemID)
-            return isCanonicalItemResolvable(ref) ? .item(ref) : nil
+            let encodedParts = components.percentEncodedPath.split(
+                separator: "/",
+                omittingEmptySubsequences: false
+            )
+            guard encodedParts.count == 3,
+                  encodedParts[0].isEmpty,
+                  let rawType = String(encodedParts[1]).removingPercentEncoding,
+                  let selector = String(encodedParts[2]).removingPercentEncoding,
+                  let type = LibraryEntityType(rawValue: rawType),
+                  LibraryEntityType.activeCases.contains(type),
+                  !selector.isEmpty,
+                  selector == selector.trimmingCharacters(in: .whitespacesAndNewlines),
+                  selector != ".",
+                  selector != "..",
+                  !selector.contains("/"),
+                  !selector.contains("\\"),
+                  !selector.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+                  let ref = resolveCanonicalItem(type, selector),
+                  ref.type == type else {
+                return nil
+            }
+            return .item(ref)
         default:
             return nil
         }
@@ -133,7 +154,7 @@ struct JournalCaptureLink: Hashable {
 
     static func links(
         in markdown: String,
-        isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+        resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     ) -> [JournalCaptureLink] {
         guard let expression = markdownLinkExpression else {
             return []
@@ -145,8 +166,8 @@ struct JournalCaptureLink: Hashable {
                   let destinationRange = Range(match.range(at: 2), in: markdown),
                   let destination = URL(string: String(markdown[destinationRange])),
                   let target = target(
-                    for: destination,
-                    isCanonicalItemResolvable: isCanonicalItemResolvable
+                      for: destination,
+                      resolveCanonicalItem: resolveCanonicalItem
                   ) else {
                 return nil
             }
@@ -160,7 +181,7 @@ struct JournalCaptureLink: Hashable {
 
     static func markdownForRendering(
         _ markdown: String,
-        isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+        resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     ) -> String {
         guard let expression = markdownLinkExpression else { return markdown }
         let rendered = NSMutableString(string: markdown)
@@ -177,7 +198,7 @@ struct JournalCaptureLink: Hashable {
             if let destination = URL(string: rawDestination) {
                 resolvedTarget = Self.target(
                     for: destination,
-                    isCanonicalItemResolvable: isCanonicalItemResolvable
+                    resolveCanonicalItem: resolveCanonicalItem
                 )
             } else {
                 resolvedTarget = nil

@@ -127,4 +127,37 @@ struct ItemLinkServiceTests {
         #expect(removed?.metadata["targetType"] == "contact")
         #expect(removed?.metadata["targetID"] == contact.entityID.uuidString)
     }
+
+    @Test("Canonical selector resolution returns one exact note and fails closed for duplicate or missing titles")
+    func canonicalSelectorResolutionIsUniqueOrFailsClosed() throws {
+        let (db, url) = try makeTestDB()
+        let vaultRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-item-link-resolution-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            db.close()
+            cleanup(url)
+            try? FileManager.default.removeItem(at: vaultRoot)
+        }
+        let notesRoot = vaultRoot.appendingPathComponent("Inbox/Notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
+        let notes = NotesStorage(
+            database: db,
+            notesDirectoryURL: notesRoot,
+            vaultRootURL: vaultRoot
+        )
+        let first = notes.createNew(initialContent: "Synthetic fixture one")
+        notes.rename(note: first, to: "Journal target alpha")
+        let service = ItemLinkService(database: db, notes: notes)
+
+        #expect(try service.resolve(type: .note, ref: "Journal target alpha") == .init(type: .note, entityID: first.id))
+
+        let duplicate = notes.createNew(initialContent: "Synthetic fixture two")
+        notes.rename(note: duplicate, to: "Journal target beta")
+        #expect(throws: ItemLinkService.LinkError.self) {
+            try service.resolve(type: .note, ref: "Journal target")
+        }
+        #expect(throws: ItemLinkService.LinkError.self) {
+            try service.resolve(type: .note, ref: "No such note")
+        }
+    }
 }

@@ -103,7 +103,7 @@ struct CiderOpenPolicy {
     func open(_ destination: CiderOpenDestination) throws -> Bool {
         switch destination {
         case .untrustedWeb(let url):
-            guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            guard Self.isAllowedUntrustedWebURL(url) else {
                 throw CiderOpenError.unsupportedWebScheme
             }
             guard workspace.open(url) else { throw CiderOpenError.openFailed }
@@ -131,6 +131,23 @@ struct CiderOpenPolicy {
             guard workspace.open(systemDestination.url) else { throw CiderOpenError.openFailed }
             return true
         }
+    }
+
+    /// Pure validation shared by source-text presentation and the final side-effect
+    /// boundary. A web destination must be an absolute HTTP(S) URL with a real host;
+    /// credentials and backslash-based authority tricks are rejected.
+    nonisolated static func isAllowedUntrustedWebURL(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host,
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              !url.absoluteString.contains("\\") else {
+            return false
+        }
+        return true
     }
 
     private func validateLocalURL(_ url: URL) throws {

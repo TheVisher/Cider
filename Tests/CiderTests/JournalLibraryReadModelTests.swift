@@ -383,7 +383,7 @@ struct JournalLibraryReadModelTests {
         )
         let card = try #require(JournalLibraryReadModel.build(from: [note]).days.first?.captureCards.first)
 
-        #expect(card.links(isCanonicalItemResolvable: { _ in false }) == [
+        #expect(card.links(resolveCanonicalItem: { _, _ in nil }) == [
             JournalCaptureLink(
                 label: "Televero",
                 destination: try #require(URL(string: "https://televerohealth.com/")),
@@ -416,7 +416,9 @@ struct JournalLibraryReadModelTests {
         )
         let card = try #require(JournalLibraryReadModel.build(from: [note]).days.first?.captureCards.first)
 
-        let links = card.links(isCanonicalItemResolvable: { $0 == resolvedRef })
+        let links = card.links(resolveCanonicalItem: { type, selector in
+            type == resolvedRef.type && selector == resolvedRef.entityID.uuidString ? resolvedRef : nil
+        })
 
         #expect(links.count == 1)
         #expect(links.first?.label == "saved article")
@@ -425,12 +427,88 @@ struct JournalLibraryReadModelTests {
         #expect(!links.contains { $0.label.contains("Juniper") })
         let rendered = card.preparedMarkdown(
             timestampFormat: .twentyFourHour,
-            isCanonicalItemResolvable: { $0 == resolvedRef }
+            resolveCanonicalItem: { type, selector in
+                type == resolvedRef.type && selector == resolvedRef.entityID.uuidString ? resolvedRef : nil
+            }
         )
         #expect(rendered.contains("[saved article](cider://item/bookmark/\(resolvedID.uuidString))"))
         #expect(rendered.contains("Do not link missing note."))
         #expect(!rendered.contains("cider://item/note/\(unresolvedID.uuidString)"))
         #expect(card.sourceEntry.content == content)
+    }
+
+    @Test("capture card resolves explicit typed selectors only when canonical resolution is unique")
+    func captureCardCanonicalSelectorsFailClosedForAmbiguousAndMissingTargets() throws {
+        let uniqueRef = LibraryEntityRef(type: .bookmark, entityID: UUID())
+        let content = """
+        # Journal 06-03-2026
+
+        ## 09:30
+        Source: capture.add
+
+        Open [the unique article](cider://item/bookmark/Televero%20article).
+        Keep [the ambiguous article](cider://item/bookmark/Duplicate%20title) inert.
+        Keep [the missing note](cider://item/note/Absent) inert.
+        """
+        let note = Note(
+            title: "Journal 06-03-2026",
+            content: content,
+            relativePath: "Inbox/Notes/Journal 06-03-2026.md"
+        )
+        let card = try #require(JournalLibraryReadModel.build(from: [note]).days.first?.captureCards.first)
+        var selectors: [(LibraryEntityType, String)] = []
+        let resolver: (LibraryEntityType, String) -> LibraryEntityRef? = { type, selector in
+            selectors.append((type, selector))
+            return type == .bookmark && selector == "Televero article" ? uniqueRef : nil
+        }
+
+        let links = card.links(resolveCanonicalItem: resolver)
+
+        #expect(links.map(\.target) == [.item(uniqueRef)])
+        #expect(selectors.contains { $0.0 == .bookmark && $0.1 == "Duplicate title" })
+        #expect(selectors.contains { $0.0 == .note && $0.1 == "Absent" })
+        let rendered = card.preparedMarkdown(
+            timestampFormat: .twentyFourHour,
+            resolveCanonicalItem: resolver
+        )
+        #expect(rendered.contains("[the unique article](cider://item/bookmark/Televero%20article)"))
+        #expect(rendered.contains("Keep the ambiguous article inert."))
+        #expect(rendered.contains("Keep the missing note inert."))
+        #expect(card.sourceEntry.content == content)
+        #expect(card.sourceContent.contains("cider://item/bookmark/Duplicate%20title"))
+    }
+
+    @Test("capture link targets reject malformed web destinations and internal path tricks")
+    func captureLinkTargetsRejectMalformedAndTrickyDestinations() throws {
+        let resolver: (LibraryEntityType, String) -> LibraryEntityRef? = { type, _ in
+            LibraryEntityRef(type: type, entityID: UUID())
+        }
+        let rejected = [
+            "file:///tmp/private.txt",
+            "javascript:alert(1)",
+            "https:///missing-host",
+            "https://user:password@example.com/",
+            "cider://item/bookmark/..",
+            "cider://item/bookmark/%2E%2E",
+            "cider://item/bookmark/title/extra",
+            "cider://item/bookmark/title?fallback=https://example.com",
+            "cider://other/bookmark/title",
+            "cider://item/externalFile/title",
+        ]
+
+        for raw in rejected {
+            let destination = try #require(URL(string: raw))
+            #expect(JournalCaptureLink.target(
+                for: destination,
+                resolveCanonicalItem: resolver
+            ) == nil, "Unexpected actionable destination: \(raw)")
+        }
+
+        let allowed = try #require(URL(string: "https://example.com/path?q=journal#capture"))
+        #expect(JournalCaptureLink.target(
+            for: allowed,
+            resolveCanonicalItem: { _, _ in nil }
+        ) == .external(allowed))
     }
 
     @Test("single source without reliable capture boundaries is not fabricated into cards")

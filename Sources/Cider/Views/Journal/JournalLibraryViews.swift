@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 
 struct JournalLibraryCardView: View {
@@ -63,7 +64,7 @@ struct JournalDetailContentView: View {
     let projection: JournalLibraryReadModel
     @ObservedObject var notesViewModel: NotesViewModel
     @Binding var selectedEntryID: String?
-    let isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+    let resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     @State private var isEditingSource = false
     @State private var intelligenceState: JournalIntelligenceDayReviewLoadState = .loading
@@ -103,7 +104,7 @@ struct JournalDetailContentView: View {
                         intelligenceState: intelligenceState,
                         isIntelligenceExpanded: $isIntelligenceExpanded,
                         onReloadIntelligence: { intelligenceReloadToken += 1 },
-                        isCanonicalItemResolvable: isCanonicalItemResolvable,
+                        resolveCanonicalItem: resolveCanonicalItem,
                         onOpenCanonicalItem: onOpenCanonicalItem,
                         onEditSource: selectedDay.editableEntry == nil ? nil : { isEditingSource = true }
                     )
@@ -191,7 +192,7 @@ private struct JournalCaptureCardsView: View {
     let intelligenceState: JournalIntelligenceDayReviewLoadState
     @Binding var isIntelligenceExpanded: Bool
     let onReloadIntelligence: () -> Void
-    let isCanonicalItemResolvable: (LibraryEntityRef) -> Bool
+    let resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     let onEditSource: (() -> Void)?
 
@@ -245,13 +246,13 @@ private struct JournalCaptureCardsView: View {
                             MarkdownContentView(
                                 text: card.preparedMarkdown(
                                     timestampFormat: timestampFormat,
-                                    isCanonicalItemResolvable: isCanonicalItemResolvable
+                                    resolveCanonicalItem: resolveCanonicalItem
                                 )
                             )
                             .environment(\.openURL, OpenURLAction { destination in
                                 switch JournalCaptureLink.target(
                                     for: destination,
-                                    isCanonicalItemResolvable: isCanonicalItemResolvable
+                                    resolveCanonicalItem: resolveCanonicalItem
                                 ) {
                                 case .external(let url):
                                     CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
@@ -328,14 +329,8 @@ private struct JournalMediaSourceCardView: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        if source.kind == .photo,
-           source.isOriginalAvailable,
-           let image = NSImage(contentsOf: StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(source.relativePath)) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
+        if source.kind == .photo, source.isOriginalAvailable {
+            JournalMediaPhotoThumbnailView(source: source)
         } else {
             Image(systemName: source.kind == .audio ? "waveform" : source.kind == .photo ? "photo" : "paperclip")
                 .font(CiderFont.bodySemibold)
@@ -344,6 +339,78 @@ private struct JournalMediaSourceCardView: View {
                 .background(CiderColors.surfaceInput)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
         }
+    }
+}
+
+private struct JournalMediaPhotoThumbnailView: View {
+    let source: JournalMediaSourceCard
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "photo")
+                    .font(CiderFont.bodySemibold)
+                    .foregroundColor(CiderColors.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(CiderColors.surfaceInput)
+            }
+        }
+        .frame(width: 48, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
+        .task(id: "\(source.id):\(source.relativePath):\(source.capturedAt.timeIntervalSince1970)") {
+            await loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() async {
+        if let cached = VaultFileThumbnailCache.shared.get(
+            source.relativePath,
+            modifiedAt: source.capturedAt
+        ) {
+            image = cached
+            return
+        }
+
+        let url = StoragePaths.cachedVaultDirectoryURL
+            .appendingPathComponent(source.relativePath)
+            .standardizedFileURL
+        let loaded = await JournalMediaPhotoThumbnailLoader.load(at: url)
+        guard !Task.isCancelled, let loaded else { return }
+        VaultFileThumbnailCache.shared.set(
+            loaded,
+            for: source.relativePath,
+            modifiedAt: source.capturedAt
+        )
+        image = loaded
+    }
+}
+
+enum JournalMediaPhotoThumbnailLoader {
+    static func load(at url: URL) async -> NSImage? {
+        await Task.detached(priority: .utility) {
+            guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 160,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                imageSource,
+                0,
+                options as CFDictionary
+            ) else {
+                return nil
+            }
+            return NSImage(
+                cgImage: cgImage,
+                size: NSSize(width: cgImage.width, height: cgImage.height)
+            )
+        }.value
     }
 }
 
