@@ -4589,7 +4589,15 @@ struct CiderCLI {
             sourceContext: sourceContext,
             media: media
         ))
-        return journalAtomicCapturePayload(receipt, sourceContext: sourceContext)
+        let graphCandidates = recordJournalGraphCandidates(
+            captureEventID: receipt.receiptID,
+            journalOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: receipt.item.id)
+        )
+        return journalAtomicCapturePayload(
+            receipt,
+            sourceContext: sourceContext,
+            graphCandidates: graphCandidates
+        )
     }
 
     static func journalMediaKind(forPathExtension pathExtension: String) -> JournalMediaKind {
@@ -4617,7 +4625,8 @@ struct CiderCLI {
 
     static func journalAtomicCapturePayload(
         _ receipt: JournalAtomicCaptureReceipt,
-        sourceContext: CaptureSourceContext?
+        sourceContext: CaptureSourceContext?,
+        graphCandidates: [String: Any]
     ) -> [String: Any] {
         func item(_ ref: JournalAtomicCaptureReceipt.ItemRef) -> [String: Any] {
             [
@@ -4640,13 +4649,23 @@ struct CiderCLI {
                 "mediaItem": ref.mediaItem.map(item) ?? NSNull(),
             ]
         }
-        let safeNextCommands = [
+        var safeNextCommands = [
             "cider-cli item get note \(receipt.item.id) --json",
             "cider-cli item context note \(receipt.item.id) --json",
         ]
+        let candidateCount = graphCandidates["count"] as? Int ?? 0
+        let candidateStatus = graphCandidates["status"] as? String ?? "failed"
+        let candidateChanged = graphCandidates["wasReused"] as? Bool == false
+            && candidateStatus != "failed"
+            && candidateStatus != "unavailable"
+        if candidateCount > 0 {
+            safeNextCommands.append("cider-cli item journal-intelligence --date \(receipt.journalDate) --json")
+            safeNextCommands.append("cider-cli item graph-candidates note \(receipt.item.id) --json")
+            safeNextCommands.append("cider-cli capture review-queue --kind graph_candidate --json")
+        }
         var payload: [String: Any] = [
             "ok": true,
-            "changed": !receipt.wasReused,
+            "changed": !receipt.wasReused || candidateChanged,
             "readOnly": false,
             "command": "capture.add",
             "kind": "journal",
@@ -4667,6 +4686,15 @@ struct CiderCLI {
             "source": source(receipt.textSource),
             "media": receipt.mediaSources.map(source),
             "captureEventID": receipt.receiptID,
+            "enrichment": [
+                "status": candidateStatus,
+                "isEnriching": false,
+                "changed": candidateChanged,
+                "graphCandidateCount": candidateCount,
+                "reviewNeeded": candidateCount > 0,
+                "sourceCaptureCommitted": true,
+            ],
+            "graphCandidates": graphCandidates,
             "duplicate": ["status": receipt.wasReused ? "exact_retry_reused" : "new"],
             "routing": [
                 "reviewNeeded": false,
@@ -4679,9 +4707,17 @@ struct CiderCLI {
                 "ownerID": receipt.item.id,
                 "mediaOwnerCount": receipt.mediaSources.count,
             ],
-            "nextSafeAction": "inspect_item",
+            "nextSafeAction": candidateCount > 0 ? "review_candidates" : "inspect_item",
             "safeNextCommands": safeNextCommands,
         ]
+        if candidateStatus == "failed" {
+            payload["partialSuccess"] = [
+                "status": "source_committed_enrichment_failed",
+                "reason": "The Journal capture is committed and inspectable, but reviewable candidate enrichment is incomplete.",
+                "sourceCaptureCommitted": true,
+                "enrichmentClaimed": false,
+            ] as [String: Any]
+        }
         if let sourceContext { payload["sourceContext"] = sourceContext.toDictionary() }
         return payload
     }
@@ -5261,41 +5297,46 @@ struct CiderCLI {
         _ result: DailyNoteAppendResult,
         captureEventID: String? = nil
     ) -> [String: Any] {
-        guard CiderDatabase.shared.isOpen else {
+        recordJournalGraphCandidates(
+            captureEventID: captureEventID,
+            journalOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: result.note.id.uuidString)
+        )
+    }
+
+    static func recordJournalGraphCandidates(
+        captureEventID: String?,
+        journalOwner: SecondBrainOwnerRef,
+        database: CiderDatabase = .shared
+    ) -> [String: Any] {
+        guard database.isOpen, let captureEventID, !captureEventID.isEmpty else {
             return [
                 "status": "unavailable",
                 "count": 0,
-                "reason": "Graph candidate extraction could not run because no writable database is available.",
-            ] as [String: Any]
-        }
-
-        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: result.note.id.uuidString)
-        let extraction = SecondBrainJournalGraphCandidateExtractor().extract(
-            sourceOwner: owner,
-            rawContent: result.rawContent,
-            date: result.date,
-            time: result.time
-        )
-        guard !extraction.outputs.isEmpty else {
-            return [
-                "status": "none",
-                "count": 0,
-                "candidateIDs": [],
-                "candidateRefs": [],
+                "reviewRequired": false,
+                "sourceCaptureCommitted": database.isOpen,
+                "reason": "Reviewable candidate extraction could not resolve a committed Journal capture.",
             ] as [String: Any]
         }
 
         do {
-            let service = SecondBrainEnrichmentOutputService(database: .shared)
-            for var output in extraction.outputs {
-                if let captureEventID {
-                    output.metadata["capture_event_id"] = captureEventID
-                    output.metadata["capture_event_ref"] = "capture_event:\(captureEventID)"
-                }
-                try service.record(output)
-            }
-            let candidates = extraction.outputs.map { output -> [String: Any] in
+            let result = try JournalCaptureCandidateService(database: database).generate(
+                captureEventID: captureEventID,
+                journalOwner: journalOwner
+            )
+            let candidates = result.outputs.map { output -> [String: Any] in
                 let refPrefix = output.kind == "memory_candidate" ? "memory_candidate" : "graph_candidate"
+                let spanStart: Any
+                if let raw = output.metadata["source_span_start"], let value = Int(raw) {
+                    spanStart = value
+                } else {
+                    spanStart = NSNull()
+                }
+                let spanEnd: Any
+                if let raw = output.metadata["source_span_end"], let value = Int(raw) {
+                    spanEnd = value
+                } else {
+                    spanEnd = NSNull()
+                }
                 return [
                     "id": output.id,
                     "ref": "\(refPrefix):\(output.id)",
@@ -5303,41 +5344,68 @@ struct CiderCLI {
                     "mentionText": output.value,
                     "reviewState": output.reviewState,
                     "sourceQuote": output.evidence,
+                    "sourceSpan": [
+                        "coordinateSpace": output.metadata["source_coordinate_space"] ?? "capture_event.source_text",
+                        "start": spanStart,
+                        "end": spanEnd,
+                    ],
+                    "objectTypes": DatabaseHelpers.decodeStringArray(
+                        output.metadata[SecondBrainGraphCandidateContract.MetadataKey.objectTypeGuesses]
+                    ),
+                    "relationTypes": DatabaseHelpers.decodeStringArray(
+                        output.metadata[SecondBrainGraphCandidateContract.MetadataKey.relationGuesses]
+                    ),
+                    "provenance": [
+                        "captureEventRef": "capture_event:\(captureEventID)",
+                        "journalSourceRef": result.textSourceRef,
+                        "journalOwnerRef": journalOwner.canonicalRef,
+                    ],
                     "confidence": output.confidence as Any,
                     "safeNextCommands": [
                         output.kind == "memory_candidate"
                             ? "cider-cli item memory-facts inspect \(output.id) --json"
                             : "cider-cli item graph-candidate \(output.id) --json",
-                        "cider-cli item context note \(result.note.id.uuidString) --json",
+                        "cider-cli item context note \(journalOwner.ownerID) --json",
                     ],
                 ] as [String: Any]
             }
-            let candidateRefs = extraction.outputs.map { output in
+            let candidateRefs = result.outputs.map { output in
                 "\(output.kind == "memory_candidate" ? "memory_candidate" : "graph_candidate"):\(output.id)"
             }
             let reviewQueueCommands = orderedUniqueStrings(
                 ["graph_candidate", "memory_candidate"].compactMap { kind in
-                    extraction.outputs.contains { $0.kind == kind }
+                    result.outputs.contains { $0.kind == kind }
                         ? "cider-cli capture review-queue --kind \(kind) --json"
                         : nil
                 }
             )
             return [
-                "status": "suggested",
-                "count": extraction.outputs.count,
-                "candidateIDs": extraction.ids,
+                "status": result.status.rawValue,
+                "count": result.outputs.count,
+                "candidateIDs": result.outputs.map(\.id),
                 "candidateRefs": candidateRefs,
-                "reviewState": "suggested",
+                "reviewState": result.outputs.isEmpty ? NSNull() : "suggested" as Any,
+                "reviewRequired": result.reviewRequired,
+                "wasReused": result.wasReused,
+                "wasBounded": result.wasBounded,
+                "discardedCount": result.discardedCount,
+                "captureEventRef": "capture_event:\(captureEventID)",
+                "journalSourceRef": result.textSourceRef,
+                "sourceCaptureCommitted": true,
                 "candidates": candidates,
                 "safeNextCommands": [
-                    "cider-cli item graph-candidates note \(result.note.id.uuidString) --json",
+                    "cider-cli item graph-candidates note \(journalOwner.ownerID) --json",
                 ] + reviewQueueCommands,
             ] as [String: Any]
         } catch {
             return [
                 "status": "failed",
                 "count": 0,
-                "reason": "Graph candidate extraction failed: \(error.localizedDescription)",
+                "reviewRequired": false,
+                "sourceCaptureCommitted": true,
+                "enrichmentClaimed": false,
+                "captureEventRef": "capture_event:\(captureEventID)",
+                "reason": "The Journal capture was committed, but reviewable candidate enrichment could not be completed.",
             ] as [String: Any]
         }
     }

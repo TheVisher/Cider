@@ -637,6 +637,8 @@ final class JournalIntelligenceDailyReceiptService {
         let category: JournalIntelligenceCategory
         if !types.isDisjoint(with: [.person, .contact]) {
             category = .people
+        } else if types.contains(.project) {
+            category = .durableMemory
         } else if !types.isDisjoint(with: [.trip]) {
             category = .tripPlans
         } else if !types.isDisjoint(with: [.movie, .show, .media, .video, .book, .music, .file, .url, .recipe]) {

@@ -178,6 +178,10 @@ final class JournalIntelligenceCrossTimeReconciliationService {
         _ input: Input,
         snapshot: Snapshot
     ) -> JournalIntelligenceCrossTimeReconciliation {
+        if let candidate = graphCandidate(input.output),
+           !Set(candidate.objectTypeGuesses).isDisjoint(with: [.person, .contact]) {
+            return reconcilePersonReference(candidate.mentionText, snapshot: snapshot)
+        }
         let scans = canonicalScans([.ownerLabels, .acceptedMemories], in: snapshot)
         guard let update = personUpdate(from: input.output.value) else {
             return unsupported(
@@ -238,6 +242,44 @@ final class JournalIntelligenceCrossTimeReconciliationService {
             explanation: priorUpdates.isEmpty
                 ? "The person is canonical, but this source-backed employer update is new."
                 : "The person is canonical and accepted history names a different employer, so this looks like a new update rather than a repeat."
+        )
+    }
+
+    private func reconcilePersonReference(
+        _ mention: String,
+        snapshot: Snapshot
+    ) -> JournalIntelligenceCrossTimeReconciliation {
+        let scans = canonicalScans([.ownerLabels], in: snapshot)
+        let matches = exactLabels(
+            mention,
+            in: snapshot.labels,
+            ownerKinds: ["person"],
+            ownerTypes: ["contact", "person"]
+        )
+        if matches.count > 1 {
+            return ambiguous(
+                matches: matches.map { labelMatch($0, reason: "exact_person_label") },
+                comparedKinds: ["person"],
+                scans: scans,
+                reason: "multiple_exact_canonical_identities",
+                explanation: "More than one canonical person has the exact label '\(mention)', so Cider will not choose one."
+            )
+        }
+        guard let match = matches.first else {
+            return noMatch(
+                comparedKinds: ["person"],
+                scans: scans,
+                reason: "no_exact_person_identity",
+                explanation: "No canonical person exactly matches '\(mention)'."
+            )
+        }
+        return matched(
+            classification: .newUpdate,
+            matches: [labelMatch(match, reason: "exact_person_label")],
+            comparedKinds: ["person"],
+            scans: scans,
+            reason: "known_person_new_source_mention",
+            explanation: "The Journal source names one known person exactly; the mention remains a reviewable update rather than an automatic link."
         )
     }
 
@@ -524,6 +566,9 @@ final class JournalIntelligenceCrossTimeReconciliationService {
         _ input: Input,
         snapshot: Snapshot
     ) -> JournalIntelligenceCrossTimeReconciliation {
+        if let candidate = graphCandidate(input.output), candidate.objectTypeGuesses.contains(.project) {
+            return reconcileProjectReference(candidate.mentionText, snapshot: snapshot)
+        }
         let scans = canonicalScans([.acceptedMemories], in: snapshot)
         let currentValue = normalized(input.output.value)
         let currentKey = normalized(input.output.metadata["memory_key"] ?? "")
@@ -559,6 +604,49 @@ final class JournalIntelligenceCrossTimeReconciliationService {
             scans: scans,
             reason: "no_exact_accepted_memory",
             explanation: "No accepted memory has the same value or explicit memory key."
+        )
+    }
+
+    private func reconcileProjectReference(
+        _ mention: String,
+        snapshot: Snapshot
+    ) -> JournalIntelligenceCrossTimeReconciliation {
+        let scans = canonicalScans([.ownerLabels, .projects], in: snapshot)
+        let labelMatches = exactLabels(
+            mention,
+            in: snapshot.labels,
+            ownerKinds: ["project"],
+            ownerTypes: ["project"]
+        ).map { labelMatch($0, reason: "exact_project_label") }
+        let key = normalized(mention)
+        let projectMatches = snapshot.projects
+            .filter { normalized($0.title) == key }
+            .map { itemMatch($0, reason: "exact_project_title") }
+        let matches = distinctMatches(labelMatches + projectMatches)
+        if matches.count > 1 {
+            return ambiguous(
+                matches: matches,
+                comparedKinds: ["project"],
+                scans: scans,
+                reason: "multiple_exact_canonical_projects",
+                explanation: "More than one canonical project exactly matches '\(mention)', so Cider will not choose one."
+            )
+        }
+        guard let match = matches.first else {
+            return noMatch(
+                comparedKinds: ["project"],
+                scans: scans,
+                reason: "no_exact_project_identity",
+                explanation: "No canonical project exactly matches '\(mention)'."
+            )
+        }
+        return matched(
+            classification: .newUpdate,
+            matches: [match],
+            comparedKinds: ["project"],
+            scans: scans,
+            reason: "known_project_new_source_mention",
+            explanation: "The Journal source names one known project exactly; the mention remains a reviewable update rather than an automatic link."
         )
     }
 

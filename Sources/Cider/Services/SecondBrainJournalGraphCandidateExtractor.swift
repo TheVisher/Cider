@@ -34,8 +34,10 @@ struct SecondBrainJournalGraphCandidateExtractor {
             date: date,
             time: time
         ))
+        outputs.append(contentsOf: safeURLCandidates(sourceOwner: sourceOwner, rawContent: rawContent))
         for sentence in sentences {
             var sentenceOutputs: [SecondBrainEnrichmentOutput] = []
+            sentenceOutputs.append(contentsOf: referenceCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             sentenceOutputs.append(contentsOf: watchedCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             sentenceOutputs.append(contentsOf: preferenceCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
             sentenceOutputs.append(contentsOf: visitedCandidates(sourceOwner: sourceOwner, sentence: sentence.text))
@@ -62,6 +64,100 @@ struct SecondBrainJournalGraphCandidateExtractor {
             return output
         }
         return SecondBrainJournalGraphCandidateExtractionResult(outputs: enriched)
+    }
+
+    /// Narrow, deterministic references that belong in the existing graph-candidate
+    /// review flow. This deliberately does not resolve or create canonical targets.
+    private func referenceCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        explicitPersonCandidates(sourceOwner: sourceOwner, sentence: sentence)
+            + explicitProjectCandidates(sourceOwner: sourceOwner, sentence: sentence)
+    }
+
+    private func safeURLCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        rawContent: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let nsContent = rawContent as NSString
+        let range = NSRange(location: 0, length: nsContent.length)
+        return (detector?.matches(in: rawContent, range: range) ?? []).compactMap { match in
+            guard let url = match.url,
+                  CiderOpenPolicy.isAllowedUntrustedWebURL(url),
+                  var candidate = makeCandidate(
+                    sourceOwner: sourceOwner,
+                    candidateKind: .object,
+                    mentionText: url.absoluteString,
+                    sourceQuote: nsContent.substring(with: match.range),
+                    objectTypes: [.url],
+                    relations: [],
+                    actions: ["review_link_reference"],
+                    confidence: 0.98,
+                    confidenceReason: "Journal text contains an explicit safe HTTP(S) reference."
+                  ) else { return nil }
+            candidate.metadata["canonical_url"] = url.absoluteString
+            candidate.metadata["url_action_boundary"] = "reviewable_link_candidate_not_bookmark"
+            return outputWithSourceSpan(
+                candidate,
+                start: match.range.location,
+                end: match.range.location + match.range.length
+            )
+        }
+    }
+
+    private func explicitPersonCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        regexMatches(
+            pattern: #"\b(?i:met\s+with|talked\s+with|spoke\s+with|had\s+(?:coffee|breakfast|lunch|dinner)\s+with|called)\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z][A-Za-z0-9'’-]*){1,2})(?=(?i:\s+(?:about|at|for|to|and)\b)|[.!?,;:]|$)"#,
+            in: sentence
+        ).compactMap { match in
+            guard let person = trimmedNonEmpty(match.captures.first ?? nil),
+                  !isVagueJournalIntelligenceValue(person) else { return nil }
+            return makeCandidate(
+                sourceOwner: sourceOwner,
+                candidateKind: .object,
+                mentionText: person,
+                sourceQuote: sentence,
+                objectTypes: [.person, .contact],
+                relations: [],
+                actions: ["review_person_reference"],
+                confidence: 0.86,
+                confidenceReason: "Journal text explicitly names a person in a direct interaction."
+            )
+        }
+    }
+
+    private func explicitProjectCandidates(
+        sourceOwner: SecondBrainOwnerRef,
+        sentence: String
+    ) -> [SecondBrainEnrichmentOutput] {
+        let leadingProject = regexMatches(
+            pattern: #"\b(?i:worked\s+on|made\s+progress\s+on|planned|reviewed)\s+(Project\s+[A-Z][A-Za-z0-9'’&+.-]*(?:\s+[A-Z][A-Za-z0-9'’&+.-]*){0,3})(?=(?i:\s+(?:with|for|and|at|because)\b)|[.!?,;:]|$)"#,
+            in: sentence
+        ).compactMap { $0.captures.first ?? nil }
+        let trailingProject = regexMatches(
+            pattern: #"\b(?i:worked\s+on|made\s+progress\s+on|planned|reviewed)\s+(?i:the)\s+([A-Z][A-Za-z0-9'’&+.-]*(?:\s+[A-Z][A-Za-z0-9'’&+.-]*){0,3}\s+Project)(?=(?i:\s+(?:with|for|and|at|because)\b)|[.!?,;:]|$)"#,
+            in: sentence
+        ).compactMap { $0.captures.first ?? nil }
+        return (leadingProject + trailingProject).compactMap { rawProject in
+            guard let project = trimmedNonEmpty(rawProject),
+                  !isVagueJournalIntelligenceValue(project) else { return nil }
+            return makeCandidate(
+                sourceOwner: sourceOwner,
+                candidateKind: .object,
+                mentionText: project,
+                sourceQuote: sentence,
+                objectTypes: [.project],
+                relations: [],
+                actions: ["review_project_reference"],
+                confidence: 0.88,
+                confidenceReason: "Journal text explicitly names a project in a work action."
+            )
+        }
     }
 
     private func watchedCandidates(
