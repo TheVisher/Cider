@@ -152,6 +152,27 @@ struct SearchServiceSnapshotTests {
         #expect(!scope.activeScopeDescriptions.joined(separator: " ").contains("Folder: nan"))
     }
 
+    @Test("snapshot search fails closed for an unknown tag scope")
+    func snapshotSearchFailsClosedForUnknownTagScope() async {
+        let bookmark = Bookmark(
+            title: "Needle bookmark",
+            urlString: "https://example.com/needle"
+        )
+        let results = await SearchService.search(snapshot: SearchService.Snapshot(
+            query: "needle @tag:Missing",
+            bookmarks: [bookmark],
+            notes: [],
+            dateCards: [],
+            contacts: [],
+            todos: [],
+            vaultFiles: [],
+            folders: [],
+            labels: []
+        ))
+
+        #expect(results.isEmpty)
+    }
+
     private static func bookmark(index: Int, labelID: UUID, folderID: UUID, now: Date) -> Bookmark {
         Bookmark(
             title: index == 123 ? "Needle bookmark" : "Bookmark \(index)",

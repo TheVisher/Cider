@@ -190,6 +190,7 @@ struct SearchPaletteView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedIndex: Int = -1
     @State private var activeScope = SearchScope(cleanQuery: "")
+    @State private var searchNotice: String?
     @FocusState private var isSearchFieldFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -363,17 +364,31 @@ struct SearchPaletteView: View {
             searchTask?.cancel()
             let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             activeScope = SearchService.parseScope(from: trimmed)
+            searchNotice = nil
             guard !trimmed.isEmpty else { results = []; return }
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard !Task.isCancelled else { return }
-                let foundResults = await SearchService.search(query: trimmed, bookmarks: bookmarks, notes: notes)
+                let response = await SearchPaletteCanonicalSearchAdapter().search(
+                    snapshot: SearchService.Snapshot(
+                        query: trimmed,
+                        bookmarks: bookmarks,
+                        notes: notes,
+                        dateCards: DateCardStorage.shared.dateCards,
+                        contacts: ContactStorage.shared.contacts,
+                        todos: TodoCardStorage.shared.todoCards,
+                        vaultFiles: VaultFileService.shared.files,
+                        folders: VaultFolderService.shared.legacyFolders,
+                        labels: CardLabelStorage.shared.labels
+                    )
+                )
                 guard SearchPaletteSearchPublishPolicy.canPublish(
                     taskQuery: trimmed,
                     currentQuery: query,
                     isCancelled: Task.isCancelled
                 ) else { return }
-                results = foundResults
+                results = response.results
+                searchNotice = response.statusMessage
             }
         }
     }
@@ -709,7 +724,7 @@ struct SearchPaletteView: View {
                         }
                     }
 
-                    if showNoResults && !activeScope.hasFolderScope {
+                    if searchNotice != nil || (showNoResults && !activeScope.hasFolderScope) {
                         noResultsRow
                     }
 
@@ -1142,7 +1157,7 @@ struct SearchPaletteView: View {
                 .font(CiderFont.bodyMedium)
                 .foregroundColor(CiderColors.tertiary)
 
-            Text("No results for \"\(query)\"")
+            Text(searchNotice ?? "No results for \"\(query)\"")
                 .font(CiderFont.subheading)
                 .foregroundColor(CiderColors.secondary)
         }

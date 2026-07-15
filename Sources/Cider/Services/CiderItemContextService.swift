@@ -280,6 +280,94 @@ enum CiderItemSearchSort: String, Codable, CaseIterable, Equatable {
     case oldest
 }
 
+enum CiderQueryFolderFacet: Equatable {
+    case none
+    case anyAssignedFolder
+    case folderIDs(Set<UUID>)
+}
+
+struct CiderQueryFacets: Equatable {
+    var entityTypes: Set<LibraryEntityType>?
+    var folder: CiderQueryFolderFacet
+    var tagIDs: Set<UUID>
+
+    init(
+        entityTypes: Set<LibraryEntityType>? = nil,
+        folder: CiderQueryFolderFacet = .none,
+        tagIDs: Set<UUID> = []
+    ) {
+        self.entityTypes = entityTypes
+        self.folder = folder
+        self.tagIDs = tagIDs
+    }
+
+    var hasConstraints: Bool {
+        entityTypes != nil || folder != .none || !tagIDs.isEmpty
+    }
+}
+
+struct CiderQuery: Equatable {
+    var text: String
+    var facets: CiderQueryFacets
+    var scope: CiderItemSearchScope
+    var sort: CiderItemSearchSort
+    var limit: Int
+
+    init(
+        text: String,
+        facets: CiderQueryFacets = CiderQueryFacets(),
+        scope: CiderItemSearchScope = .all,
+        sort: CiderItemSearchSort = .relevance,
+        limit: Int = 100
+    ) {
+        self.text = text
+        self.facets = facets
+        self.scope = scope
+        self.sort = sort
+        self.limit = limit
+    }
+}
+
+enum CiderQueryIndexStatus: String, Equatable {
+    case current
+    case lagging
+    case incomplete
+    case unavailable
+}
+
+struct CiderQueryIndexState: Equatable {
+    var status: CiderQueryIndexStatus
+    var eligibleItemCount: Int
+    var indexedItemCount: Int
+    var missingItemCount: Int
+    var staleItemCount: Int
+
+    var isComplete: Bool {
+        status == .current
+    }
+}
+
+enum CiderQueryFallbackState: String, Equatable {
+    case none
+    case canonicalFieldsOnly
+}
+
+enum CiderQueryResultClassification: String, Equatable {
+    case matches
+    case noMatches
+    case indeterminate
+}
+
+struct CiderQueryResponse: Equatable {
+    var query: CiderQuery
+    var results: [CiderItemSearchResult]
+    var indexState: CiderQueryIndexState
+    var fallbackState: CiderQueryFallbackState
+    var classification: CiderQueryResultClassification
+    var resultWindowIsBounded: Bool
+    var warnings: [String]
+}
+
 struct CiderItemSearchMatchProvenance: Codable, Equatable {
     var currentContentMatched: Bool = false
     var historicalProvenanceMatched: Bool = false
@@ -678,6 +766,88 @@ final class CiderItemContextService {
         )
     }
 
+    /// Shared canonical query contract for UI and automation adapters.
+    /// Canonical item identity and indexed recall stay owned by this service;
+    /// callers may apply surface-specific ranking and presentation afterward.
+    func query(_ query: CiderQuery) throws -> CiderQueryResponse {
+        let trimmed = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let boundedLimit = max(1, query.limit)
+        let scanLimit = max(200, min(2_000, boundedLimit * 10))
+        var normalizedQuery = query
+        normalizedQuery.text = trimmed
+        normalizedQuery.limit = boundedLimit
+
+        let rawResults: [CiderItemSearchResult]
+        let fallbackState: CiderQueryFallbackState
+        var warnings: [String] = []
+        let indexState: CiderQueryIndexState
+        do {
+            indexState = try queryIndexState(for: query.facets)
+        } catch {
+            indexState = CiderQueryIndexState(
+                status: .unavailable,
+                eligibleItemCount: 0,
+                indexedItemCount: 0,
+                missingItemCount: 0,
+                staleItemCount: 0
+            )
+            warnings.append("Index freshness could not be verified: \(error.localizedDescription)")
+        }
+
+        do {
+            if trimmed.isEmpty {
+                rawResults = try allItemResults(limit: scanLimit, facets: query.facets)
+            } else {
+                rawResults = try rankedSearchResults(
+                    queryPlan: recallQueryPlan(for: trimmed),
+                    limit: scanLimit,
+                    spaceRefs: nil,
+                    scope: query.scope,
+                    sort: query.sort,
+                    facets: query.facets
+                )
+            }
+            fallbackState = .none
+        } catch {
+            guard !trimmed.isEmpty else { throw error }
+            rawResults = try searchItems(trimmed, limit: scanLimit)
+                .filter { queryResult($0, matches: query.facets) }
+            fallbackState = .canonicalFieldsOnly
+            warnings.append("Indexed body search was unavailable; results are limited to canonical title and path fields.")
+        }
+
+        let resultWindowIsBounded = rawResults.count >= scanLimit || rawResults.count > boundedLimit
+        let results = Array(rawResults.prefix(boundedLimit))
+        let classification: CiderQueryResultClassification
+        if !results.isEmpty {
+            classification = .matches
+        } else if fallbackState != .none || !indexState.isComplete || resultWindowIsBounded {
+            classification = .indeterminate
+        } else {
+            classification = .noMatches
+        }
+
+        if indexState.missingItemCount > 0 {
+            warnings.append("\(indexState.missingItemCount) eligible item(s) have no indexed content chunks.")
+        }
+        if indexState.staleItemCount > 0 {
+            warnings.append("\(indexState.staleItemCount) eligible item(s) have stale indexed content chunks.")
+        }
+        if resultWindowIsBounded {
+            warnings.append("Results are bounded to a finite canonical candidate window.")
+        }
+
+        return CiderQueryResponse(
+            query: normalizedQuery,
+            results: results,
+            indexState: indexState,
+            fallbackState: fallbackState,
+            classification: classification,
+            resultWindowIsBounded: resultWindowIsBounded,
+            warnings: warnings
+        )
+    }
+
     func searchDiagnostics(_ query: String, limit: Int = 20) throws -> CiderItemSearchDiagnosticsReport {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let boundedLimit = max(1, limit)
@@ -913,6 +1083,166 @@ final class CiderItemContextService {
             if spaceRefs != nil, results.count >= max(1, limit) { break }
         }
         return results
+    }
+
+    private func allItemResults(
+        limit: Int,
+        facets: CiderQueryFacets
+    ) throws -> [CiderItemSearchResult] {
+        let stmt = try database.prepare("""
+            SELECT id, type, title, created_at, updated_at, folder_id, relative_path
+            FROM items
+            ORDER BY updated_at DESC, created_at DESC, title COLLATE NOCASE ASC;
+            """)
+
+        var results: [CiderItemSearchResult] = []
+        while try stmt.step() {
+            let item = try itemSummary(from: stmt)
+            let owner = owner(for: item)
+            let result = CiderItemSearchResult(
+                id: "item-\(item.id.uuidString)",
+                kind: .item,
+                owner: owner,
+                item: item,
+                title: item.title,
+                snippet: item.relativePath ?? item.type.rawValue,
+                rank: 0,
+                stage: "facet_browse",
+                rankFactors: ["facet_browse"]
+            )
+            if queryResult(result, matches: facets) {
+                results.append(result)
+                if results.count > max(1, limit) { break }
+            }
+        }
+        return results
+    }
+
+    private func queryResult(
+        _ result: CiderItemSearchResult,
+        matches facets: CiderQueryFacets
+    ) -> Bool {
+        guard let item = result.item else {
+            return facets.hasConstraints == false
+        }
+        return queryItem(item, matches: facets)
+    }
+
+    private func queryItem(
+        _ item: CiderItemSummary,
+        matches facets: CiderQueryFacets,
+        precomputedTagItemIDs: Set<UUID>? = nil
+    ) -> Bool {
+        if let entityTypes = facets.entityTypes,
+           !entityTypes.contains(item.type) {
+            return false
+        }
+        switch facets.folder {
+        case .none:
+            break
+        case .anyAssignedFolder:
+            guard item.folderID != nil else { return false }
+        case .folderIDs(let folderIDs):
+            guard let folderID = item.folderID, folderIDs.contains(folderID) else { return false }
+        }
+        if !facets.tagIDs.isEmpty {
+            if let precomputedTagItemIDs {
+                return precomputedTagItemIDs.contains(item.id)
+            }
+            guard let itemTagIDs = try? itemTagIDs(for: item.id),
+                  facets.tagIDs.isSubset(of: itemTagIDs) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func itemTagIDs(for itemID: UUID) throws -> Set<UUID> {
+        let stmt = try database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?;")
+        stmt.bind(DatabaseHelpers.encode(itemID), at: 1)
+        var tagIDs: Set<UUID> = []
+        while try stmt.step() {
+            if let tagID = UUID(uuidString: stmt.string(at: 0)) {
+                tagIDs.insert(tagID)
+            }
+        }
+        return tagIDs
+    }
+
+    private func itemIDs(matchingAll tagIDs: Set<UUID>) throws -> Set<UUID> {
+        guard !tagIDs.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: tagIDs.count).joined(separator: ", ")
+        let stmt = try database.prepare("""
+            SELECT item_id
+            FROM item_tags
+            WHERE tag_id IN (\(placeholders))
+            GROUP BY item_id
+            HAVING COUNT(DISTINCT tag_id) = ?;
+            """)
+        let sortedTagIDs = tagIDs.map(\.uuidString).sorted()
+        for (index, tagID) in sortedTagIDs.enumerated() {
+            stmt.bind(tagID, at: Int32(index + 1))
+        }
+        stmt.bind(tagIDs.count, at: Int32(sortedTagIDs.count + 1))
+        var itemIDs: Set<UUID> = []
+        while try stmt.step() {
+            if let itemID = UUID(uuidString: stmt.string(at: 0)) {
+                itemIDs.insert(itemID)
+            }
+        }
+        return itemIDs
+    }
+
+    private func queryIndexState(for facets: CiderQueryFacets) throws -> CiderQueryIndexState {
+        let tagItemIDs: Set<UUID>?
+        if facets.tagIDs.isEmpty {
+            tagItemIDs = nil
+        } else {
+            tagItemIDs = try itemIDs(matchingAll: facets.tagIDs)
+        }
+        let stmt = try database.prepare("""
+            SELECT i.id, i.type, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                   COUNT(c.id), MAX(c.updated_at)
+            FROM items i
+            LEFT JOIN content_chunks c
+              ON c.owner_id = i.id
+             AND c.owner_type = CASE WHEN i.type = 'event' THEN 'dateCard' ELSE i.type END
+            GROUP BY i.id, i.type, i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path;
+            """)
+        var eligibleItemCount = 0
+        var indexedItemCount = 0
+        var missingItemCount = 0
+        var staleItemCount = 0
+        while try stmt.step() {
+            let item = try itemSummary(from: stmt)
+            guard queryItem(item, matches: facets, precomputedTagItemIDs: tagItemIDs) else { continue }
+            eligibleItemCount += 1
+            let chunkCount = stmt.int(at: 7)
+            guard chunkCount > 0 else {
+                missingItemCount += 1
+                continue
+            }
+            indexedItemCount += 1
+            let newestChunkUpdatedAt = stmt.optionalDouble(at: 8).map(DatabaseHelpers.decodeDate)
+            if newestChunkUpdatedAt == nil || newestChunkUpdatedAt! < item.updatedAt {
+                staleItemCount += 1
+            }
+        }
+        let status: CiderQueryIndexStatus
+        if missingItemCount > 0 {
+            status = .incomplete
+        } else if staleItemCount > 0 {
+            status = .lagging
+        } else {
+            status = .current
+        }
+        return CiderQueryIndexState(
+            status: status,
+            eligibleItemCount: eligibleItemCount,
+            indexedItemCount: indexedItemCount,
+            missingItemCount: missingItemCount,
+            staleItemCount: staleItemCount
+        )
     }
 
     private func searchEnrichmentOutputs(
@@ -1160,7 +1490,8 @@ final class CiderItemContextService {
         limit: Int,
         spaceRefs: Set<LibraryEntityRef>? = nil,
         scope: CiderItemSearchScope = .all,
-        sort: CiderItemSearchSort = .relevance
+        sort: CiderItemSearchSort = .relevance,
+        facets: CiderQueryFacets? = nil
     ) throws -> [CiderItemSearchResult] {
         let boundedLimit = max(1, limit)
         var bestByOwner: [String: CiderItemSearchResult] = [:]
@@ -1345,6 +1676,7 @@ final class CiderItemContextService {
                 scope: scope
             )
                 && searchResult(result, isIncludedIn: scope)
+                && facets.map { queryResult(result, matches: $0) } != false
         }
 
         let scopedCandidates = Array(candidates).map { result in

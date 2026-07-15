@@ -40,6 +40,7 @@ struct SearchScope: Equatable {
     var showAllFolders: Bool = false         // true when `@folder:` typed with no name
     var labelID: UUID?
     var labelName: String?                   // raw name from query, for display
+    var resolutionFailures: [String] = []    // unsupported/unresolved modifiers; search must fail closed
     var cleanQuery: String                   // query with scope modifiers removed
 
     /// Human-readable description of active scopes.
@@ -73,6 +74,10 @@ struct SearchScope: Equatable {
 
     var hasFolderScope: Bool {
         !folderIDs.isEmpty || showAllFolders
+    }
+
+    var isResolved: Bool {
+        resolutionFailures.isEmpty
     }
 }
 
@@ -127,6 +132,7 @@ enum SearchService {
         var showAllFolders = false
         var labelID: UUID? = nil
         var labelName: String? = nil
+        var resolutionFailures: [String] = []
         var remainingParts: [String] = []
 
         let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
@@ -178,13 +184,19 @@ enum SearchService {
                 }) {
                     folderIDs.insert(folder.id)
                     folderNames.append(folder.name)
-                } else if let folder = folders.first(where: {
-                    $0.name.lowercased().hasPrefix(name.lowercased())
-                }) {
-                    folderIDs.insert(folder.id)
-                    folderNames.append(folder.name)
                 } else {
-                    remainingParts.append(contentsOf: nameParts)
+                    let prefixMatches = folders.filter {
+                        $0.name.lowercased().hasPrefix(name.lowercased())
+                    }
+                    if prefixMatches.count == 1, let folder = prefixMatches.first {
+                        folderIDs.insert(folder.id)
+                        folderNames.append(folder.name)
+                    } else if prefixMatches.count > 1 {
+                        resolutionFailures.append("Folder '\(name)' is ambiguous.")
+                    } else {
+                        resolutionFailures.append("Folder '\(name)' was not found.")
+                        remainingParts.append(contentsOf: nameParts)
+                    }
                 }
                 continue
             }
@@ -192,8 +204,9 @@ enum SearchService {
             // Tag scope: @tag:Name or @t:Name (prefix match on "tag")
             if let colonIdx = modifier.firstIndex(of: ":"),
                "tag".hasPrefix(String(modifier[modifier.startIndex..<colonIdx])),
-               modifier[modifier.startIndex..<colonIdx].count >= 1 {
-                let afterColon = String(modifier[modifier.index(after: colonIdx)...])
+               modifier[modifier.startIndex..<colonIdx].count >= 1,
+               let rawColonIdx = rawModifier.firstIndex(of: ":") {
+                let afterColon = String(rawModifier[rawModifier.index(after: rawColonIdx)...])
                 var nameParts: [String] = []
                 if !afterColon.isEmpty { nameParts.append(afterColon) }
                 i += 1
@@ -202,17 +215,30 @@ enum SearchService {
                     i += 1
                 }
                 let name = nameParts.joined(separator: " ")
-                guard !name.isEmpty else { continue }
+                guard !name.isEmpty else {
+                    resolutionFailures.append("Tag scope needs a tag name.")
+                    continue
+                }
+                if labelName != nil {
+                    resolutionFailures.append("Multiple tag scopes are not supported by Search Palette yet.")
+                }
                 labelName = name
                 if let label = labels.first(where: {
                     $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
                 }) {
                     labelID = label.id
-                } else if let label = labels.first(where: {
-                    $0.name.lowercased().hasPrefix(name.lowercased())
-                }) {
-                    labelID = label.id
-                    labelName = label.name
+                } else {
+                    let prefixMatches = labels.filter {
+                        $0.name.lowercased().hasPrefix(name.lowercased())
+                    }
+                    if prefixMatches.count == 1, let label = prefixMatches.first {
+                        labelID = label.id
+                        labelName = label.name
+                    } else if prefixMatches.count > 1 {
+                        resolutionFailures.append("Tag '\(name)' is ambiguous.")
+                    } else {
+                        resolutionFailures.append("Tag '\(name)' was not found.")
+                    }
                 }
                 continue
             }
@@ -229,7 +255,7 @@ enum SearchService {
             }
 
             if !matched {
-                remainingParts.append(part)
+                resolutionFailures.append("Unsupported scope modifier '\(part)'.")
             }
 
             i += 1
@@ -242,6 +268,7 @@ enum SearchService {
             showAllFolders: showAllFolders,
             labelID: labelID,
             labelName: labelName,
+            resolutionFailures: resolutionFailures,
             cleanQuery: remainingParts.joined(separator: " ")
         )
     }
@@ -292,6 +319,7 @@ enum SearchService {
         guard !trimmed.isEmpty else { return [] }
 
         var scope = parseScope(from: trimmed, folders: folders, labels: labels)
+        guard scope.isResolved else { return [] }
         let genericTypeIntent = scope.entityTypes == nil ? parseGenericTypeIntent(from: scope.cleanQuery) : nil
         if let genericTypeIntent {
             scope.entityTypes = [genericTypeIntent.type]
@@ -695,5 +723,309 @@ enum SearchService {
             }
         }
         return nil
+    }
+}
+
+enum SearchPaletteCanonicalSearchStatus: Equatable {
+    case ready
+    case failedClosed([String])
+    case unavailable(String)
+    case cancelled
+}
+
+struct SearchPaletteCanonicalSearchResponse {
+    var results: [SearchResult]
+    var canonical: CiderQueryResponse?
+    var status: SearchPaletteCanonicalSearchStatus
+    var unprojectedCanonicalItemIDs: [UUID]
+
+    var statusMessage: String? {
+        switch status {
+        case .cancelled:
+            return nil
+        case .failedClosed(let reasons):
+            return (reasons.first ?? "The requested scope is unsupported.") + " Search was not broadened."
+        case .unavailable:
+            return "Indexed search is currently unavailable. No complete no-match conclusion was made."
+        case .ready:
+            if !unprojectedCanonicalItemIDs.isEmpty {
+                return "Some indexed matches cannot be presented from the current Search Palette snapshot."
+            }
+            guard let canonical else {
+                return "Indexed search state is unavailable."
+            }
+            if canonical.fallbackState == .canonicalFieldsOnly {
+                return "Showing canonical title and path fallback; indexed body search is unavailable."
+            }
+            if canonical.indexState.status == .lagging {
+                return "The search index is lagging; results may be incomplete."
+            }
+            if canonical.indexState.status == .incomplete {
+                return "The search index is incomplete; results may be incomplete."
+            }
+            if canonical.indexState.status == .unavailable {
+                return "Index freshness is unavailable; results may be incomplete."
+            }
+            if canonical.resultWindowIsBounded {
+                return "Showing a bounded canonical result window."
+            }
+            return nil
+        }
+    }
+
+    var emptyStateMessage: String? {
+        guard results.isEmpty else { return nil }
+        if let statusMessage { return statusMessage }
+        switch status {
+        case .cancelled:
+            return nil
+        case .failedClosed, .unavailable:
+            return statusMessage
+        case .ready:
+            guard let canonical else {
+                return "Indexed search state is unavailable."
+            }
+            switch canonical.classification {
+            case .matches:
+                return "Indexed matches exist, but they could not be presented here."
+            case .noMatches:
+                return nil
+            case .indeterminate:
+                return "Search coverage was bounded. No complete no-match conclusion was made."
+            }
+        }
+    }
+}
+
+@MainActor
+struct SearchPaletteCanonicalSearchAdapter {
+    private let contextService: CiderItemContextService
+    private let resultLimit: Int
+
+    init(
+        contextService: CiderItemContextService = CiderItemContextService(),
+        resultLimit: Int = 100
+    ) {
+        self.contextService = contextService
+        self.resultLimit = max(1, resultLimit)
+    }
+
+    func search(snapshot: SearchService.Snapshot) async -> SearchPaletteCanonicalSearchResponse {
+        if Task.isCancelled {
+            return cancelledResponse()
+        }
+        let scope = SearchService.parseScope(
+            from: snapshot.query,
+            folders: snapshot.folders,
+            labels: snapshot.labels
+        )
+        guard scope.isResolved else {
+            return SearchPaletteCanonicalSearchResponse(
+                results: [],
+                canonical: nil,
+                status: .failedClosed(scope.resolutionFailures),
+                unprojectedCanonicalItemIDs: []
+            )
+        }
+        guard !(scope.showAllFolders && !scope.folderIDs.isEmpty) else {
+            return SearchPaletteCanonicalSearchResponse(
+                results: [],
+                canonical: nil,
+                status: .failedClosed(["All-folders scope cannot be combined with a specific folder scope."]),
+                unprojectedCanonicalItemIDs: []
+            )
+        }
+
+        let folderFacet: CiderQueryFolderFacet
+        if !scope.folderIDs.isEmpty {
+            folderFacet = .folderIDs(scope.folderIDs)
+        } else if scope.showAllFolders {
+            folderFacet = .anyAssignedFolder
+        } else {
+            folderFacet = .none
+        }
+        let entityTypes = scope.entityTypes.map { Set($0.map(libraryEntityType)) }
+            ?? LibraryEntityType.activeCases
+        let tagIDs = scope.labelID.map { Set([$0]) } ?? []
+        let query = CiderQuery(
+            text: scope.cleanQuery,
+            facets: CiderQueryFacets(
+                entityTypes: entityTypes,
+                folder: folderFacet,
+                tagIDs: tagIDs
+            ),
+            limit: resultLimit
+        )
+
+        do {
+            let canonical = try contextService.query(query)
+            if Task.isCancelled {
+                return cancelledResponse()
+            }
+            let projected = project(canonical.results, query: query.text, snapshot: snapshot)
+            return SearchPaletteCanonicalSearchResponse(
+                results: projected.results,
+                canonical: canonical,
+                status: .ready,
+                unprojectedCanonicalItemIDs: projected.unprojectedIDs
+            )
+        } catch {
+            return SearchPaletteCanonicalSearchResponse(
+                results: [],
+                canonical: nil,
+                status: .unavailable(error.localizedDescription),
+                unprojectedCanonicalItemIDs: []
+            )
+        }
+    }
+
+    private func cancelledResponse() -> SearchPaletteCanonicalSearchResponse {
+        SearchPaletteCanonicalSearchResponse(
+            results: [],
+            canonical: nil,
+            status: .cancelled,
+            unprojectedCanonicalItemIDs: []
+        )
+    }
+
+    private func libraryEntityType(_ type: SearchResultType) -> LibraryEntityType {
+        switch type {
+        case .bookmark: return .bookmark
+        case .note: return .note
+        case .dateCard: return .dateCard
+        case .contact: return .contact
+        case .todo: return .todo
+        case .vaultFile: return .vaultFile
+        }
+    }
+
+    private func project(
+        _ canonicalResults: [CiderItemSearchResult],
+        query: String,
+        snapshot: SearchService.Snapshot
+    ) -> (results: [SearchResult], unprojectedIDs: [UUID]) {
+        let bookmarks = Dictionary(uniqueKeysWithValues: snapshot.bookmarks.map { ($0.id, $0) })
+        let notes = Dictionary(uniqueKeysWithValues: snapshot.notes.map { ($0.id, $0) })
+        let dateCards = Dictionary(uniqueKeysWithValues: snapshot.dateCards.map { ($0.id, $0) })
+        let contacts = Dictionary(uniqueKeysWithValues: snapshot.contacts.map { ($0.id, $0) })
+        let todos = Dictionary(uniqueKeysWithValues: snapshot.todos.map { ($0.id, $0) })
+        let files = Dictionary(uniqueKeysWithValues: snapshot.vaultFiles.map { ($0.id, $0) })
+        var projected: [(result: SearchResult, canonical: CiderItemSearchResult)] = []
+        var unprojectedIDs: [UUID] = []
+
+        for canonical in canonicalResults {
+            guard let item = canonical.item else { continue }
+            let snippet = presentationSnippet(for: canonical, query: query)
+            let result: SearchResult?
+            switch item.type {
+            case .bookmark:
+                result = bookmarks[item.id].map { bookmark in
+                    SearchResult(
+                        id: item.id, type: .bookmark, title: bookmark.title,
+                        subtitle: snippet == nil ? bookmark.hostDisplay : nil,
+                        snippet: snippet, date: bookmark.updatedAt, bookmark: bookmark
+                    )
+                }
+            case .note:
+                result = notes[item.id].map { note in
+                    SearchResult(
+                        id: item.id, type: .note, title: note.title,
+                        subtitle: note.journalCaptureSubtitle,
+                        snippet: snippet, date: note.modifiedAt, note: note
+                    )
+                }
+            case .dateCard:
+                result = dateCards[item.id].map { dateCard in
+                    SearchResult(
+                        id: item.id, type: .dateCard, title: dateCard.title,
+                        subtitle: snippet == nil ? dateCard.startAt.formatted(.dateTime.month().day().year()) : nil,
+                        snippet: snippet, date: dateCard.updatedAt, dateCard: dateCard
+                    )
+                }
+            case .contact:
+                result = contacts[item.id].map { contact in
+                    SearchResult(
+                        id: item.id, type: .contact, title: contact.displayName,
+                        subtitle: snippet == nil && !contact.relationshipLabel.isEmpty ? contact.relationshipLabel : nil,
+                        snippet: snippet, date: contact.updatedAt, contact: contact
+                    )
+                }
+            case .todo:
+                result = todos[item.id].map { todo in
+                    SearchResult(
+                        id: item.id, type: .todo, title: todo.title,
+                        subtitle: snippet == nil ? todoSubtitle(todo) : nil,
+                        snippet: snippet, date: todo.updatedAt, todoCard: todo
+                    )
+                }
+            case .vaultFile:
+                result = files[item.id].map { file in
+                    SearchResult(
+                        id: item.id, type: .vaultFile, title: file.displayTitle,
+                        subtitle: file.fileType.displayName,
+                        snippet: snippet, date: file.modifiedAt, vaultFile: file
+                    )
+                }
+            case .externalFile, .session:
+                result = nil
+            }
+            if let result {
+                projected.append((result, canonical))
+            } else {
+                unprojectedIDs.append(item.id)
+            }
+        }
+
+        projected.sort { lhs, rhs in
+            let lhsScore = presentationRank(for: lhs.result, canonical: lhs.canonical, query: query)
+            let rhsScore = presentationRank(for: rhs.result, canonical: rhs.canonical, query: query)
+            if lhsScore != rhsScore { return lhsScore > rhsScore }
+            if lhs.result.date != rhs.result.date { return lhs.result.date > rhs.result.date }
+            return lhs.result.title.localizedCaseInsensitiveCompare(rhs.result.title) == .orderedAscending
+        }
+        return (projected.map(\.result), unprojectedIDs)
+    }
+
+    private func todoSubtitle(_ todo: TodoCard) -> String? {
+        if todo.isCompleted { return "Completed" }
+        return todo.dueDate.map { "Due \($0.formatted(.dateTime.month().day()))" }
+    }
+
+    private func presentationSnippet(
+        for canonical: CiderItemSearchResult,
+        query: String
+    ) -> SearchSnippet? {
+        guard canonical.kind == .chunk || canonical.matchProvenance.isHistoricalOnly else { return nil }
+        let raw = canonical.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if let open = raw.firstIndex(of: "["),
+           let close = raw[raw.index(after: open)...].firstIndex(of: "]") {
+            return SearchSnippet(
+                prefix: String(raw[..<open]),
+                match: String(raw[raw.index(after: open)..<close]),
+                suffix: String(raw[raw.index(after: close)...])
+            )
+        }
+        let tokens = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        return SearchService.extractSnippet(tokens: tokens, from: raw)
+            ?? SearchSnippet(prefix: "", match: String(raw.prefix(120)), suffix: raw.count > 120 ? "…" : "")
+    }
+
+    private func presentationRank(
+        for result: SearchResult,
+        canonical: CiderItemSearchResult,
+        query: String
+    ) -> Double {
+        var score = canonical.rank
+        if !query.isEmpty, result.title.localizedStandardContains(query) {
+            score += 1_000
+        }
+        if canonical.matchProvenance.currentContentMatched {
+            score += 100
+        }
+        if canonical.matchProvenance.isHistoricalOnly {
+            score -= 100
+        }
+        return score
     }
 }
