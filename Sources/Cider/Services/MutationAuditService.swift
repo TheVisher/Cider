@@ -102,6 +102,36 @@ final class MutationAuditService {
         }
     }
 
+    @discardableResult
+    func recordRequired(
+        action: String,
+        itemType: String,
+        itemID: UUID,
+        before: [String: String]? = nil,
+        after: [String: String]? = nil,
+        metadata: [String: String]? = nil,
+        source: MutationAuditSource? = nil
+    ) throws -> MutationAuditEntry {
+        guard let db = resolvedDatabase else {
+            throw CiderDatabaseError.prepare("Database not open")
+        }
+        let entry = MutationAuditEntry(
+            id: UUID(),
+            occurredAt: Date(),
+            itemType: itemType,
+            itemID: itemID,
+            action: action,
+            source: source ?? inferredSource(),
+            beforeState: before ?? [:],
+            afterState: after ?? [:],
+            metadata: metadata ?? [:]
+        )
+        try db.withTransaction {
+            try self.persist(entry, in: db)
+        }
+        return entry
+    }
+
     func loadEntries(limit: Int? = nil) -> [MutationAuditEntry] {
         guard let db = resolvedDatabase else { return [] }
 

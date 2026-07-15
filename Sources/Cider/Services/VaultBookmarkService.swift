@@ -93,11 +93,15 @@ final class VaultBookmarkService: ObservableObject {
         loadBookmarks()
     }
 
-    /// Testing-only initializer with an explicit database.
-    /// Does NOT call loadBookmarks() — tests call loadBookmarksFromDatabase() directly.
-    init(database: CiderDatabase, schedulesEnrichment: Bool = true) {
+    /// Explicit-database initializer for bounded CLI operations and tests.
+    /// Does NOT call loadBookmarks(); the caller chooses when to load canonical rows.
+    init(
+        database: CiderDatabase,
+        schedulesEnrichment: Bool = true,
+        writesVaultCaches: Bool = false
+    ) {
         self.database = database
-        writesVaultCaches = false
+        self.writesVaultCaches = writesVaultCaches
         self.schedulesEnrichment = schedulesEnrichment
     }
 
@@ -577,12 +581,41 @@ final class VaultBookmarkService: ObservableObject {
     /// Maps a folderID to a vault directory URL and its relative path.
     private func resolveBookmarkDirectory(_ folderID: UUID?) -> (URL, String) {
         if let folderID,
-           let vaultFolder = VaultFolderService.shared.folder(for: folderID) {
+           let vaultFolder = folderForAssignment(folderID) {
             let dirURL = vaultRoot.appendingPathComponent(vaultFolder.relativePath)
             return (dirURL, vaultFolder.relativePath)
         }
         // Default: Inbox/Bookmarks/
         return (inboxBookmarksDir, inboxRelativePath)
+    }
+
+    private func folderForAssignment(_ folderID: UUID) -> VaultFolder? {
+        if let database {
+            do {
+                let stmt = try database.prepare("""
+                    SELECT relative_path, created_at, updated_at, icon, cover_image_path, cover_image_offset_y
+                    FROM folders
+                    WHERE id = ?
+                    LIMIT 1;
+                    """)
+                stmt.bind(folderID.uuidString, at: 1)
+                if try stmt.step() {
+                    return VaultFolder(
+                        id: folderID,
+                        relativePath: stmt.string(at: 0),
+                        createdAt: DatabaseHelpers.decodeDate(stmt.double(at: 1)),
+                        updatedAt: DatabaseHelpers.decodeDate(stmt.double(at: 2)),
+                        icon: stmt.optionalString(at: 3),
+                        coverImagePath: stmt.optionalString(at: 4),
+                        coverImageOffsetY: stmt.optionalDouble(at: 5)
+                    )
+                }
+            } catch {
+                logger.error("Failed to resolve a bookmark assignment folder: \(error.localizedDescription)")
+                return nil
+            }
+        }
+        return VaultFolderService.shared.folder(for: folderID)
     }
 
     // MARK: - CRUD
@@ -952,6 +985,220 @@ final class VaultBookmarkService: ObservableObject {
 
     // MARK: - Folder Assignment
 
+    enum RoutingAssignmentError: LocalizedError {
+        case bookmarkUnavailable
+        case databaseMismatch
+        case canonicalBookmarkDrift
+        case destinationUnavailable
+        case destinationMismatch
+        case sourceFileUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .bookmarkUnavailable: return "The bookmark is not loaded."
+            case .databaseMismatch: return "The bookmark writer is not bound to the routing database."
+            case .canonicalBookmarkDrift: return "The canonical bookmark path changed before routing."
+            case .destinationUnavailable: return "The exact routing destination is unavailable."
+            case .destinationMismatch: return "The routing destination does not match its canonical folder."
+            case .sourceFileUnavailable: return "The canonical bookmark file is unavailable."
+            }
+        }
+    }
+
+    struct CompensatableRoutingAssignment {
+        fileprivate let bookmarkID: UUID
+        fileprivate let originalBookmark: Bookmark
+        fileprivate let routedBookmark: Bookmark
+        fileprivate let fileMove: BookmarkFileService.CompensatableMove?
+    }
+
+    /// Routing-only assignment boundary. The exact destination must already
+    /// exist, the in-memory bookmark must match its canonical SQLite row, and
+    /// only that row is persisted inside the caller's open transaction. Cache,
+    /// sync, indexing, sidecar cleanup, and mutation audit are intentionally
+    /// excluded until the routing transaction commits.
+    func beginCompensatableRoutingAssignment(
+        _ bookmarkID: UUID,
+        to destination: CiderRoutingDecisionTarget,
+        database db: CiderDatabase,
+        failureInjector: (@MainActor (CiderRoutingReviewMutationCheckpoint) throws -> Void)? = nil
+    ) throws -> CompensatableRoutingAssignment {
+        guard resolvedDatabase === db else { throw RoutingAssignmentError.databaseMismatch }
+        guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else {
+            throw RoutingAssignmentError.bookmarkUnavailable
+        }
+
+        let originalBookmark = bookmarks[index]
+        let canonical = try canonicalRoutingBookmarkState(bookmarkID, database: db)
+        guard canonical.folderID == originalBookmark.folderID,
+              canonical.relativePath == originalBookmark.relativePath else {
+            throw RoutingAssignmentError.canonicalBookmarkDrift
+        }
+
+        let resolvedDestination = try exactRoutingDestination(destination, database: db)
+        guard let originalRelativePath = originalBookmark.relativePath,
+              !originalRelativePath.isEmpty else {
+            throw RoutingAssignmentError.sourceFileUnavailable
+        }
+        let sourceFileURL = vaultRoot.appendingPathComponent(originalRelativePath)
+        var sourceIsDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourceFileURL.path, isDirectory: &sourceIsDirectory),
+              !sourceIsDirectory.boolValue else {
+            throw RoutingAssignmentError.sourceFileUnavailable
+        }
+
+        let sourceDirectoryURL = sourceFileURL.deletingLastPathComponent()
+        var fileMove: BookmarkFileService.CompensatableMove?
+        var routedBookmark = originalBookmark
+        do {
+            if sourceDirectoryURL.standardizedFileURL.path != resolvedDestination.directoryURL.standardizedFileURL.path {
+                fileMove = try BookmarkFileService.shared.moveCompensatably(
+                    bookmark: originalBookmark,
+                    filename: sourceFileURL.lastPathComponent,
+                    from: sourceDirectoryURL,
+                    to: resolvedDestination.directoryURL,
+                    destDirRelativePath: resolvedDestination.relativePath,
+                    failureInjector: { checkpoint in
+                        if checkpoint == .afterBookmarkFileMove {
+                            try failureInjector?(.afterBookmarkFileMove)
+                        }
+                    }
+                )
+                routedBookmark.relativePath = fileMove?.relativePath
+            }
+            routedBookmark.folderID = resolvedDestination.folderID
+            routedBookmark.updatedAt = Date()
+            bookmarks[index] = routedBookmark
+            try persistExactRoutingBookmark(
+                routedBookmark,
+                replacing: originalBookmark,
+                database: db
+            )
+            try failureInjector?(.afterBookmarkPersistence)
+            return CompensatableRoutingAssignment(
+                bookmarkID: bookmarkID,
+                originalBookmark: originalBookmark,
+                routedBookmark: routedBookmark,
+                fileMove: fileMove
+            )
+        } catch {
+            bookmarks[index] = originalBookmark
+            if let fileMove {
+                do {
+                    try BookmarkFileService.shared.compensate(fileMove)
+                } catch let compensationError {
+                    throw BookmarkFileService.CompensationError(
+                        operation: "restore routing assignment after \(error.localizedDescription)",
+                        underlyingErrors: [compensationError]
+                    )
+                }
+            }
+            throw error
+        }
+    }
+
+    func compensateRoutingAssignment(_ assignment: CompensatableRoutingAssignment) throws {
+        guard let index = bookmarks.firstIndex(where: { $0.id == assignment.bookmarkID }) else {
+            throw RoutingAssignmentError.bookmarkUnavailable
+        }
+        bookmarks[index] = assignment.originalBookmark
+        if let fileMove = assignment.fileMove {
+            try BookmarkFileService.shared.compensate(fileMove)
+        }
+    }
+
+    /// Called only after the routing transaction has committed. These writes
+    /// are bounded projections of already-durable canonical state and never
+    /// create a second routing audit or receipt.
+    func finalizeRoutingAssignment(_ assignment: CompensatableRoutingAssignment) {
+        if let fileMove = assignment.fileMove {
+            BookmarkFileService.shared.finalize(fileMove)
+        }
+        writeIndexCache()
+        SecondBrainItemMutationIndexer.rebuildAfterMutation(
+            database: resolvedDatabase,
+            ownerType: "bookmark",
+            ownerID: assignment.bookmarkID
+        )
+    }
+
+    private func canonicalRoutingBookmarkState(
+        _ bookmarkID: UUID,
+        database db: CiderDatabase
+    ) throws -> (folderID: UUID?, relativePath: String?) {
+        let statement = try db.prepare("SELECT folder_id, relative_path FROM items WHERE id = ? AND type = 'bookmark' LIMIT 1;")
+        statement.bind(bookmarkID.uuidString, at: 1)
+        guard try statement.step() else { throw RoutingAssignmentError.bookmarkUnavailable }
+        return (
+            DatabaseHelpers.decodeUUID(statement.optionalString(at: 0) ?? ""),
+            statement.optionalString(at: 1)
+        )
+    }
+
+    private func exactRoutingDestination(
+        _ destination: CiderRoutingDecisionTarget,
+        database db: CiderDatabase
+    ) throws -> (folderID: UUID?, relativePath: String, directoryURL: URL) {
+        let folderID: UUID?
+        let relativePath: String
+        if let requestedFolderID = destination.folderID {
+            let statement = try db.prepare("SELECT relative_path FROM folders WHERE id = ? LIMIT 1;")
+            statement.bind(requestedFolderID.uuidString, at: 1)
+            guard try statement.step() else { throw RoutingAssignmentError.destinationUnavailable }
+            let canonicalRelativePath = statement.string(at: 0)
+            guard destination.kind == "folder",
+                  destination.relativePath == canonicalRelativePath else {
+                throw RoutingAssignmentError.destinationMismatch
+            }
+            folderID = requestedFolderID
+            relativePath = canonicalRelativePath
+        } else {
+            guard destination.kind == "inbox",
+                  destination.relativePath == inboxRelativePath else {
+                throw RoutingAssignmentError.destinationMismatch
+            }
+            folderID = nil
+            relativePath = inboxRelativePath
+        }
+
+        let directoryURL = vaultRoot.appendingPathComponent(relativePath)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directoryURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw RoutingAssignmentError.destinationUnavailable
+        }
+        return (folderID, relativePath, directoryURL)
+    }
+
+    private func persistExactRoutingBookmark(
+        _ routedBookmark: Bookmark,
+        replacing originalBookmark: Bookmark,
+        database db: CiderDatabase
+    ) throws {
+        let statement = try db.prepare("""
+            UPDATE items
+            SET folder_id = ?, relative_path = ?, updated_at = ?
+            WHERE id = ?
+              AND type = 'bookmark'
+              AND ((folder_id IS NULL AND ? IS NULL) OR folder_id = ?)
+              AND relative_path = ?;
+            """)
+        let originalFolderID = originalBookmark.folderID?.uuidString
+        statement.bind(routedBookmark.folderID?.uuidString, at: 1)
+            .bind(routedBookmark.relativePath, at: 2)
+            .bind(DatabaseHelpers.encode(routedBookmark.updatedAt), at: 3)
+            .bind(routedBookmark.id.uuidString, at: 4)
+            .bind(originalFolderID, at: 5)
+            .bind(originalFolderID, at: 6)
+            .bind(originalBookmark.relativePath, at: 7)
+        try statement.step()
+
+        let changes = try db.prepare("SELECT changes();")
+        guard try changes.step(), changes.int(at: 0) == 1 else {
+            throw RoutingAssignmentError.canonicalBookmarkDrift
+        }
+    }
+
     @discardableResult
     func assignBookmark(
         _ bookmarkID: UUID,
@@ -960,7 +1207,7 @@ final class VaultBookmarkService: ObservableObject {
     ) -> Bool {
         guard let index = bookmarks.firstIndex(where: { $0.id == bookmarkID }) else { return false }
 
-        if let folderID, VaultFolderService.shared.folder(for: folderID) == nil {
+        if let folderID, folderForAssignment(folderID) == nil {
             return false
         }
 
@@ -998,7 +1245,7 @@ final class VaultBookmarkService: ObservableObject {
         bookmarks[index].folderID = folderID
         bookmarks[index].updatedAt = Date()
         persist()
-        MutationAuditService.shared.record(
+        MutationAuditService(database: resolvedDatabase).record(
             action: "reassign_folder",
             itemType: "bookmark",
             itemID: bookmarkID,

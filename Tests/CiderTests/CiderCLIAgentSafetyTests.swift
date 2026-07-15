@@ -697,7 +697,7 @@ struct CiderCLIAgentSafetyTests {
         })
     }
 
-    @Test("review defer persists action receipt and records missing item failure")
+    @Test("review defer persists one canonical receipt and keeps missing item failure receipt free")
     func reviewDeferPersistsActionReceiptAndRecordsMissingItemFailure() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-review-defer-action-ledger-\(UUID().uuidString)")
@@ -771,25 +771,17 @@ struct CiderCLIAgentSafetyTests {
             command: "review.routing.defer",
             errorCode: "item_not_found"
         )
-        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
-        #expect(missingReceipt["readOnly"] as? Bool == false)
-        #expect(missingReceipt["changed"] as? Bool == false)
-        #expect(missingReceipt["status"] as? String == "failed")
-        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("missing-review-item") == true)
+        #expect(missing["actionReceipt"] == nil)
 
         let failedLedger = try assertStrictProcessJSON(
             runCLI(args: ["item", "action-ledger", "list", "--command", "review.routing.defer", "--status", "failed", "--json"], vault: vault),
             command: "item.action-ledger.list"
         )
         let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
-        #expect(failedEntries.contains { failed in
-            failed["command"] as? String == "review.routing.defer"
-                && failed["resultStatus"] as? String == "failed"
-                && failed["changed"] as? Bool == false
-        })
+        #expect(failedEntries.isEmpty)
     }
 
-    @Test("review approve persists action receipt and records missing item failure")
+    @Test("review approve persists one canonical receipt and keeps missing item failure receipt free")
     func reviewApprovePersistsActionReceiptAndRecordsMissingItemFailure() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-review-approve-action-ledger-\(UUID().uuidString)")
@@ -872,26 +864,17 @@ struct CiderCLIAgentSafetyTests {
             command: "review.routing.approve",
             errorCode: "item_not_found"
         )
-        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
-        #expect(missingReceipt["subcommand"] as? String == "approve")
-        #expect(missingReceipt["readOnly"] as? Bool == false)
-        #expect(missingReceipt["changed"] as? Bool == false)
-        #expect(missingReceipt["status"] as? String == "failed")
-        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("missing-review-item") == true)
+        #expect(missing["actionReceipt"] == nil)
 
         let failedLedger = try assertStrictProcessJSON(
             runCLI(args: ["item", "action-ledger", "list", "--command", "review.routing.approve", "--status", "failed", "--json"], vault: vault),
             command: "item.action-ledger.list"
         )
         let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
-        #expect(failedEntries.contains { failed in
-            failed["command"] as? String == "review.routing.approve"
-                && failed["resultStatus"] as? String == "failed"
-                && failed["changed"] as? Bool == false
-        })
+        #expect(failedEntries.isEmpty)
     }
 
-    @Test("review correct persists action receipt and records missing item failure")
+    @Test("review correct persists one canonical receipt and keeps missing item failure receipt free")
     func reviewCorrectPersistsActionReceiptAndRecordsMissingItemFailure() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-review-correct-action-ledger-\(UUID().uuidString)")
@@ -907,6 +890,22 @@ struct CiderCLIAgentSafetyTests {
             command: "bookmark.add"
         )
         let bookmarkID = try #require(bookmark["id"] as? String)
+        try FileManager.default.createDirectory(
+            at: vault.appendingPathComponent("Research"),
+            withIntermediateDirectories: true
+        )
+        let folderDatabase = CiderDatabase()
+        try folderDatabase.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        let folder = try folderDatabase.prepare("""
+            INSERT INTO folders (id, relative_path, created_at, updated_at)
+            VALUES (?, 'Research', ?, ?);
+            """)
+        let folderTimestamp = Date()
+        folder.bind(UUID().uuidString, at: 1)
+            .bind(DatabaseHelpers.encode(folderTimestamp), at: 2)
+            .bind(DatabaseHelpers.encode(folderTimestamp), at: 3)
+        try folder.step()
+        folderDatabase.close()
 
         let correctPayload = try assertStrictProcessJSON(
             runCLI(args: [
@@ -976,23 +975,14 @@ struct CiderCLIAgentSafetyTests {
             command: "review.routing.correct",
             errorCode: "item_not_found"
         )
-        let missingReceipt = try #require(missing["actionReceipt"] as? [String: Any])
-        #expect(missingReceipt["subcommand"] as? String == "correct")
-        #expect(missingReceipt["readOnly"] as? Bool == false)
-        #expect(missingReceipt["changed"] as? Bool == false)
-        #expect(missingReceipt["status"] as? String == "failed")
-        #expect((missingReceipt["sourceRefs"] as? [String])?.contains("missing-review-item") == true)
+        #expect(missing["actionReceipt"] == nil)
 
         let failedLedger = try assertStrictProcessJSON(
             runCLI(args: ["item", "action-ledger", "list", "--command", "review.routing.correct", "--status", "failed", "--json"], vault: vault),
             command: "item.action-ledger.list"
         )
         let failedEntries = try #require(failedLedger["entries"] as? [[String: Any]])
-        #expect(failedEntries.contains { failed in
-            failed["command"] as? String == "review.routing.correct"
-                && failed["resultStatus"] as? String == "failed"
-                && failed["changed"] as? Bool == false
-        })
+        #expect(failedEntries.isEmpty)
     }
 
     @Test("action ledger CLI lists and inspects recorded receipts")

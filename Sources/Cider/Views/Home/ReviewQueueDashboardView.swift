@@ -5,7 +5,7 @@ struct ReviewQueueDashboardView: View {
     let summary: HomeReviewCockpitSummary
     let onOpenItem: (LibraryItemV2) -> Void
     let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
-    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> HomeReviewActionResult
+    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction, CiderRoutingDecisionTarget?) -> HomeReviewActionResult
     let onEnrichReviewBatch: () -> Bool
 
     @State private var reviewActionState = HomeReviewActionState()
@@ -13,6 +13,7 @@ struct ReviewQueueDashboardView: View {
     @State private var scheduledBatchEnrichmentCount: Int?
     @State private var selectedLaneLabel: String?
     @State private var selectedDetailItemID: String?
+    @ObservedObject private var folderService = VaultFolderService.shared
 
     private var visibleItems: [HomeReviewCockpitItem] {
         items.filter { item in
@@ -384,13 +385,46 @@ struct ReviewQueueDashboardView: View {
                 .help(action.helpLabel(for: reviewItem))
                 .accessibilityLabel(action.helpLabel(for: reviewItem))
             }
+        case .correctRoute:
+            Menu {
+                Button("Inbox") {
+                    performReviewAction(
+                        .correctRoute,
+                        for: reviewItem,
+                        destination: CiderRoutingDecisionTarget(
+                            kind: "inbox",
+                            name: "Inbox/Bookmarks",
+                            relativePath: "Inbox/Bookmarks",
+                            folderID: nil
+                        )
+                    )
+                }
+                ForEach(folderService.folders.sorted(by: { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending })) { folder in
+                    Button(folder.relativePath) {
+                        performReviewAction(
+                            .correctRoute,
+                            for: reviewItem,
+                            destination: CiderRoutingDecisionTarget(
+                                kind: "folder",
+                                name: folder.name,
+                                relativePath: folder.relativePath,
+                                folderID: folder.id
+                            )
+                        )
+                    }
+                }
+            } label: {
+                Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(CiderFont.captionSemibold)
+            }
+            .menuStyle(.borderlessButton)
+            .disabled(reviewActionState.pendingReviewIDs.contains(reviewItem.id))
+            .help(action.helpLabel(for: reviewItem))
+            .accessibilityLabel(action.helpLabel(for: reviewItem))
         case .accept, .reject, .deferReview:
             Button {
-                reviewActionState.begin(rowID: reviewItem.id)
-                reviewActionState.reconcile(
-                    rowID: reviewItem.id,
-                    result: onPerformReviewAction(reviewItem, action)
-                )
+                performReviewAction(action, for: reviewItem, destination: nil)
             } label: {
                 Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
                     .labelStyle(.titleAndIcon)
@@ -401,6 +435,18 @@ struct ReviewQueueDashboardView: View {
             .help(action.helpLabel(for: reviewItem))
             .accessibilityLabel(action.helpLabel(for: reviewItem))
         }
+    }
+
+    private func performReviewAction(
+        _ action: HomeReviewCockpitAction,
+        for reviewItem: HomeReviewCockpitItem,
+        destination: CiderRoutingDecisionTarget?
+    ) {
+        reviewActionState.begin(rowID: reviewItem.id)
+        reviewActionState.reconcile(
+            rowID: reviewItem.id,
+            result: onPerformReviewAction(reviewItem, action, destination)
+        )
     }
 
     private func reviewMetadataLine(for item: HomeReviewCockpitItem) -> String {

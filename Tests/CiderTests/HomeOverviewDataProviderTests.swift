@@ -562,16 +562,19 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Needs metadata"])
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].kindLabel, "Enrichment")
-        XCTAssertNil(snapshot.reviewCockpitItems[0].confidenceLabel)
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Inbox/Bookmarks/Needs metadata.webloc")
-        XCTAssertFalse(snapshot.reviewCockpitItems[0].canApprove)
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Routed capture", "Needs metadata"])
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].kindLabel, "Routing")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "62% confidence")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Spaces/Research")
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].canApprove)
         XCTAssertTrue(snapshot.reviewCockpitItems[0].canCorrect)
-        XCTAssertFalse(snapshot.reviewCockpitItems[0].canDefer)
+        XCTAssertTrue(snapshot.reviewCockpitItems[0].canDefer)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].kindLabel, "Enrichment")
+        XCTAssertNil(snapshot.reviewCockpitItems[1].confidenceLabel)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].targetLabel, "Inbox/Bookmarks/Needs metadata.webloc")
     }
 
-    func testDashboardReviewCockpitSuppressesLegacyFolderRoutingNoise() {
+    func testDashboardReviewCockpitExposesRoutingButSuppressesInboxNoise() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let bookmarkID = UUID()
         let routingItem = CiderReviewQueueItem(
@@ -652,15 +655,16 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Needs metadata", "Possible duplicate"])
+        XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Routine route", "Needs metadata", "Possible duplicate"])
         XCTAssertEqual(
             snapshot.reviewCockpitSummary.badges,
             [
                 HomeReviewCockpitBadge(id: "kind-duplicate_candidate", label: "Duplicate", value: 1),
                 HomeReviewCockpitBadge(id: "kind-enrichment_failed", label: "Enrichment", value: 1),
+                HomeReviewCockpitBadge(id: "kind-low_confidence_routing", label: "Routing", value: 1),
             ]
         )
-        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 2)
+        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 3)
     }
 
     func testReviewCockpitLabelsMemoryCandidatesWithSourceEvidence() {
@@ -999,11 +1003,12 @@ final class HomeOverviewDataProviderTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 4)
+        XCTAssertEqual(snapshot.reviewCockpitSummary.totalCount, 7)
         XCTAssertEqual(
             snapshot.reviewCockpitSummary.badges,
             [
                 HomeReviewCockpitBadge(id: "kind-enrichment_failed", label: "Enrichment", value: 4),
+                HomeReviewCockpitBadge(id: "kind-low_confidence_routing", label: "Routing", value: 3),
             ]
         )
         XCTAssertEqual(snapshot.reviewCockpitSummary.safeActionCounts["enrich"], 4)

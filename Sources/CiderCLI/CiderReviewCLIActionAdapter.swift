@@ -73,6 +73,7 @@ struct CiderReviewCLIActionAdapterResult {
 
 enum CiderReviewCLIActionAdapterError: LocalizedError, Equatable {
     case malformedExpectedVersion
+    case staleExpectedVersion
     case candidateUnavailable
     case unsupportedFamily(String)
 
@@ -80,6 +81,8 @@ enum CiderReviewCLIActionAdapterError: LocalizedError, Equatable {
         switch self {
         case .malformedExpectedVersion:
             return "The expected candidate version selector is invalid. Refresh the candidate and use the exact emitted selector."
+        case .staleExpectedVersion:
+            return "The expected candidate version is unavailable. Refresh the candidate and use the exact emitted selector."
         case .candidateUnavailable:
             return "This suggestion is no longer available. Refresh the review list; nothing was changed."
         case .unsupportedFamily:
@@ -89,7 +92,7 @@ enum CiderReviewCLIActionAdapterError: LocalizedError, Equatable {
 
     var classification: CiderReviewActionErrorClassification {
         switch self {
-        case .malformedExpectedVersion: .staleExpectedVersion
+        case .malformedExpectedVersion, .staleExpectedVersion: .staleExpectedVersion
         case .candidateUnavailable: .candidateUnavailable
         case .unsupportedFamily: .unsupportedFamily
         }
@@ -197,4 +200,129 @@ struct CiderReviewCLIActionAdapter {
         )
     }
 
+}
+
+struct CiderRoutingReviewCLIActionAdapterResult {
+    var request: CiderReviewActionRequest
+    var outcome: CiderReviewActionOutcome
+    var before: CiderRoutingExplanation
+    var after: CiderRoutingExplanation
+    var expectedVersionSelector: String
+    var canonicalReceipt: SecondBrainActionReceiptRecord?
+
+    func legacyResult(remainingActiveRoutingReviewCount: Int) throws -> CiderReviewRoutingActionResult {
+        guard let latest = after.latestDecision else {
+            throw CiderRoutingDecisionError.decisionNotFound(after.item.id)
+        }
+        let status: String
+        switch request.action {
+        case .approve: status = "accepted"
+        case .defer: status = "deferred"
+        case .correct: status = "corrected"
+        case .reject: status = "rejected"
+        }
+        return CiderReviewRoutingActionResult(
+            action: "review.routing.\(request.action.rawValue)",
+            itemID: after.item.id,
+            itemType: after.item.type,
+            title: after.item.title,
+            status: status,
+            message: outcome.message,
+            actor: request.actor,
+            reviewState: latest.reviewState,
+            routingDecisionID: latest.id,
+            supersedesDecisionID: latest.supersedesDecisionID,
+            target: latest.target,
+            remainingActiveRoutingReviewCount: remainingActiveRoutingReviewCount,
+            safeActions: ["review summary", "review list", "routing explain"],
+            changed: outcome.changed,
+            actionReceiptID: outcome.actionReceiptID,
+            expectedVersionSelector: expectedVersionSelector,
+            safeVerificationCommands: canonicalReceipt?.safeVerificationCommands ?? [],
+            safeNextCommands: canonicalReceipt?.safeNextCommands ?? []
+        )
+    }
+}
+
+@MainActor
+struct CiderRoutingReviewCLIActionAdapter {
+    private let database: CiderDatabase
+    private let routingService: CiderRoutingDecisionService
+    private let coordinator: CiderReviewActionCoordinator
+
+    init(database: CiderDatabase = .shared, bookmarkService: VaultBookmarkService = .shared) {
+        self.database = database
+        routingService = CiderRoutingDecisionService(database: database)
+        coordinator = CiderReviewActionCoordinator(database: database, bookmarkService: bookmarkService)
+    }
+
+    func perform(
+        itemRef: String,
+        action: CiderReviewAction,
+        destination: CiderRoutingDecisionTarget?,
+        reason: String?,
+        actor: String,
+        expectedVersionSelector: String?,
+        surface: CiderReviewInvokingSurface = .cli
+    ) throws -> CiderRoutingReviewCLIActionAdapterResult {
+        let itemID = try routingService.resolveItemID(ref: itemRef)
+        let before = try routingService.explain(itemID: itemID)
+        guard let latestDecision = before.latestDecision else {
+            throw CiderRoutingDecisionError.decisionNotFound(itemID)
+        }
+        let decision: CiderRoutingDecision
+        let expectedVersion: CiderReviewExpectedVersion
+        let emittedSelector: String
+        if let expectedVersionSelector {
+            guard let decoded = CiderReviewCLIActionAdapter.decodeExpectedVersionSelector(expectedVersionSelector) else {
+                throw CiderReviewCLIActionAdapterError.malformedExpectedVersion
+            }
+            expectedVersion = decoded
+            emittedSelector = expectedVersionSelector
+            let matching = before.history.filter {
+                $0.reviewState == decoded.reviewState
+                    && $0.createdAt.timeIntervalSinceReferenceDate.bitPattern
+                        == decoded.updatedAt.timeIntervalSinceReferenceDate.bitPattern
+            }
+            guard matching.count == 1, let selected = matching.first else {
+                throw CiderReviewCLIActionAdapterError.staleExpectedVersion
+            }
+            decision = selected
+        } else {
+            decision = latestDecision
+            expectedVersion = .init(reviewState: decision.reviewState, updatedAt: decision.createdAt)
+            emittedSelector = CiderReviewCLIActionAdapter.expectedVersionSelector(
+                reviewState: decision.reviewState,
+                updatedAt: decision.createdAt
+            )
+        }
+        let request = CiderReviewActionRequest(
+            identity: .init(
+                candidateRef: "routing_decision:\(decision.id.uuidString)",
+                family: .routingDecision
+            ),
+            expectedVersion: expectedVersion,
+            action: action,
+            reason: reason,
+            routingItemID: itemID,
+            routingDestination: destination ?? decision.target,
+            actor: actor,
+            surface: surface,
+            exactEvidenceRequirement: .notRequired,
+            mutationAuthority: .reviewApprovedCandidate
+        )
+        let outcome = coordinator.perform(request)
+        let after = try routingService.explain(itemID: itemID)
+        let receipt = try outcome.actionReceiptID.flatMap {
+            try SecondBrainActionReceiptLedgerService(database: database).inspect(id: $0)
+        }
+        return CiderRoutingReviewCLIActionAdapterResult(
+            request: request,
+            outcome: outcome,
+            before: before,
+            after: after,
+            expectedVersionSelector: emittedSelector,
+            canonicalReceipt: receipt
+        )
+    }
 }

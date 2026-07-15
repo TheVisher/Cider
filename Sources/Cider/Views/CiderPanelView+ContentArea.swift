@@ -594,8 +594,8 @@ extension CiderPanelView {
             onOpenKanbanCard: { boardID, cardID in
                 openKanbanCardDetail(boardID: boardID, cardID: cardID)
             },
-            onPerformReviewAction: { reviewItem, action in
-                performHomeReviewAction(reviewItem, action: action, surface: .home)
+            onPerformReviewAction: { reviewItem, action, destination in
+                performHomeReviewAction(reviewItem, action: action, routingDestination: destination, surface: .home)
             },
             onEnrichReviewBatch: {
                 enrichHomeReviewBatch()
@@ -640,8 +640,8 @@ extension CiderPanelView {
             summary: snapshot.reviewCockpitSummary,
             onOpenItem: { item in openDashboardItem(item) },
             onOpenReviewSource: { reviewItem in openDashboardReviewSource(reviewItem) },
-            onPerformReviewAction: { reviewItem, action in
-                performHomeReviewAction(reviewItem, action: action, surface: .reviewQueue)
+            onPerformReviewAction: { reviewItem, action, destination in
+                performHomeReviewAction(reviewItem, action: action, routingDestination: destination, surface: .reviewQueue)
             },
             onEnrichReviewBatch: {
                 enrichHomeReviewBatch()
@@ -669,9 +669,15 @@ extension CiderPanelView {
     private func performHomeReviewAction(
         _ reviewItem: HomeReviewCockpitItem,
         action: HomeReviewCockpitAction,
+        routingDestination: CiderRoutingDecisionTarget? = nil,
         surface: CiderReviewInvokingSurface
     ) -> HomeReviewActionResult {
-        if let coordinatorRequest = homeCoordinatorRequest(for: reviewItem, action: action, surface: surface) {
+        if let coordinatorRequest = homeCoordinatorRequest(
+            for: reviewItem,
+            action: action,
+            routingDestination: routingDestination,
+            surface: surface
+        ) {
             let outcome = CiderReviewActionCoordinator().perform(coordinatorRequest)
             if outcome.isSuccessful {
                 refreshHomeReviewModel()
@@ -688,6 +694,8 @@ extension CiderPanelView {
             didChange = false
         case .deferReview:
             didChange = deferHomeReviewItem(reviewItem)
+        case .correctRoute:
+            didChange = false
         case .openSource:
             return openDashboardReviewSource(reviewItem)
                 ? .succeeded
@@ -703,6 +711,7 @@ extension CiderPanelView {
     private func homeCoordinatorRequest(
         for reviewItem: HomeReviewCockpitItem,
         action: HomeReviewCockpitAction,
+        routingDestination: CiderRoutingDecisionTarget?,
         surface: CiderReviewInvokingSurface
     ) -> CiderReviewActionRequest? {
         guard let coordinatorAction = action.coordinatorAction else { return nil }
@@ -714,6 +723,8 @@ extension CiderPanelView {
             family = .graphCandidate
         case "Event Date Fact":
             family = .eventDateFact
+        case "Routing":
+            family = .routingDecision
         default:
             return nil
         }
@@ -724,9 +735,13 @@ extension CiderPanelView {
                 identity: .init(candidateRef: reviewItem.candidateRef ?? "missing", family: family),
                 expectedVersion: .init(reviewState: reviewItem.candidateExpectedReviewState ?? "unknown", updatedAt: .distantPast),
                 action: coordinatorAction,
+                routingItemID: family == .routingDecision ? reviewItem.itemID : nil,
+                routingDestination: family == .routingDecision
+                    ? (routingDestination ?? reviewItem.routingDestination)
+                    : nil,
                 actor: "user",
                 surface: surface,
-                exactEvidenceRequirement: .required,
+                exactEvidenceRequirement: family == .routingDecision ? .notRequired : .required,
                 mutationAuthority: .reviewApprovedCandidate
             )
         }
@@ -734,9 +749,16 @@ extension CiderPanelView {
             identity: .init(candidateRef: candidateRef, family: family),
             expectedVersion: .init(reviewState: reviewState, updatedAt: updatedAt),
             action: coordinatorAction,
+            reason: family == .routingDecision
+                ? (coordinatorAction == .correct ? "Corrected from \(surface.rawValue)." : coordinatorAction == .defer ? "Deferred from \(surface.rawValue)." : nil)
+                : nil,
+            routingItemID: family == .routingDecision ? reviewItem.itemID : nil,
+            routingDestination: family == .routingDecision
+                ? (routingDestination ?? reviewItem.routingDestination)
+                : nil,
             actor: "user",
             surface: surface,
-            exactEvidenceRequirement: .required,
+            exactEvidenceRequirement: family == .routingDecision ? .notRequired : .required,
             mutationAuthority: .reviewApprovedCandidate
         )
     }

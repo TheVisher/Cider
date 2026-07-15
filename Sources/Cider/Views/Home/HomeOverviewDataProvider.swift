@@ -548,7 +548,7 @@ enum HomeOverviewDataProvider {
                 targetLabel: reviewTargetLabel(for: reviewItem),
                 sourceLabel: reviewSourceLabel(reviewItem.source),
                 canApprove: reviewActions.contains(.accept),
-                canCorrect: reviewActions.contains(.openSource),
+                canCorrect: reviewActions.contains(.openSource) || reviewActions.contains(.correctRoute),
                 canDefer: reviewActions.contains(.deferReview),
                 safeActions: reviewItem.safeActions,
                 dateSuggestionApproval: nil,
@@ -557,6 +557,7 @@ enum HomeOverviewDataProvider {
                 candidateRef: reviewItem.candidateRef,
                 candidateExpectedReviewState: reviewItem.reviewState,
                 candidateUpdatedAt: reviewItem.candidateUpdatedAt,
+                routingDestination: reviewItem.target,
                 sourceQuote: reviewItem.sourceQuote,
                 sourceProvenanceLabel: reviewSourceProvenanceLabel(linkedItem: linkedItem, reviewItem: reviewItem),
                 memoryKind: reviewItem.memoryKind,
@@ -701,7 +702,7 @@ enum HomeOverviewDataProvider {
 
     private static func isVisibleReviewCockpitKind(_ kind: String) -> Bool {
         switch kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "low_confidence_routing", "deferred_routing", "inbox_backlog":
+        case "inbox_backlog":
             return false
         default:
             return true
@@ -1065,7 +1066,7 @@ enum HomeOverviewDataProvider {
         let hasCandidateID = item.candidateID != nil || item.candidateRef != nil
 
         if linkedItem != nil,
-           safeActions.contains("correct")
+           (safeActions.contains("correct") && !hasRoutingDecision)
             || ["memory_candidate", "graph_candidate", "event_date_fact"].contains(normalizedKind) {
             actions.append(.openSource)
         }
@@ -1097,8 +1098,14 @@ enum HomeOverviewDataProvider {
             if hasRoutingDecision && safeActions.contains("approve") {
                 actions.append(.accept)
             }
+            if hasRoutingDecision && item.itemType == "bookmark" && safeActions.contains("correct") {
+                actions.append(.correctRoute)
+            }
             if hasRoutingDecision && safeActions.contains("defer") {
                 actions.append(.deferReview)
+            }
+            if hasRoutingDecision && item.itemType != "bookmark" && safeActions.contains("item move") {
+                actions.append(.openSource)
             }
         }
 

@@ -76,6 +76,12 @@ enum CiderReviewActionErrorClassification: String, Equatable, Sendable {
     case correctionRequired = "correction_required"
     case targetRequired = "target_required"
     case targetUnavailable = "target_unavailable"
+    case destinationRequired = "destination_required"
+    case destinationInvalid = "destination_invalid"
+    case destinationUnresolved = "destination_unresolved"
+    case destinationAmbiguous = "destination_ambiguous"
+    case routingUnauthorized = "routing_unauthorized"
+    case unsupportedRoutingCorrection = "unsupported_routing_correction"
     case reviewApprovalRequired = "review_approval_required"
     case databaseFailure = "database_failure"
     case writerFailure = "writer_failure"
@@ -98,6 +104,8 @@ struct CiderReviewActionRequest: Equatable, Sendable {
     var correction: String?
     var targetOptionRef: String?
     var reason: String?
+    var routingItemID: UUID?
+    var routingDestination: CiderRoutingDecisionTarget?
     var actor: String
     var surface: CiderReviewInvokingSurface
     var exactEvidenceRequirement: CiderReviewExactEvidenceRequirement
@@ -110,6 +118,8 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         correction: String? = nil,
         targetOptionRef: String? = nil,
         reason: String? = nil,
+        routingItemID: UUID? = nil,
+        routingDestination: CiderRoutingDecisionTarget? = nil,
         actor: String,
         surface: CiderReviewInvokingSurface,
         exactEvidenceRequirement: CiderReviewExactEvidenceRequirement,
@@ -121,6 +131,8 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         self.correction = correction
         self.targetOptionRef = targetOptionRef
         self.reason = reason
+        self.routingItemID = routingItemID
+        self.routingDestination = routingDestination
         self.actor = actor
         self.surface = surface
         self.exactEvidenceRequirement = exactEvidenceRequirement
@@ -142,6 +154,9 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
     var truthBoundary: String
     var actionReceiptID: String?
     var targetOwnerRef: String?
+    var routingItemID: UUID?
+    var routingDecisionID: UUID?
+    var routingDestination: CiderRoutingDecisionTarget?
     var message: String
     var error: CiderReviewActionFailure?
 
@@ -160,6 +175,9 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
             && truthBoundary == other.truthBoundary
             && actionReceiptID == other.actionReceiptID
             && targetOwnerRef == other.targetOwnerRef
+            && routingItemID == other.routingItemID
+            && routingDecisionID == other.routingDecisionID
+            && routingDestination == other.routingDestination
             && error == other.error
     }
 }
@@ -185,6 +203,41 @@ struct CiderEventDateFactReviewActionAdapter {
 }
 
 @MainActor
+struct CiderRoutingDecisionReviewActionAdapter {
+    private let service: CiderRoutingDecisionService
+    private let bookmarkService: VaultBookmarkService
+
+    init(
+        database: CiderDatabase,
+        bookmarkService: VaultBookmarkService,
+        failureInjector: (@MainActor (CiderRoutingReviewMutationCheckpoint) throws -> Void)? = nil
+    ) {
+        service = CiderRoutingDecisionService(database: database, failureInjector: failureInjector)
+        self.bookmarkService = bookmarkService
+    }
+
+    func perform(_ request: CiderReviewActionRequest) throws -> CiderRoutingReviewMutationResult {
+        guard let itemID = request.routingItemID,
+              let destination = request.routingDestination,
+              let separator = request.identity.candidateRef.lastIndex(of: ":"),
+              let decisionID = UUID(uuidString: String(request.identity.candidateRef[request.identity.candidateRef.index(after: separator)...])) else {
+            throw CiderRoutingReviewActionError.malformedCandidate
+        }
+        return try service.performReviewAction(
+            candidateID: decisionID,
+            itemID: itemID,
+            expectedReviewState: request.expectedVersion.reviewState,
+            expectedCreatedAt: request.expectedVersion.updatedAt,
+            action: request.action,
+            destination: destination,
+            reason: request.reason,
+            actor: request.actor,
+            bookmarkService: bookmarkService
+        )
+    }
+}
+
+@MainActor
 final class CiderReviewActionCoordinator {
     typealias MutationBoundary = @MainActor (
         JournalIntelligenceReviewActionRequest,
@@ -195,10 +248,19 @@ final class CiderReviewActionCoordinator {
         CiderReviewActionRequest
     ) throws -> SecondBrainEventDateFactReviewMutationResult
 
+    typealias RoutingMutationBoundary = @MainActor (
+        CiderReviewActionRequest
+    ) throws -> CiderRoutingReviewMutationResult
+
     private let performMutation: MutationBoundary
     private let performEventDateMutation: EventDateMutationBoundary
+    private let performRoutingMutation: RoutingMutationBoundary
 
-    init(database: CiderDatabase = .shared) {
+    init(
+        database: CiderDatabase = .shared,
+        bookmarkService: VaultBookmarkService = .shared,
+        routingFailureInjector: (@MainActor (CiderRoutingReviewMutationCheckpoint) throws -> Void)? = nil
+    ) {
         let service = JournalIntelligenceReviewActionService(database: database)
         performMutation = { request, actor in
             try service.perform(request, actor: actor)
@@ -207,12 +269,23 @@ final class CiderReviewActionCoordinator {
         performEventDateMutation = { request in
             try eventDateAdapter.perform(request)
         }
+        let routingAdapter = CiderRoutingDecisionReviewActionAdapter(
+            database: database,
+            bookmarkService: bookmarkService,
+            failureInjector: routingFailureInjector
+        )
+        performRoutingMutation = { request in
+            try routingAdapter.perform(request)
+        }
     }
 
     init(_ performMutation: @escaping MutationBoundary) {
         self.performMutation = performMutation
         performEventDateMutation = { request in
             throw SecondBrainEventDateFactReviewService.EventDateFactReviewError.unsupportedReviewAction(request.action.rawValue)
+        }
+        performRoutingMutation = { _ in
+            throw CiderRoutingReviewActionError.unsupportedAction
         }
     }
 
@@ -222,6 +295,29 @@ final class CiderReviewActionCoordinator {
         }
 
         do {
+            if request.identity.family == .routingDecision {
+                let delegated = try performRoutingMutation(request)
+                return CiderReviewActionOutcome(
+                    identity: request.identity,
+                    action: request.action,
+                    actor: request.actor,
+                    surface: request.surface,
+                    availability: .available,
+                    exactEvidenceRequirement: request.exactEvidenceRequirement,
+                    evidenceStatus: .notRequired,
+                    mutationAuthority: request.mutationAuthority,
+                    changed: delegated.changed,
+                    resultingReviewState: delegated.decision.reviewState,
+                    truthBoundary: delegated.truthBoundary,
+                    actionReceiptID: delegated.receiptID,
+                    targetOwnerRef: delegated.decision.target.folderID.map { "folder:\($0.uuidString)" },
+                    routingItemID: delegated.item.id,
+                    routingDecisionID: delegated.decision.id,
+                    routingDestination: delegated.decision.target,
+                    message: routingOutcomeMessage(action: request.action),
+                    error: nil
+                )
+            }
             if request.identity.family == .eventDateFact {
                 let delegated = try performEventDateMutation(request)
                 return CiderReviewActionOutcome(
@@ -238,6 +334,9 @@ final class CiderReviewActionCoordinator {
                     truthBoundary: delegated.view.truthBoundary,
                     actionReceiptID: delegated.receiptID,
                     targetOwnerRef: delegated.view.structuredFactRef,
+                    routingItemID: nil,
+                    routingDecisionID: nil,
+                    routingDestination: nil,
                     message: eventDateOutcomeMessage(action: request.action),
                     error: nil
                 )
@@ -269,6 +368,9 @@ final class CiderReviewActionCoordinator {
                 truthBoundary: delegated.truthBoundary,
                 actionReceiptID: delegated.actionReceiptID,
                 targetOwnerRef: delegated.targetOwnerRef,
+                routingItemID: nil,
+                routingDecisionID: nil,
+                routingDestination: nil,
                 message: delegated.message,
                 error: nil
             )
@@ -283,12 +385,15 @@ final class CiderReviewActionCoordinator {
         }
         guard request.identity.family == .memoryCandidate
                 || request.identity.family == .graphCandidate
-                || request.identity.family == .eventDateFact else {
+                || request.identity.family == .eventDateFact
+                || request.identity.family == .routingDecision else {
             return failure(.unsupportedFamily)
         }
         let supportedSurfaces: [CiderReviewInvokingSurface] = request.identity.family == .eventDateFact
             ? [.home, .journal, .reviewQueue, .cli]
-            : [.home, .journal, .cli]
+            : request.identity.family == .routingDecision
+                ? [.home, .reviewQueue, .cli]
+                : [.home, .journal, .cli]
         guard supportedSurfaces.contains(request.surface) else {
             return failure(.unsupportedSurface)
         }
@@ -299,10 +404,25 @@ final class CiderReviewActionCoordinator {
               request.identity.candidateRef.count > identityPrefix.count else {
             return failure(.invalidCandidateIdentity)
         }
-        guard request.exactEvidenceRequirement == .required else {
+        if request.identity.family == .routingDecision {
+            guard request.exactEvidenceRequirement == .notRequired else {
+                return failure(.unsupportedActionForSurface)
+            }
+            guard request.action != .reject else {
+                return failure(.unsupportedActionForSurface)
+            }
+            guard request.routingItemID != nil else {
+                return failure(.invalidCandidateIdentity)
+            }
+            guard request.routingDestination != nil else {
+                return failure(.destinationRequired)
+            }
+        } else if request.exactEvidenceRequirement != .required {
             return failure(.exactEvidenceRequired)
         }
-        if request.surface == .home, request.action == .correct {
+        if request.surface == .home,
+           request.action == .correct,
+           request.identity.family != .routingDecision {
             return failure(.unsupportedActionForSurface)
         }
         if request.identity.family == .eventDateFact, request.action == .correct {
@@ -339,6 +459,9 @@ final class CiderReviewActionCoordinator {
             truthBoundary: "reviewable_candidate_not_truth",
             actionReceiptID: nil,
             targetOwnerRef: nil,
+            routingItemID: request.routingItemID,
+            routingDecisionID: nil,
+            routingDestination: request.routingDestination,
             message: failure.message,
             error: failure
         )
@@ -396,7 +519,44 @@ final class CiderReviewActionCoordinator {
                 return failure(.writerFailure)
             }
         }
+        if let error = error as? CiderRoutingReviewActionError {
+            switch error {
+            case .malformedCandidate, .itemMismatch:
+                return failure(.invalidCandidateIdentity)
+            case .candidateUnavailable:
+                return failure(.candidateUnavailable)
+            case .staleCandidate:
+                return failure(.staleExpectedVersion)
+            case .alreadyReviewed:
+                return failure(.alreadyReviewed)
+            case .unsupportedAction:
+                return failure(.unsupportedActionForSurface)
+            case .missingDestination:
+                return failure(.destinationRequired)
+            case .invalidDestination:
+                return failure(.destinationInvalid)
+            case .unresolvedDestination:
+                return failure(.destinationUnresolved)
+            case .ambiguousDestination:
+                return failure(.destinationAmbiguous)
+            case .unauthorizedDestination:
+                return failure(.routingUnauthorized)
+            case .unsupportedCorrectionItemType:
+                return failure(.unsupportedRoutingCorrection)
+            case .assignmentFailed:
+                return failure(.writerFailure)
+            }
+        }
         return failure(.writerFailure)
+    }
+
+    private func routingOutcomeMessage(action: CiderReviewAction) -> String {
+        switch action {
+        case .approve: return "Approved the proposed routing destination."
+        case .defer: return "Deferred the routing decision for later review."
+        case .correct: return "Applied the explicitly selected routing destination."
+        case .reject: return "Routing rejection is unavailable."
+        }
     }
 
     private func eventDateOutcomeMessage(action: CiderReviewAction) -> String {
@@ -442,6 +602,18 @@ final class CiderReviewActionCoordinator {
             return "Choose the exact target in Journal Review before approving or correcting this link."
         case .targetUnavailable:
             return "That target is no longer available. Refresh Journal Review and choose again."
+        case .destinationRequired:
+            return "Choose an explicit routing destination before continuing. Nothing was changed."
+        case .destinationInvalid:
+            return "That routing destination is invalid. Refresh the available destinations; nothing was changed."
+        case .destinationUnresolved:
+            return "That routing destination no longer exists. Refresh the available destinations; nothing was changed."
+        case .destinationAmbiguous:
+            return "That routing destination is ambiguous. Choose one exact destination; nothing was changed."
+        case .routingUnauthorized:
+            return "Cider could not verify authority for that routing destination. Nothing was changed."
+        case .unsupportedRoutingCorrection:
+            return "Use the item's Move action to correct this non-bookmark destination. Nothing was changed."
         case .reviewApprovalRequired:
             return "Inferred proposals must remain in review until a user explicitly approves them."
         case .databaseFailure:

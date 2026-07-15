@@ -207,6 +207,12 @@ struct CiderCLI {
             return true
         }
 
+        if command == "routing" || command == "route",
+           subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
+            printRoutingHelp()
+            return true
+        }
+
         if command == "project-artifact" || command == "artifact" {
             if subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
                 printProjectArtifactHelp(commandPrefix: "cider-cli project-artifact", includeCompatibility: true)
@@ -356,6 +362,31 @@ struct CiderCLI {
 
         printItemSubcommandEarlyHelp(subcommand: subcommand, args: args)
         return true
+    }
+
+    static func printRoutingHelp() {
+        let usage = """
+        cider-cli routing explain <item-id> [--json]
+        cider-cli routing approve <item-id> [--actor user|agent] [--expected-version <selector>] [--json]
+        cider-cli routing correct <item-id> (--folder <name|path>|--path <existing-target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--expected-version <selector>] [--json]
+        cider-cli routing rerun <item-id> [--actor user|agent] [--json]
+        """
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": "routing.help",
+                "usage": usage,
+                "readOnly": true,
+                "changed": false,
+                "compatibilityAliases": ["route"],
+                "truthBoundary": "help_contract_only_not_vault_truth",
+                "safeVerificationCommands": ["cider-cli routing --help --json"],
+            ])
+        } else {
+            print("Usage:")
+            print("  \(usage.replacingOccurrences(of: "\n", with: "\n  "))")
+            print("\nRouting corrections require an existing exact folder path, unique folder name, or --inbox. Help never mutates the vault.")
+        }
     }
 
     static func itemRecallHelpContractPayload(subcommand rawSubcommand: String?) -> [String: Any]? {
@@ -953,7 +984,18 @@ struct CiderCLI {
             return
         }
 
-        let bookmarkService = VaultBookmarkService.shared
+        let bookmarkService: VaultBookmarkService
+        if ["review", "routing", "route"].contains(command) {
+            let routingBookmarkService = VaultBookmarkService(
+                database: CiderDatabase.shared,
+                schedulesEnrichment: false,
+                writesVaultCaches: true
+            )
+            routingBookmarkService.loadBookmarksFromDatabase(CiderDatabase.shared)
+            bookmarkService = routingBookmarkService
+        } else {
+            bookmarkService = VaultBookmarkService.shared
+        }
         let notesStorage = NotesStorage.shared
         let todoStorage = TodoCardStorage.shared
         let vaultFileService = VaultFileService.shared
@@ -2905,40 +2947,17 @@ struct CiderCLI {
                     )
                     return
                 }
-                let itemID = try service.resolveItemID(ref: itemRef)
-                let result = try service.approve(
-                    itemID: itemID,
-                    actor: actor
-                )
-                printReviewRoutingActionResult(result)
-            } catch CiderRoutingDecisionError.itemReferenceNotFound(let ref) {
-                var payload = structuredActionReceiptFailurePayload(
-                    command: "review.routing.approve",
-                    action: "approve",
+                performRoutingReviewCLIAction(
+                    itemRef: itemRef,
+                    action: .approve,
+                    destination: nil,
+                    reason: parseFlag("--reason", from: args),
                     actor: actor,
-                    owner: nil,
-                    readOnly: false,
-                    errorCode: "item_not_found",
-                    error: "No item found matching '\(ref)'.",
-                    sourceRefs: [ref],
-                    safeVerificationCommands: [
-                        "cider-cli review list --json",
-                        "cider-cli item action-ledger list --command review.routing.approve --status failed --json",
-                    ],
-                    safeNextCommands: [
-                        "cider-cli review list --json",
-                    ]
+                    expectedVersionSelector: parseFlag("--expected-version", from: args),
+                    bookmarkService: bookmarkService,
+                    presentation: .review
                 )
-                if var receipt = payload["actionReceipt"] as? [String: Any] {
-                    receipt["subcommand"] = "approve"
-                    receipt["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
-                    payload["actionReceipt"] = receipt
-                }
-                persistActionReceiptIfPresent(payload)
-                processExitCode = 1
-                if jsonOutput { outputJSON(payload) } else { print("Error: No item found matching '\(ref)'.") }
-            } catch {
-                printCLIError(error.localizedDescription)
+                return
             }
 
         case "reject":
@@ -3018,7 +3037,7 @@ struct CiderCLI {
                     folderID: nil
                 )
             } else {
-                switch resolveFolderArg(from: args) {
+                switch resolveExistingRoutingFolderArg(from: args) {
                 case .unspecified:
                     printCLIError("review correct requires --folder, --path, or --inbox.")
                     return
@@ -3035,43 +3054,17 @@ struct CiderCLI {
             }
 
             do {
-                let itemID = try service.resolveItemID(ref: itemRef)
-                let result = try service.correctBookmark(
-                    itemID: itemID,
-                    target: target,
+                performRoutingReviewCLIAction(
+                    itemRef: itemRef,
+                    action: .correct,
+                    destination: target,
                     reason: parseFlag("--reason", from: args) ?? "Corrected from review queue.",
                     actor: parseFlag("--actor", from: args) ?? "user",
-                    bookmarkService: bookmarkService
+                    expectedVersionSelector: parseFlag("--expected-version", from: args),
+                    bookmarkService: bookmarkService,
+                    presentation: .review
                 )
-                printReviewRoutingActionResult(result)
-            } catch CiderRoutingDecisionError.itemReferenceNotFound(let ref) {
-                var payload = structuredActionReceiptFailurePayload(
-                    command: "review.routing.correct",
-                    action: "correct",
-                    actor: parseFlag("--actor", from: args) ?? "user",
-                    owner: nil,
-                    readOnly: false,
-                    errorCode: "item_not_found",
-                    error: "No item found matching '\(ref)'.",
-                    sourceRefs: [ref],
-                    safeVerificationCommands: [
-                        "cider-cli review list --json",
-                        "cider-cli item action-ledger list --command review.routing.correct --status failed --json",
-                    ],
-                    safeNextCommands: [
-                        "cider-cli review list --json",
-                    ]
-                )
-                if var receipt = payload["actionReceipt"] as? [String: Any] {
-                    receipt["subcommand"] = "correct"
-                    receipt["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
-                    payload["actionReceipt"] = receipt
-                }
-                persistActionReceiptIfPresent(payload)
-                processExitCode = 1
-                if jsonOutput { outputJSON(payload) } else { print("Error: No item found matching '\(ref)'.") }
-            } catch {
-                print("Error: \(error.localizedDescription)")
+                return
             }
 
         case "defer":
@@ -3113,41 +3106,17 @@ struct CiderCLI {
                     )
                     return
                 }
-                let itemID = try service.resolveItemID(ref: itemRef)
-                let result = try service.deferReview(
-                    itemID: itemID,
+                performRoutingReviewCLIAction(
+                    itemRef: itemRef,
+                    action: .defer,
+                    destination: nil,
                     reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
-                    actor: actor
-                )
-                printReviewRoutingActionResult(result)
-            } catch CiderRoutingDecisionError.itemReferenceNotFound(let ref) {
-                var payload = structuredActionReceiptFailurePayload(
-                    command: "review.routing.defer",
-                    action: "defer",
                     actor: actor,
-                    owner: nil,
-                    readOnly: false,
-                    errorCode: "item_not_found",
-                    error: "No item found matching '\(ref)'.",
-                    sourceRefs: [ref],
-                    safeVerificationCommands: [
-                        "cider-cli review list --json",
-                        "cider-cli item action-ledger list --command review.routing.defer --status failed --json",
-                    ],
-                    safeNextCommands: [
-                        "cider-cli review list --json",
-                    ]
+                    expectedVersionSelector: parseFlag("--expected-version", from: args),
+                    bookmarkService: bookmarkService,
+                    presentation: .review
                 )
-                if var receipt = payload["actionReceipt"] as? [String: Any] {
-                    receipt["subcommand"] = "defer"
-                    receipt["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
-                    payload["actionReceipt"] = receipt
-                }
-                persistActionReceiptIfPresent(payload)
-                processExitCode = 1
-                if jsonOutput { outputJSON(payload) } else { print("Error: No item found matching '\(ref)'.") }
-            } catch {
-                print("Error: \(error.localizedDescription)")
+                return
             }
 
         case "enrich":
@@ -3362,6 +3331,117 @@ struct CiderCLI {
         }
     }
 
+    enum RoutingReviewPresentation {
+        case review
+        case routingAlias
+    }
+
+    static func performRoutingReviewCLIAction(
+        itemRef: String,
+        action: CiderReviewAction,
+        destination: CiderRoutingDecisionTarget?,
+        reason: String?,
+        actor: String,
+        expectedVersionSelector: String?,
+        bookmarkService: VaultBookmarkService,
+        presentation: RoutingReviewPresentation
+    ) {
+        do {
+            let adapter = CiderRoutingReviewCLIActionAdapter(
+                database: .shared,
+                bookmarkService: bookmarkService
+            )
+            let result = try adapter.perform(
+                itemRef: itemRef,
+                action: action,
+                destination: destination,
+                reason: reason,
+                actor: actor,
+                expectedVersionSelector: expectedVersionSelector
+            )
+            guard result.outcome.isSuccessful else {
+                processExitCode = 1
+                if jsonOutput {
+                    outputJSON(routingCoordinatorFailurePayload(result))
+                } else {
+                    print("Error: \(result.outcome.message)")
+                }
+                return
+            }
+            let remaining = try CiderReviewQueueService(database: .shared).list(
+                limit: Int.max,
+                kind: "low_confidence_routing",
+                reviewState: "needs_review"
+            ).items.count
+            switch presentation {
+            case .review:
+                printReviewRoutingActionResult(try result.legacyResult(remainingActiveRoutingReviewCount: remaining))
+            case .routingAlias:
+                printRoutingExplanation(result.after, routingReview: result)
+            }
+        } catch {
+            processExitCode = 1
+            let message: String
+            let errorCode: String
+            let classification: CiderReviewActionErrorClassification
+            if let routingError = error as? CiderRoutingDecisionError,
+               case .itemReferenceNotFound = routingError {
+                message = "No routing item matched that reference. Refresh the review list; nothing was changed."
+                errorCode = "item_not_found"
+                classification = .candidateUnavailable
+            } else if error is CiderReviewCLIActionAdapterError {
+                message = "The expected routing version is invalid. Refresh the route and use the exact emitted selector."
+                errorCode = "stale_expected_version"
+                classification = .staleExpectedVersion
+            } else {
+                message = "Cider could not safely complete this routing action. Refresh the review list; nothing was changed."
+                errorCode = "candidate_unavailable"
+                classification = .candidateUnavailable
+            }
+            if jsonOutput {
+                outputJSON([
+                    "ok": false,
+                    "command": "review.routing.\(action.rawValue)",
+                    "action": action.rawValue,
+                    "readOnly": false,
+                    "changed": false,
+                    "error": message,
+                    "errorCode": errorCode,
+                    "errorClassification": classification.rawValue,
+                    "safeNextCommands": ["cider-cli review list --include-deferred --json"],
+                ])
+            } else {
+                print("Error: \(message)")
+            }
+        }
+    }
+
+    static func routingCoordinatorFailurePayload(
+        _ result: CiderRoutingReviewCLIActionAdapterResult
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "ok": false,
+            "command": "review.routing.\(result.request.action.rawValue)",
+            "action": result.request.action.rawValue,
+            "readOnly": false,
+            "changed": false,
+            "reviewFamily": "routing_decision",
+            "candidateRef": result.request.identity.candidateRef,
+            "reviewState": result.outcome.resultingReviewState,
+            "expectedVersionSelector": result.expectedVersionSelector,
+            "error": result.outcome.message,
+            "safeNextCommands": ["cider-cli review list --include-deferred --json"],
+        ]
+        if let classification = result.outcome.error?.classification.rawValue {
+            payload["errorClassification"] = classification
+            payload["errorCode"] = classification
+        }
+        if let itemID = result.request.routingItemID {
+            payload["itemID"] = itemID.uuidString
+        }
+        return payload
+    }
+
     static func handleRouting(subcommand: String?, args: [String], bookmarkService: VaultBookmarkService) {
         let service = CiderRoutingDecisionService()
 
@@ -3379,21 +3459,24 @@ struct CiderCLI {
             }
 
         case "approve":
-            guard let itemRef = args.first else {
-                print("Error: Usage: cider-cli routing approve <item-id> [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--actor", "--expected-version"]) else {
+                print("Error: Usage: cider-cli routing approve <item-id> [--actor user|agent] [--expected-version <selector>] [--json]")
                 return
             }
-            do {
-                let itemID = try service.resolveItemID(ref: itemRef)
-                let explanation = try service.approve(itemID: itemID, actor: parseFlag("--actor", from: args) ?? "user")
-                printRoutingExplanation(explanation)
-            } catch {
-                print("Error: \(error.localizedDescription)")
-            }
+            performRoutingReviewCLIAction(
+                itemRef: itemRef,
+                action: .approve,
+                destination: nil,
+                reason: nil,
+                actor: parseFlag("--actor", from: args) ?? "user",
+                expectedVersionSelector: parseFlag("--expected-version", from: args),
+                bookmarkService: bookmarkService,
+                presentation: .routingAlias
+            )
 
         case "correct":
-            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor"]) else {
-                printCLIError("Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor", "--expected-version"]) else {
+                printCLIError("Usage: cider-cli routing correct <item-id> (--folder <name|path>|--path <existing-target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--expected-version <selector>] [--json]")
                 return
             }
 
@@ -3406,7 +3489,7 @@ struct CiderCLI {
                     folderID: nil
                 )
             } else {
-                switch resolveFolderArg(from: args) {
+                switch resolveExistingRoutingFolderArg(from: args) {
                 case .unspecified:
                     printCLIError("routing correct requires --folder, --path, or --inbox.")
                     return
@@ -3422,19 +3505,16 @@ struct CiderCLI {
                 }
             }
 
-            do {
-                let itemID = try service.resolveItemID(ref: itemRef)
-                let explanation = try service.correctBookmark(
-                    itemID: itemID,
-                    target: target,
-                    reason: parseFlag("--reason", from: args) ?? "Corrected route.",
-                    actor: parseFlag("--actor", from: args) ?? "user",
-                    bookmarkService: bookmarkService
-                )
-                printRoutingExplanation(explanation)
-            } catch {
-                print("Error: \(error.localizedDescription)")
-            }
+            performRoutingReviewCLIAction(
+                itemRef: itemRef,
+                action: .correct,
+                destination: target,
+                reason: parseFlag("--reason", from: args) ?? "Corrected route.",
+                actor: parseFlag("--actor", from: args) ?? "user",
+                expectedVersionSelector: parseFlag("--expected-version", from: args),
+                bookmarkService: bookmarkService,
+                presentation: .routingAlias
+            )
 
         case "rerun":
             guard let itemRef = args.first else {
@@ -3453,13 +3533,7 @@ struct CiderCLI {
             }
 
         case nil, "help", "--help", "-h":
-            print("""
-            Usage:
-              cider-cli routing explain <item-id> [--json]
-              cider-cli routing approve <item-id> [--actor user|agent] [--json]
-              cider-cli routing correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
-              cider-cli routing rerun <item-id> [--actor user|agent] [--json]
-            """)
+            printRoutingHelp()
 
         default:
             printCLIError("Unknown routing command: \(subcommand ?? "nil"). Commands: explain, approve, correct, rerun")
@@ -14955,9 +15029,24 @@ struct CiderCLI {
         }
     }
 
-    static func printRoutingExplanation(_ explanation: CiderRoutingExplanation) {
+    static func printRoutingExplanation(
+        _ explanation: CiderRoutingExplanation,
+        routingReview: CiderRoutingReviewCLIActionAdapterResult? = nil
+    ) {
         if jsonOutput {
-            outputJSON(explanation.toDictionary())
+            var payload = explanation.toDictionary()
+            if let routingReview {
+                payload["action"] = routingReview.request.action.rawValue
+                payload["readOnly"] = false
+                payload["changed"] = routingReview.outcome.changed
+                payload["reviewFamily"] = "routing_decision"
+                payload["candidateRef"] = routingReview.request.identity.candidateRef
+                payload["expectedVersionSelector"] = routingReview.expectedVersionSelector
+                payload["actionReceiptID"] = routingReview.outcome.actionReceiptID
+                payload["safeVerificationCommands"] = routingReview.canonicalReceipt?.safeVerificationCommands ?? []
+                payload["safeNextCommands"] = routingReview.canonicalReceipt?.safeNextCommands ?? []
+            }
+            outputJSON(payload)
             return
         }
 
@@ -14981,6 +15070,12 @@ struct CiderCLI {
         }
         print("  History entries: \(explanation.history.count)")
         print("  Next safe action: \(explanation.nextSafeAction)")
+        if let routingReview {
+            print("  Expected version: \(routingReview.expectedVersionSelector)")
+            if let receiptID = routingReview.outcome.actionReceiptID {
+                print("  Receipt: \(receiptID)")
+            }
+        }
     }
 
     static func printReviewQueueResult(_ result: CiderReviewQueueResult, filters: [String: Any]? = nil) {
@@ -15431,9 +15526,8 @@ struct CiderCLI {
                 payload["ok"] = true
                 payload["command"] = result.action
                 payload["readOnly"] = false
-                payload["changed"] = true
+                payload["changed"] = result.changed
                 payload["actionReceipt"] = actionReceiptForReviewRoutingAction(result)
-                persistActionReceiptIfPresent(payload)
             }
             outputJSON(payload)
             return
@@ -15451,6 +15545,13 @@ struct CiderCLI {
         }
         print("  Remaining routing reviews: \(result.remainingActiveRoutingReviewCount)")
         print("  Message: \(result.message)")
+        print("  Changed: \(result.changed)")
+        if let expectedVersionSelector = result.expectedVersionSelector {
+            print("  Expected version: \(expectedVersionSelector)")
+        }
+        if let actionReceiptID = result.actionReceiptID {
+            print("  Receipt: \(actionReceiptID)")
+        }
         print("  Safe actions: \(result.safeActions.joined(separator: ", "))")
     }
 
@@ -15458,6 +15559,10 @@ struct CiderCLI {
         let owner = SecondBrainOwnerRef(ownerType: result.itemType, ownerID: result.itemID.uuidString)
         let ownerRef = owner.canonicalRef
         let subcommand = result.action.replacingOccurrences(of: "review.routing.", with: "")
+        let expectedReviewState = result.expectedVersionSelector?
+            .split(separator: "@", maxSplits: 1)
+            .first
+            .map(String.init) ?? "needs_review"
         let receipt = agentActionReceiptToDict(
             command: result.action,
             action: subcommand,
@@ -15473,27 +15578,32 @@ struct CiderCLI {
                 result.supersedesDecisionID.map { "routing_decision:\($0.uuidString)" },
             ].compactMap { $0 }),
             readOnly: false,
-            changed: true,
+            changed: result.changed,
             status: result.status,
-            before: result.supersedesDecisionID.map { ["reviewState": "needs_review", "routingDecisionID": $0.uuidString] },
+            before: result.supersedesDecisionID.map { ["reviewState": expectedReviewState, "routingDecisionID": $0.uuidString] },
             after: [
                 "reviewState": result.reviewState,
                 "routingDecisionID": result.routingDecisionID.uuidString,
                 "remainingActiveRoutingReviewCount": result.remainingActiveRoutingReviewCount,
             ],
-            safeVerificationCommands: [
+            safeVerificationCommands: result.safeVerificationCommands.isEmpty ? [
                 "cider-cli review list --include-deferred --json",
                 "cider-cli item action-ledger list --owner \(ownerRef) --command \(result.action) --json",
                 "cider-cli item context \(result.itemType) \(result.itemID.uuidString) --max-history 10 --json",
-            ],
-            safeNextCommands: [
+            ] : result.safeVerificationCommands,
+            safeNextCommands: result.safeNextCommands.isEmpty ? [
                 "cider-cli review list --json",
                 "cider-cli review list --include-deferred --json",
                 "cider-cli item recall-context --item \(result.itemType) \(result.itemID.uuidString) --history-command \(result.action) --json",
-            ]
+            ] : result.safeNextCommands
         )
         var adjusted = receipt
+        if let actionReceiptID = result.actionReceiptID {
+            adjusted["id"] = actionReceiptID
+        }
         adjusted["subcommand"] = subcommand
+        adjusted["commandFamily"] = "review"
+        adjusted["canonicalReceipt"] = true
         adjusted["truthBoundary"] = "receipt_proves_command_execution_and_review_state_outcome_not_memory_truth"
         return adjusted
     }
@@ -31284,6 +31394,33 @@ struct CiderCLI {
         case unspecified
         case resolved(VaultFolder)
         case failed
+    }
+
+    static func resolveExistingRoutingFolderArg(from args: [String]) -> FolderArgResolution {
+        let raw = parseFlag("--path", from: args) ?? parseFlag("--folder", from: args)
+        guard let raw else { return .unspecified }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              !value.hasPrefix("/"),
+              !value.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {
+            printCLIError("The routing destination is invalid. Choose one existing vault folder; nothing was changed.")
+            return .failed
+        }
+        let folders = VaultFolderService.shared.folders
+        let exactPath = folders.filter {
+            $0.relativePath.localizedCaseInsensitiveCompare(value) == .orderedSame
+        }
+        if exactPath.count == 1 { return .resolved(exactPath[0]) }
+        let idMatches = folders.filter { $0.id.uuidString.lowercased().hasPrefix(value.lowercased()) }
+        if idMatches.count == 1 { return .resolved(idMatches[0]) }
+        let nameMatches = folders.filter { $0.name.localizedCaseInsensitiveCompare(value) == .orderedSame }
+        if nameMatches.count == 1 { return .resolved(nameMatches[0]) }
+        if exactPath.count > 1 || idMatches.count > 1 || nameMatches.count > 1 {
+            printCLIError("The routing destination is ambiguous. Choose one exact existing folder path or ID; nothing was changed.")
+        } else {
+            printCLIError("The routing destination could not be verified. Choose an existing folder; nothing was changed.")
+        }
+        return .failed
     }
 
     static func folderArgFailurePayload(

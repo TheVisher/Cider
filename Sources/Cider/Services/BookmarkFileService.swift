@@ -41,6 +41,39 @@ final class BookmarkFileService {
         }
     }
 
+    enum MoveCheckpoint: Equatable {
+        case afterBookmarkFileMove
+        case beforeAssetMove(relativePath: String)
+        case afterAssetMove(relativePath: String)
+    }
+
+    typealias MoveFailureInjector = @MainActor (MoveCheckpoint) throws -> Void
+
+    struct CompensatableMove {
+        let relativePath: String
+        fileprivate let sourceDirectoryURL: URL
+        fileprivate let destinationDirectoryURL: URL
+        fileprivate let sourceFilename: String
+        fileprivate let destinationFilename: String
+        fileprivate let movedArtifacts: [MovedArtifact]
+        fileprivate let createdDirectories: [URL]
+    }
+
+    fileprivate struct MovedArtifact {
+        let sourceURL: URL
+        let destinationURL: URL
+    }
+
+    struct CompensationError: LocalizedError {
+        let operation: String
+        let underlyingErrors: [Error]
+
+        var errorDescription: String? {
+            let details = underlyingErrors.map(\.localizedDescription).joined(separator: "; ")
+            return "Failed to \(operation): \(details)"
+        }
+    }
+
     // MARK: - Sidecar Model
 
     /// Per-folder sidecar file mapping filenames → bookmark metadata.
@@ -198,39 +231,123 @@ final class BookmarkFileService {
         to destDirURL: URL,
         destDirRelativePath: String
     ) throws -> String {
+        let move = try moveCompensatably(
+            bookmark: bookmark,
+            filename: filename,
+            from: sourceDirURL,
+            to: destDirURL,
+            destDirRelativePath: destDirRelativePath
+        )
+        finalize(move)
+        return move.relativePath
+    }
+
+    /// Moves all bookmark artifacts while retaining an exact rollback journal.
+    /// Legacy sidecar cleanup is deliberately deferred to `finalize(_:)` so a
+    /// caller can keep sidecars unchanged until its canonical transaction commits.
+    func moveCompensatably(
+        bookmark: Bookmark,
+        filename: String,
+        from sourceDirURL: URL,
+        to destDirURL: URL,
+        destDirRelativePath: String,
+        failureInjector: MoveFailureInjector? = nil
+    ) throws -> CompensatableMove {
         let destFilename = uniqueFilename(
             for: sanitizedFilename(bookmark.title.isEmpty ? "Untitled" : bookmark.title),
             extension: "webloc",
             in: destDirURL
         )
 
-        try fm.createDirectory(at: destDirURL, withIntermediateDirectories: true)
-
-        // Move .webloc file
+        var movedArtifacts: [MovedArtifact] = []
+        var createdDirectories: [URL] = []
         let sourceFileURL = sourceDirURL.appendingPathComponent(filename)
         let destFileURL = destDirURL.appendingPathComponent(destFilename)
-        try fm.moveItem(at: sourceFileURL, to: destFileURL)
 
-        let entry = sidecarEntry(from: bookmark)
-        if let thumbName = entry.thumbnailFilename {
-            try moveAsset(named: thumbName, subdir: Self.thumbnailsDir, from: sourceDirURL, to: destDirURL)
-        }
-        if let origName = entry.originalImageFilename {
-            try moveAsset(named: origName, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
-        }
-        if let carousel = entry.carouselImageFilenames {
-            for name in carousel {
-                try moveAsset(named: name, subdir: Self.originalsDir, from: sourceDirURL, to: destDirURL)
+        do {
+            try createDirectoryIfNeeded(destDirURL, tracking: &createdDirectories)
+            do {
+                try fm.moveItem(at: sourceFileURL, to: destFileURL)
+                movedArtifacts.append(MovedArtifact(sourceURL: sourceFileURL, destinationURL: destFileURL))
+            } catch {
+                throw FileOperationError(
+                    operation: "move bookmark file",
+                    sourceURL: sourceFileURL,
+                    destinationURL: destFileURL,
+                    underlyingError: error
+                )
             }
-        }
+            try failureInjector?(.afterBookmarkFileMove)
 
-        // Clean up any legacy sidecar entries so they do not drift after the move.
-        removeSidecarEntry(at: sourceDirURL, filename: filename)
-        removeSidecarEntry(at: destDirURL, filename: destFilename)
+            let entry = sidecarEntry(from: bookmark)
+            var assets: [(name: String, subdirectory: String)] = []
+            if let thumbName = entry.thumbnailFilename {
+                assets.append((thumbName, Self.thumbnailsDir))
+            }
+            if let origName = entry.originalImageFilename {
+                assets.append((origName, Self.originalsDir))
+            }
+            assets.append(contentsOf: (entry.carouselImageFilenames ?? []).map { ($0, Self.originalsDir) })
+
+            for asset in assets {
+                let sourceURL = sourceDirURL
+                    .appendingPathComponent(asset.subdirectory)
+                    .appendingPathComponent(asset.name)
+                guard fm.fileExists(atPath: sourceURL.path) else { continue }
+                let destinationSubdirectoryURL = destDirURL.appendingPathComponent(asset.subdirectory)
+                let destinationURL = destinationSubdirectoryURL.appendingPathComponent(asset.name)
+                let relativeAssetPath = "\(asset.subdirectory)/\(asset.name)"
+                try failureInjector?(.beforeAssetMove(relativePath: relativeAssetPath))
+                do {
+                    try createDirectoryIfNeeded(destinationSubdirectoryURL, tracking: &createdDirectories)
+                    try fm.moveItem(at: sourceURL, to: destinationURL)
+                    movedArtifacts.append(MovedArtifact(sourceURL: sourceURL, destinationURL: destinationURL))
+                } catch {
+                    throw FileOperationError(
+                        operation: "move bookmark asset",
+                        sourceURL: sourceURL,
+                        destinationURL: destinationURL,
+                        underlyingError: error
+                    )
+                }
+                try failureInjector?(.afterAssetMove(relativePath: relativeAssetPath))
+            }
+        } catch {
+            do {
+                try compensateArtifacts(movedArtifacts, createdDirectories: createdDirectories)
+            } catch let compensationError {
+                throw CompensationError(
+                    operation: "compensate bookmark move after \(error.localizedDescription)",
+                    underlyingErrors: [compensationError]
+                )
+            }
+            throw error
+        }
 
         let relativePath = destDirRelativePath.isEmpty ? destFilename : "\(destDirRelativePath)/\(destFilename)"
-        logger.info("Moved bookmark: \(filename) → \(relativePath)")
-        return relativePath
+        return CompensatableMove(
+            relativePath: relativePath,
+            sourceDirectoryURL: sourceDirURL,
+            destinationDirectoryURL: destDirURL,
+            sourceFilename: filename,
+            destinationFilename: destFilename,
+            movedArtifacts: movedArtifacts,
+            createdDirectories: createdDirectories
+        )
+    }
+
+    /// Restores every moved artifact to its original URL. Sidecars are still
+    /// untouched at this point, so rollback restores the exact pre-move files.
+    func compensate(_ move: CompensatableMove) throws {
+        try compensateArtifacts(move.movedArtifacts, createdDirectories: move.createdDirectories)
+    }
+
+    /// Performs the legacy, non-authoritative sidecar cleanup only after the
+    /// caller's canonical mutation has committed.
+    func finalize(_ move: CompensatableMove) {
+        removeSidecarEntry(at: move.sourceDirectoryURL, filename: move.sourceFilename)
+        removeSidecarEntry(at: move.destinationDirectoryURL, filename: move.destinationFilename)
+        logger.info("Moved bookmark: \(move.sourceFilename) → \(move.relativePath)")
     }
 
     /// Renames a bookmark artifact within its current folder without changing
@@ -376,23 +493,52 @@ final class BookmarkFileService {
 
     // MARK: - Asset Helpers
 
-    /// Moves a single image asset between folder hidden directories.
-    private func moveAsset(named name: String, subdir: String, from sourceDir: URL, to destDir: URL) throws {
-        let sourceURL = sourceDir.appendingPathComponent(subdir).appendingPathComponent(name)
-        guard fm.fileExists(atPath: sourceURL.path) else { return }
+    private func createDirectoryIfNeeded(_ directoryURL: URL, tracking createdDirectories: inout [URL]) throws {
+        var isDirectory: ObjCBool = false
+        if fm.fileExists(atPath: directoryURL.path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else {
+                throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: directoryURL.path])
+            }
+            return
+        }
+        try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        createdDirectories.append(directoryURL)
+    }
 
-        let destSubdirURL = destDir.appendingPathComponent(subdir)
-        let destURL = destSubdirURL.appendingPathComponent(name)
-        do {
-            try fm.createDirectory(at: destSubdirURL, withIntermediateDirectories: true)
-            try fm.moveItem(at: sourceURL, to: destURL)
-        } catch {
-            throw FileOperationError(
-                operation: "move bookmark asset",
-                sourceURL: sourceURL,
-                destinationURL: destURL,
-                underlyingError: error
-            )
+    private func compensateArtifacts(
+        _ movedArtifacts: [MovedArtifact],
+        createdDirectories: [URL]
+    ) throws {
+        var errors: [Error] = []
+        for artifact in movedArtifacts.reversed() {
+            guard fm.fileExists(atPath: artifact.destinationURL.path) else {
+                errors.append(CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: artifact.destinationURL.path]))
+                continue
+            }
+            do {
+                try fm.createDirectory(
+                    at: artifact.sourceURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fm.moveItem(at: artifact.destinationURL, to: artifact.sourceURL)
+            } catch {
+                errors.append(error)
+            }
+        }
+        for directoryURL in createdDirectories.reversed() {
+            do {
+                let contents = try fm.contentsOfDirectory(atPath: directoryURL.path)
+                if contents.isEmpty {
+                    try fm.removeItem(at: directoryURL)
+                }
+            } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                continue
+            } catch {
+                errors.append(error)
+            }
+        }
+        if !errors.isEmpty {
+            throw CompensationError(operation: "restore bookmark artifacts", underlyingErrors: errors)
         }
     }
 

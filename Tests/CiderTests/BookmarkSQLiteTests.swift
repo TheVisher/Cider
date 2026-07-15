@@ -1096,23 +1096,34 @@ struct BookmarkSQLiteTests {
         let source = root.appendingPathComponent("Source", isDirectory: true)
         let destination = root.appendingPathComponent("Destination", isDirectory: true)
         let sourceThumbnails = source.appendingPathComponent(BookmarkFileService.thumbnailsDir, isDirectory: true)
+        let sourceOriginals = source.appendingPathComponent(BookmarkFileService.originalsDir, isDirectory: true)
         try fm.createDirectory(at: sourceThumbnails, withIntermediateDirectories: true)
+        try fm.createDirectory(at: sourceOriginals, withIntermediateDirectories: true)
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
 
         let bookmark = Bookmark(
             title: "Asset Move Failure",
             urlString: "https://example.com/asset-move-failure",
-            thumbnailRelativePath: "\(BookmarkFileService.thumbnailsDir)/thumbnail.jpg"
+            thumbnailRelativePath: "\(BookmarkFileService.thumbnailsDir)/thumbnail.jpg",
+            originalImageRelativePath: "\(BookmarkFileService.originalsDir)/original.jpg"
         )
         let relativePath = try BookmarkFileService.shared.write(
             bookmark: bookmark,
             toDirectory: source,
             dirRelativePath: "Source"
         )
-        try Data("thumbnail".utf8).write(to: sourceThumbnails.appendingPathComponent("thumbnail.jpg"))
+        let sourceFile = source.appendingPathComponent((relativePath as NSString).lastPathComponent)
+        let sourceThumbnail = sourceThumbnails.appendingPathComponent("thumbnail.jpg")
+        let sourceOriginal = sourceOriginals.appendingPathComponent("original.jpg")
+        try Data("thumbnail".utf8).write(to: sourceThumbnail)
+        try Data("original".utf8).write(to: sourceOriginal)
 
-        let blockingPath = destination.appendingPathComponent(BookmarkFileService.thumbnailsDir)
+        let blockingPath = destination.appendingPathComponent(BookmarkFileService.originalsDir)
         try Data("not a directory".utf8).write(to: blockingPath)
+        let sourceFileBefore = try Data(contentsOf: sourceFile)
+        let sourceThumbnailBefore = try Data(contentsOf: sourceThumbnail)
+        let sourceOriginalBefore = try Data(contentsOf: sourceOriginal)
+        let blockingPathBefore = try Data(contentsOf: blockingPath)
 
         do {
             _ = try BookmarkFileService.shared.move(
@@ -1127,8 +1138,61 @@ struct BookmarkSQLiteTests {
             let description = error.localizedDescription
             #expect(description.contains("move bookmark asset"))
             #expect(description.contains(blockingPath.path))
-            #expect(description.contains("thumbnail.jpg"))
+            #expect(description.contains("original.jpg"))
         }
+
+        #expect(FileManager.default.fileExists(atPath: sourceFile.path))
+        #expect(try Data(contentsOf: sourceFile) == sourceFileBefore)
+        #expect(FileManager.default.fileExists(atPath: sourceThumbnail.path))
+        #expect(try Data(contentsOf: sourceThumbnail) == sourceThumbnailBefore)
+        #expect(FileManager.default.fileExists(atPath: sourceOriginal.path))
+        #expect(try Data(contentsOf: sourceOriginal) == sourceOriginalBefore)
+        #expect(try Data(contentsOf: blockingPath) == blockingPathBefore)
+        #expect(!FileManager.default.fileExists(atPath: destination.appendingPathComponent(sourceFile.lastPathComponent).path))
+        #expect(!FileManager.default.fileExists(atPath: destination.appendingPathComponent(BookmarkFileService.thumbnailsDir).path))
+    }
+
+    @Test("Bookmark file move keeps the existing filename collision suffix behavior")
+    func bookmarkFileMovePreservesCollisionSuffix() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "cider-bookmark-move-collision-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("Source", isDirectory: true)
+        let destination = root.appendingPathComponent("Destination", isDirectory: true)
+        try fm.createDirectory(at: source, withIntermediateDirectories: true)
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        let existing = Bookmark(title: "Collision", urlString: "https://example.com/existing")
+        let moving = Bookmark(title: "Collision", urlString: "https://example.com/moving")
+        _ = try BookmarkFileService.shared.write(
+            bookmark: existing,
+            toDirectory: destination,
+            dirRelativePath: "Destination"
+        )
+        let sourceRelativePath = try BookmarkFileService.shared.write(
+            bookmark: moving,
+            toDirectory: source,
+            dirRelativePath: "Source"
+        )
+        let existingURL = destination.appendingPathComponent("Collision.webloc")
+        let existingData = try Data(contentsOf: existingURL)
+
+        let movedRelativePath = try BookmarkFileService.shared.move(
+            bookmark: moving,
+            filename: (sourceRelativePath as NSString).lastPathComponent,
+            from: source,
+            to: destination,
+            destDirRelativePath: "Destination"
+        )
+
+        #expect(movedRelativePath == "Destination/Collision (2).webloc")
+        #expect(try Data(contentsOf: existingURL) == existingData)
+        #expect(fm.fileExists(atPath: destination.appendingPathComponent("Collision (2).webloc").path))
+        #expect(!fm.fileExists(atPath: source.appendingPathComponent("Collision.webloc").path))
     }
 
     // MARK: - Sync Duplicate Prevention

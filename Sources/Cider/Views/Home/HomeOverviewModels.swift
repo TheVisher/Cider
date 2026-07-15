@@ -156,6 +156,7 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
     case reject
     case deferReview = "defer"
     case openSource
+    case correctRoute
 
     var id: String { rawValue }
 
@@ -165,6 +166,7 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .reject: return "xmark.circle"
         case .deferReview: return "clock"
         case .openSource: return "arrow.up.right.square"
+        case .correctRoute: return "folder.badge.gearshape"
         }
     }
 
@@ -181,6 +183,8 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
                 return "Resolve target"
             }
             return "Open source"
+        case .correctRoute:
+            return "Correct destination"
         }
     }
 
@@ -202,6 +206,8 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
                 return "Open source evidence"
             }
             return item.dateSuggestionApproval == nil ? "Open source item" : "Open bookmark details"
+        case .correctRoute:
+            return "Choose an exact existing destination"
         }
     }
 
@@ -211,6 +217,7 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .reject: .reject
         case .deferReview: .defer
         case .openSource: nil
+        case .correctRoute: .correct
         }
     }
 }
@@ -280,6 +287,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let candidateRef: String?
     let candidateExpectedReviewState: String?
     let candidateUpdatedAt: Date?
+    let routingDestination: CiderRoutingDecisionTarget?
     let sourceQuote: String?
     let sourceProvenanceLabel: String?
     let memoryKind: String?
@@ -320,6 +328,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         candidateRef: String? = nil,
         candidateExpectedReviewState: String? = nil,
         candidateUpdatedAt: Date? = nil,
+        routingDestination: CiderRoutingDecisionTarget? = nil,
         sourceQuote: String? = nil,
         sourceProvenanceLabel: String? = nil,
         memoryKind: String? = nil,
@@ -359,6 +368,7 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         self.candidateRef = candidateRef
         self.candidateExpectedReviewState = candidateExpectedReviewState
         self.candidateUpdatedAt = candidateUpdatedAt
+        self.routingDestination = routingDestination
         self.sourceQuote = sourceQuote
         self.sourceProvenanceLabel = sourceProvenanceLabel
         self.memoryKind = memoryKind
