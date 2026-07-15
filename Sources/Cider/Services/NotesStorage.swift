@@ -3076,6 +3076,42 @@ final class NotesStorage: ObservableObject {
         }
     }
 
+    /// Journal's atomic capture writer already owns the surrounding database
+    /// transaction. Keep the canonical note row and its searchable projection
+    /// inside that transaction so an indexing failure cannot leave a claimed
+    /// capture with stale search state.
+    func persistJournalNoteInCurrentTransaction(_ db: CiderDatabase, note: Note) throws {
+        try persistNoteToDatabaseInner(db, note: note)
+        _ = try SecondBrainItemContentIndexingService(database: db).rebuild(
+            owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+        )
+    }
+
+    /// Publish a Journal note only after its file, database rows, provenance,
+    /// source cards, and index have all committed. The atomic writer deliberately
+    /// avoids the ordinary best-effort save path until this point.
+    func publishCommittedJournalNote(_ note: Note) {
+        contentCache.removeValue(forKey: note.id)
+        let filename = (note.relativePath as NSString).lastPathComponent
+        index[note.id] = NoteIndexEntry(
+            filename: filename,
+            folderID: note.folderID,
+            labelIDs: note.labelIDs,
+            createdAt: note.createdAt,
+            isPinned: note.isPinned ? true : nil
+        )
+        if let existing = notes.firstIndex(where: { $0.id == note.id }) {
+            notes[existing] = note
+        } else {
+            notes.append(note)
+        }
+        notes.sort { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+            return lhs.createdAt > rhs.createdAt
+        }
+        lastContentIOIssue = nil
+    }
+
     private func indexNoteContent(_ db: CiderDatabase, noteID: UUID) throws {
         _ = try SecondBrainItemContentIndexingService(database: db).rebuild(
             owner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID.uuidString)

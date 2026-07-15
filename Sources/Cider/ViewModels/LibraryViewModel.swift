@@ -51,7 +51,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func rebuildItems() {
-        let journalProjection = JournalLibraryReadModel.build(from: NotesStorage.shared.notes)
+        let journalProjection = JournalLibraryReadModel.buildFromCanonicalStore(from: NotesStorage.shared.notes)
         let journalItems: [LibraryItemV2] = journalProjection.entries.isEmpty
             ? []
             : [.journal(journalProjection.container)]
@@ -72,6 +72,7 @@ final class LibraryViewModel: ObservableObject {
         let todoItems = TodoCardStorage.shared.todoCards.map { LibraryItemV2.todo($0) }
         let vaultFileItems = VaultFileService.shared.files
             .filter { !$0.isProjectArtifact }
+            .filter { !$0.isJournalSourceOriginal }
             .map { LibraryItemV2.vaultFile($0) }
 
         let all = journalItems + bookmarkItems + noteItems + dateCardItems + contactItems + todoItems + vaultFileItems

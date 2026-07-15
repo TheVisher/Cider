@@ -37,6 +37,10 @@ struct VaultFile: Identifiable, Hashable, Codable {
         return ["QA", "Plans", "Handoffs", "Decisions", "Notes"].contains(components[2])
     }
 
+    var isJournalSourceOriginal: Bool {
+        relativePath == "Journal" || relativePath.hasPrefix("Journal/")
+    }
+
     // MARK: - Codable
 
     private enum CodingKeys: String, CodingKey {

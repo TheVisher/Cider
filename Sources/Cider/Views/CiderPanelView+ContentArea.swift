@@ -475,7 +475,7 @@ extension CiderPanelView {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .journal:
-                journalDetailBody(projection: JournalLibraryReadModel.build(from: notesStorage.notes))
+                journalDetailBody(projection: JournalLibraryReadModel.buildFromCanonicalStore(from: notesStorage.notes))
             case .search:
                 let query: String = {
                     if case .library(.search(let query)) = workspaceRouter.currentRoute {

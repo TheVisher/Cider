@@ -44,6 +44,7 @@ struct JournalCaptureCard: Identifiable, Hashable {
     let sourceContent: String
     let sourceSpan: JournalSourceSpan?
     let sourceEntry: JournalLibraryEntry
+    let mediaSources: [JournalMediaSourceCard]
 
     func displayTimestamp(format: JournalTimestampFormat) -> String {
         guard format == .twelveHour else { return timestamp24Hour }
@@ -72,6 +73,28 @@ struct JournalCaptureCard: Identifiable, Hashable {
             in: sourceContent,
             isCanonicalItemResolvable: isCanonicalItemResolvable
         )
+    }
+}
+
+struct JournalMediaSourceCard: Identifiable, Hashable {
+    let id: String
+    let noteID: UUID
+    let timestamp24Hour: String
+    let capturedAt: Date
+    let kind: JournalMediaKind
+    let displayTitle: String
+    let rawFilename: String
+    let sourceID: String
+    let mediaItemID: UUID
+    let relativePath: String
+    let isOriginalAvailable: Bool
+
+    var canonicalItemRef: LibraryEntityRef {
+        LibraryEntityRef(type: .vaultFile, entityID: mediaItemID)
+    }
+
+    var availabilityLabel: String {
+        isOriginalAvailable ? displayTitle : "\(displayTitle) · Original unavailable"
     }
 }
 
@@ -187,6 +210,7 @@ struct JournalLibraryEntry: Identifiable, Hashable {
     let dateLabel: String
     let content: String
     let metadata: JournalEntryMetadata
+    let mediaSources: [JournalMediaSourceCard]
 
     var displayTitle: String {
         metadata.displayTitle
@@ -246,7 +270,8 @@ struct JournalLibraryDay: Identifiable, Hashable {
                     captureSource: entry.note.relativePath,
                     sourceContent: entry.content,
                     sourceSpan: nil,
-                    sourceEntry: entry
+                    sourceEntry: entry,
+                    mediaSources: entry.mediaSources
                 )
             }
         }
@@ -262,7 +287,8 @@ struct JournalLibraryDay: Identifiable, Hashable {
                 captureSource: section.captureSource,
                 sourceContent: section.sourceSnippet,
                 sourceSpan: section.sourceSpan,
-                sourceEntry: entry
+                sourceEntry: entry,
+                mediaSources: entry.mediaSources.filter { $0.timestamp24Hour == section.timestamp24Hour }
             )
         }
     }
@@ -299,7 +325,11 @@ struct JournalLibraryReadModel: Hashable {
         days.first
     }
 
-    static func build(from notes: [Note], calendar: Calendar = Self.calendar) -> JournalLibraryReadModel {
+    static func build(
+        from notes: [Note],
+        mediaSources: [JournalMediaSourceCard] = [],
+        calendar: Calendar = Self.calendar
+    ) -> JournalLibraryReadModel {
         let preview = JournalMigrationPreviewService().preview(notes: notes)
         let entries = preview.rows.compactMap { row -> JournalLibraryEntry? in
             guard row.isJournalLibraryEligible,
@@ -313,7 +343,8 @@ struct JournalLibraryReadModel: Hashable {
                 date: date,
                 dateLabel: dateLabel,
                 content: row.note.resolvedContent,
-                metadata: Self.metadata(for: row, date: date, dateLabel: dateLabel)
+                metadata: Self.metadata(for: row, date: date, dateLabel: dateLabel),
+                mediaSources: mediaSources.filter { $0.noteID == row.note.id }
             )
         }
         .sorted { lhs, rhs in
@@ -343,6 +374,19 @@ struct JournalLibraryReadModel: Hashable {
             days: days,
             navigation: Self.navigation(for: days, calendar: calendar)
         )
+    }
+
+    @MainActor
+    static func buildFromCanonicalStore(
+        from notes: [Note],
+        database: CiderDatabase = .shared,
+        vaultRoot: URL = StoragePaths.cachedVaultDirectoryURL
+    ) -> JournalLibraryReadModel {
+        let sources = (try? JournalMediaSourceCardReadService(
+            database: database,
+            vaultRoot: vaultRoot
+        ).sourceCards(noteIDs: Set(notes.map(\.id)))) ?? []
+        return build(from: notes, mediaSources: sources)
     }
 
     static func formatJournalTimestamps(in content: String, format: JournalTimestampFormat) -> String {

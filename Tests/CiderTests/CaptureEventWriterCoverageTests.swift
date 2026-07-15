@@ -20,6 +20,11 @@ struct CaptureEventWriterCoverageTests {
                 outcome: "completed"
             ),
             .init(
+                relativePath: "Sources/Cider/Services/JournalAtomicCaptureWriter.swift",
+                functionName: "persistSourceCards",
+                outcome: "completed"
+            ),
+            .init(
                 relativePath: "Sources/CiderCLI/CiderCLI.swift",
                 functionName: "recordJournalCaptureProvenance",
                 outcome: "completed"

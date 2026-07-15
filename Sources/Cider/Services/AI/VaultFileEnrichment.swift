@@ -19,6 +19,10 @@ final class VaultFileEnrichment {
     /// Schedule enrichment for a vault file. Only images are enriched.
     func schedule(for file: VaultFile) {
         guard file.fileType == .image else { return }
+        // Journal originals keep source-backed titles/provenance and are read
+        // through their capture cards. Do not let generic file enrichment
+        // overwrite that identity or turn Journal intake into Library work.
+        guard !file.isJournalSourceOriginal else { return }
         // Skip if already enriched — ocrText "" means "OCR ran, no text found"
         guard file.ocrText == nil && file.dominantColors == nil else { return }
 
@@ -33,7 +37,10 @@ final class VaultFileEnrichment {
     /// Schedule enrichment for all un-enriched image files.
     func scheduleAll() {
         let imageFiles = VaultFileService.shared.files.filter {
-            $0.fileType == .image && $0.ocrText == nil && $0.dominantColors == nil
+            $0.fileType == .image
+                && !$0.isJournalSourceOriginal
+                && $0.ocrText == nil
+                && $0.dominantColors == nil
         }
         for file in imageFiles {
             schedule(for: file)

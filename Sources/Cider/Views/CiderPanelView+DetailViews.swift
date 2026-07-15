@@ -221,7 +221,7 @@ extension CiderPanelView {
                 VaultFileDetailView(file: vaultFile, onDismiss: closeGenericDetail)
             }
         } else if isJournalDetailOpen {
-            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+            let projection = JournalLibraryReadModel.buildFromCanonicalStore(from: notesStorage.notes)
             GenericItemDetailPanel(
                 title: "Journal",
                 detailViewMode: detailViewMode,
@@ -478,7 +478,7 @@ extension CiderPanelView {
             .clipShape(RoundedRectangle(cornerRadius: CiderPanelDesign.cornerRadius, style: .continuous))
             .transition(.opacity)
         } else if isJournalDetailOpen {
-            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+            let projection = JournalLibraryReadModel.buildFromCanonicalStore(from: notesStorage.notes)
             GenericItemDetailPanel(
                 title: "Journal",
                 detailViewMode: detailViewMode,
@@ -719,7 +719,7 @@ extension CiderPanelView {
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, Spacing.md)
         } else if isJournalDetailOpen {
-            let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+            let projection = JournalLibraryReadModel.buildFromCanonicalStore(from: notesStorage.notes)
             GenericItemDetailPanel(
                 title: "Journal",
                 detailViewMode: detailViewMode,

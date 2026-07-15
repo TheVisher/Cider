@@ -263,6 +263,21 @@ private struct JournalCaptureCardsView: View {
                                     return .discarded
                                 }
                             })
+
+                            if !card.mediaSources.isEmpty {
+                                LazyVGrid(
+                                    columns: [GridItem(.adaptive(minimum: 180), spacing: Spacing.sm)],
+                                    alignment: .leading,
+                                    spacing: Spacing.sm
+                                ) {
+                                    ForEach(card.mediaSources) { source in
+                                        JournalMediaSourceCardView(source: source) {
+                                            guard source.isOriginalAvailable else { return }
+                                            onOpenCanonicalItem(source.canonicalItemRef)
+                                        }
+                                    }
+                                }
+                            }
                         }
                         .padding(Spacing.md)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,6 +288,61 @@ private struct JournalCaptureCardsView: View {
                 }
                 .padding(Spacing.md)
             }
+        }
+    }
+}
+
+private struct JournalMediaSourceCardView: View {
+    let source: JournalMediaSourceCard
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: Spacing.sm) {
+                thumbnail
+
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    Text(source.displayTitle)
+                        .font(CiderFont.captionSemibold)
+                        .foregroundColor(CiderColors.primary)
+                        .lineLimit(2)
+
+                    Text(source.isOriginalAvailable ? source.rawFilename : "Original unavailable")
+                        .font(CiderFont.caption)
+                        .foregroundColor(source.isOriginalAvailable ? CiderColors.tertiary : CiderColors.warning)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(CiderColors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!source.isOriginalAvailable)
+        .accessibilityLabel(source.availabilityLabel)
+        .help(source.isOriginalAvailable ? "Open in Cider" : "The retained original is missing")
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        if source.kind == .photo,
+           source.isOriginalAvailable,
+           let image = NSImage(contentsOf: StoragePaths.cachedVaultDirectoryURL.appendingPathComponent(source.relativePath)) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
+        } else {
+            Image(systemName: source.kind == .audio ? "waveform" : source.kind == .photo ? "photo" : "paperclip")
+                .font(CiderFont.bodySemibold)
+                .foregroundColor(CiderColors.secondary)
+                .frame(width: 48, height: 48)
+                .background(CiderColors.surfaceInput)
+                .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
         }
     }
 }

@@ -101,6 +101,14 @@ struct JournalStoredOriginal: Equatable, Sendable, Comparable {
     }
 }
 
+struct JournalValidatedMediaBatch: Equatable, Sendable {
+    fileprivate let requests: [JournalMediaIntakeRequest]
+    fileprivate let validated: [LocalFileValidatedMetadata]
+
+    /// Ordered, path-free identities for exact-retry comparison.
+    var contentHashes: [String] { validated.map(\.sha256) }
+}
+
 /// Journal-owned adapter that retains an immutable original before any source-card
 /// or transcription work. It deliberately composes VaultFile storage without
 /// inheriting Chat composer policy.
@@ -160,25 +168,120 @@ final class JournalMediaIntakeService {
         _ request: JournalMediaIntakeRequest,
         createSourceCard: @MainActor (JournalStoredOriginal) throws -> T
     ) throws -> T {
-        let validated: LocalFileValidatedMetadata
+        try ingestBatch([request]) { originals in
+            guard let original = originals.first else {
+                throw LocalFileIntakeError(.persistenceFailed)
+            }
+            return try createSourceCard(original)
+        }
+    }
+
+    /// Validates every source before materializing any of them, then commits all
+    /// originals and caller-owned source-card state in one SQLite transaction.
+    /// This is the Journal writer seam for one logical capture with many media
+    /// sources; callers must not loop over the single-file API when atomicity is
+    /// required.
+    func ingestBatch<T>(
+        _ requests: [JournalMediaIntakeRequest],
+        createSourceCards: @MainActor ([JournalStoredOriginal]) throws -> T
+    ) throws -> T {
+        try ingestBatch(try validateBatch(requests), createSourceCards: createSourceCards)
+    }
+
+    /// Produces the exact validated source identities used by ingestion. Callers
+    /// may persist the ordered content hashes as part of a durable request receipt.
+    func validateBatch(_ requests: [JournalMediaIntakeRequest]) throws -> JournalValidatedMediaBatch {
+        guard !requests.isEmpty else {
+            return JournalValidatedMediaBatch(requests: [], validated: [])
+        }
+        let validated: [LocalFileValidatedMetadata]
         do {
-            validated = try validator.validate(
-                request.sourceURL,
-                policy: .init(maximumByteSize: effectiveMaximumByteSize)
-            )
+            validated = try requests.map { request in
+                try validator.validate(
+                    request.sourceURL,
+                    policy: .init(maximumByteSize: effectiveMaximumByteSize)
+                )
+            }
         } catch let error as LocalFileIntakeError {
             throw JournalMediaIntakeError(.fileIntake, intakeCode: error.code)
         } catch {
             throw JournalMediaIntakeError(.fileIntake)
         }
-        return try materializeValidated(validated, request: request, createSourceCard: createSourceCard)
+
+        do {
+            for (metadata, request) in zip(validated, requests) {
+                try validate(metadata, for: request)
+            }
+            return JournalValidatedMediaBatch(requests: requests, validated: validated)
+        } catch let error as LocalFileIntakeError {
+            throw JournalMediaIntakeError(.fileIntake, intakeCode: error.code)
+        } catch let error as JournalMediaIntakeError {
+            throw error
+        } catch {
+            throw JournalMediaIntakeError(.fileIntake)
+        }
     }
 
-    private func materializeValidated<T>(
-        _ validated: LocalFileValidatedMetadata,
-        request: JournalMediaIntakeRequest,
-        createSourceCard: @MainActor (JournalStoredOriginal) throws -> T
+    func ingestBatch<T>(
+        _ batch: JournalValidatedMediaBatch,
+        createSourceCards: @MainActor ([JournalStoredOriginal]) throws -> T
     ) throws -> T {
+        let requests = batch.requests
+        let validated = batch.validated
+        guard !requests.isEmpty else { return try createSourceCards([]) }
+        do {
+            let ingestionRequests = zip(validated, requests).map { metadata, request in
+                let stableID = Self.stableFileID(sourceDigest: request.stableSourceDigest, kind: request.kind)
+                return VaultFileIngestionService.Request(
+                    validated: metadata,
+                    fileID: stableID,
+                    destinationRelativeDirectory: destinationDirectory(for: request.kind),
+                    // The immutable original keeps the caller's raw filename.
+                    // Friendly Journal copy belongs in the canonical title
+                    // overlay and must not leak back into file identity.
+                    filename: metadata.displayName,
+                    filenameStrategy: .prefixWithStableID,
+                    fileType: canonicalFileType(for: metadata.fileExtension, kind: request.kind),
+                    folderID: nil,
+                    title: request.displayName
+                        ?? (metadata.displayName as NSString).deletingPathExtension,
+                    timestamp: request.capturedAt
+                )
+            }
+            return try ingestionService.ingestBatch(ingestionRequests) { results in
+                guard results.count == requests.count else {
+                    throw LocalFileIntakeError(.persistenceFailed)
+                }
+                let originals = zip(zip(results, validated), requests).map { pair, request in
+                    let (result, metadata) = pair
+                    let stableID = Self.stableFileID(sourceDigest: request.stableSourceDigest, kind: request.kind)
+                    return JournalStoredOriginal(
+                        file: result.file,
+                        sourceID: request.sourceID,
+                        sourceCardID: Self.sourceCardID(capturedAt: request.capturedAt, stableID: stableID),
+                        capturedAt: request.capturedAt,
+                        kind: request.kind,
+                        byteSize: metadata.byteSize,
+                        sha256: metadata.sha256,
+                        retention: .preserveOriginal,
+                        wasReused: result.wasReused
+                    )
+                }
+                return try createSourceCards(originals)
+            }
+        } catch let error as LocalFileIntakeError {
+            throw JournalMediaIntakeError(.fileIntake, intakeCode: error.code)
+        } catch let error as JournalMediaIntakeError {
+            throw error
+        } catch {
+            throw JournalMediaIntakeError(.fileIntake)
+        }
+    }
+
+    private func validate(
+        _ validated: LocalFileValidatedMetadata,
+        for request: JournalMediaIntakeRequest
+    ) throws {
         guard supports(validated.fileExtension, kind: request.kind) else {
             throw JournalMediaIntakeError(.unsupportedType)
         }
@@ -219,47 +322,6 @@ final class JournalMediaIntakeService {
             }
             guard let duration else { throw JournalMediaIntakeError(.durationUnavailable) }
             guard duration <= maximumDuration else { throw JournalMediaIntakeError(.durationExceeded) }
-        }
-
-        let stableID = Self.stableFileID(sourceDigest: request.stableSourceDigest, kind: request.kind)
-        let fileType = canonicalFileType(for: validated.fileExtension, kind: request.kind)
-        do {
-            return try ingestionService.ingestBatch([.init(
-                validated: validated,
-                fileID: stableID,
-                destinationRelativeDirectory: destinationDirectory(for: request.kind),
-                filename: request.displayName ?? validated.displayName,
-                filenameStrategy: .prefixWithStableID,
-                fileType: fileType,
-                folderID: nil,
-                title: request.displayName ?? validated.displayName,
-                timestamp: request.capturedAt
-            )]) { results in
-                guard let result = results.first else {
-                    throw LocalFileIntakeError(.persistenceFailed)
-                }
-                if result.wasReused, result.file.createdAt != request.capturedAt {
-                    throw LocalFileIntakeError(.identityConflict)
-                }
-                let original = JournalStoredOriginal(
-                    file: result.file,
-                    sourceID: request.sourceID,
-                    sourceCardID: Self.sourceCardID(capturedAt: request.capturedAt, stableID: stableID),
-                    capturedAt: request.capturedAt,
-                    kind: request.kind,
-                    byteSize: validated.byteSize,
-                    sha256: validated.sha256,
-                    retention: .preserveOriginal,
-                    wasReused: result.wasReused
-                )
-                return try createSourceCard(original)
-            }
-        } catch let error as LocalFileIntakeError {
-            throw JournalMediaIntakeError(.fileIntake, intakeCode: error.code)
-        } catch let error as JournalMediaIntakeError {
-            throw error
-        } catch {
-            throw JournalMediaIntakeError(.fileIntake)
         }
     }
 

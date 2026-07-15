@@ -434,7 +434,7 @@ extension CiderPanelView {
         let wasExpanded = isAnyDetailOpen
         clearDetailSelectionState(except: .journal)
 
-        let projection = JournalLibraryReadModel.build(from: notesStorage.notes)
+        let projection = JournalLibraryReadModel.buildFromCanonicalStore(from: notesStorage.notes)
         isJournalDetailOpen = true
         journalNavigationVisible = true
         journalMetadataVisible = false

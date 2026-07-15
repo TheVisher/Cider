@@ -2491,7 +2491,12 @@ struct CiderCLI {
                         sourceContext: sourceContext
                     )
                 case .journal(let raw):
-                    var payload = try captureAddJournalPayload(rawContent: raw, args: args, storage: NotesStorage.shared)
+                    var payload: [String: Any]
+                    if parseFlagAll("--media", from: args).isEmpty {
+                        payload = try captureAddJournalPayload(rawContent: raw, args: args, storage: NotesStorage.shared)
+                    } else {
+                        payload = try captureAddJournalMediaPayload(rawContent: raw, args: args, storage: NotesStorage.shared)
+                    }
                     if let testRunID,
                        let item = payload["item"] as? [String: Any],
                        let id = item["id"] as? String,
@@ -2815,13 +2820,14 @@ struct CiderCLI {
     }
 
     static func printCaptureUsage() {
-        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--media <local-path> --media-title <friendly-title> --media-id <source-id> --media-kind photo|audio|media ...] [--idempotency-key <key>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill")
         print("       cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]  # read-only resumable evidence drilldown")
         print("       cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]  # read-only content-free aggregate")
         print("       cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
         print("       Journal capture: use `cider-cli capture add --kind journal --date today --stdin --json` so readable Markdown, metadata, provenance, indexing, and reviewable candidates stay connected.")
+        print("       Atomic Journal media: repeat --media once per local source; repeat --media-title/--media-id/--media-kind once per source when supplied.")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
@@ -4518,6 +4524,166 @@ struct CiderCLI {
             provenance: provenance,
             graphCandidates: graphCandidates
         )
+    }
+
+    static func captureAddJournalMediaPayload(
+        rawContent: String,
+        args: [String],
+        storage: NotesStorage
+    ) throws -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            throw CaptureAddArgumentError.message("Atomic Journal media capture requires the Cider database; nothing was changed.")
+        }
+        let date = try resolveDailyNoteDateString(parseFlag("--date", from: args))
+        let time = parseFlag("--time", from: args) ?? twentyFourHourTimeFormatter.string(from: Date())
+        guard isValidClockTimeString(time) else {
+            throw CaptureAddArgumentError.message("--time must be HH:mm")
+        }
+        let mediaPaths = parseFlagAll("--media", from: args)
+        let mediaTitles = parseFlagAll("--media-title", from: args)
+        let mediaIDs = parseFlagAll("--media-id", from: args)
+        let mediaKinds = parseFlagAll("--media-kind", from: args)
+        for (values, flag) in [(mediaTitles, "--media-title"), (mediaIDs, "--media-id"), (mediaKinds, "--media-kind")]
+            where !values.isEmpty && values.count != mediaPaths.count {
+            throw CaptureAddArgumentError.message("\(flag) must be supplied once per --media source, or omitted.")
+        }
+
+        let media: [JournalAtomicMediaSource] = try mediaPaths.enumerated().map { index, rawPath in
+            let path = NSString(string: rawPath).expandingTildeInPath
+            let url = URL(fileURLWithPath: path)
+            let kind: JournalMediaKind
+            if mediaKinds.isEmpty {
+                kind = journalMediaKind(forPathExtension: url.pathExtension)
+            } else {
+                guard let parsed = JournalMediaKind(rawValue: mediaKinds[index].localizedLowercase) else {
+                    throw CaptureAddArgumentError.message("--media-kind must be photo, audio, or media.")
+                }
+                kind = parsed
+            }
+            let stablePathDigest = LocalFileIntakeValidator.sha256(Data(url.standardizedFileURL.path.utf8))
+            return JournalAtomicMediaSource(
+                sourceURL: url,
+                sourceID: mediaIDs.isEmpty ? "cli-local-sha256-\(stablePathDigest)" : mediaIDs[index],
+                kind: kind,
+                displayTitle: mediaTitles.isEmpty ? nil : mediaTitles[index],
+                mimeType: nil
+            )
+        }
+        let sourceContext = captureSourceContext(from: args, originalText: rawContent)
+        let source = journalAppendSource(commandSource: "capture.add", sourceContext: sourceContext)
+        let requestIdentity = parseFlag("--idempotency-key", from: args)
+            ?? sourceContext?.messageID.map { "message:\($0)" }
+            ?? "cli:\(LocalFileIntakeValidator.sha256(Data("\(date)|\(time)|\(rawContent)|\(media.map(\.sourceID).joined(separator: "|"))".utf8)))"
+        let capturedAt = try journalCapturedAt(date: date, time: time)
+        let receipt = try JournalAtomicCaptureWriter(
+            database: CiderDatabase.shared,
+            notesStorage: storage,
+            vaultRoot: StoragePaths.cachedVaultDirectoryURL
+        ).capture(.init(
+            journalDate: date,
+            time: time,
+            text: rawContent,
+            source: source,
+            capturedAt: capturedAt,
+            idempotencyKey: requestIdentity,
+            sourceContext: sourceContext,
+            media: media
+        ))
+        return journalAtomicCapturePayload(receipt, sourceContext: sourceContext)
+    }
+
+    static func journalMediaKind(forPathExtension pathExtension: String) -> JournalMediaKind {
+        let ext = pathExtension.localizedLowercase
+        if ["bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp"].contains(ext) {
+            return .photo
+        }
+        if ["aac", "aiff", "alac", "caf", "flac", "m4a", "mp3", "ogg", "wav", "wma"].contains(ext) {
+            return .audio
+        }
+        return .media
+    }
+
+    static func journalCapturedAt(date: String, time: String) throws -> Date {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        guard let value = formatter.date(from: "\(date) \(time)") else {
+            throw CaptureAddArgumentError.message("Journal date and time could not be resolved.")
+        }
+        return value
+    }
+
+    static func journalAtomicCapturePayload(
+        _ receipt: JournalAtomicCaptureReceipt,
+        sourceContext: CaptureSourceContext?
+    ) -> [String: Any] {
+        func item(_ ref: JournalAtomicCaptureReceipt.ItemRef) -> [String: Any] {
+            [
+                "type": ref.type,
+                "id": ref.id,
+                "ref": ref.canonicalRef,
+                "title": ref.title,
+                "relativePath": ref.relativePath ?? NSNull(),
+            ]
+        }
+        func source(_ ref: JournalAtomicCaptureReceipt.SourceRef) -> [String: Any] {
+            [
+                "id": ref.id,
+                "ref": ref.canonicalRef,
+                "kind": ref.kind,
+                "capturedAt": DatabaseHelpers.encode(ref.capturedAt),
+                "sourceID": ref.sourceID,
+                "displayTitle": ref.displayTitle,
+                "rawFilename": ref.rawFilename ?? NSNull(),
+                "mediaItem": ref.mediaItem.map(item) ?? NSNull(),
+            ]
+        }
+        let safeNextCommands = [
+            "cider-cli item get note \(receipt.item.id) --json",
+            "cider-cli item context note \(receipt.item.id) --json",
+        ]
+        var payload: [String: Any] = [
+            "ok": true,
+            "changed": !receipt.wasReused,
+            "readOnly": false,
+            "command": "capture.add",
+            "kind": "journal",
+            "captureKind": "journal",
+            "atomic": true,
+            "writer": "atomic_media_v1",
+            "date": receipt.journalDate,
+            "time": receipt.time,
+            "item": item(receipt.item),
+            "receipt": [
+                "id": receipt.receiptID,
+                "wasReused": receipt.wasReused,
+                "captureEventRef": receipt.captureEventRef,
+                "item": item(receipt.item),
+                "textSource": source(receipt.textSource),
+                "mediaSources": receipt.mediaSources.map(source),
+            ],
+            "source": source(receipt.textSource),
+            "media": receipt.mediaSources.map(source),
+            "captureEventID": receipt.receiptID,
+            "duplicate": ["status": receipt.wasReused ? "exact_retry_reused" : "new"],
+            "routing": [
+                "reviewNeeded": false,
+                "status": "recorded",
+                "reason": "Journal media sources are linked directly to the canonical day.",
+            ],
+            "indexing": [
+                "status": "indexed",
+                "ownerType": "note",
+                "ownerID": receipt.item.id,
+                "mediaOwnerCount": receipt.mediaSources.count,
+            ],
+            "nextSafeAction": "inspect_item",
+            "safeNextCommands": safeNextCommands,
+        ]
+        if let sourceContext { payload["sourceContext"] = sourceContext.toDictionary() }
+        return payload
     }
 
     static func journalAppendSource(commandSource: String, sourceContext: CaptureSourceContext?) -> String {
@@ -14238,6 +14404,7 @@ struct CiderCLI {
             "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
             "--source-meta", "--date", "--time", "--location", "--details", "--name",
             "--relationship", "--email", "--phone", "--test-run", "--test-marker",
+            "--media", "--media-title", "--media-id", "--media-kind", "--idempotency-key",
         ]
         let booleanFlags: Set<String> = [
             "--stdin", "--json", "--no-wait", "--all-day", "--help", "-h",
