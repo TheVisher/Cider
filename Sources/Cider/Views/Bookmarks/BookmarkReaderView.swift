@@ -111,7 +111,7 @@ struct BookmarkReaderView: NSViewRepresentable {
                 if url.host == currentHost && url.path == currentPath {
                     return .cancel
                 }
-                openURLSafely(url)
+                CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
                 return .cancel
             }
             return .allow

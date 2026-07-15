@@ -2071,7 +2071,9 @@ private struct KanbanCommentReferenceLinkRow: View {
     let reference: KanbanCardCommentThreadPolicy.ReferenceLink
 
     var body: some View {
-        Link(destination: reference.url) {
+        Button {
+            CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(reference.url))
+        } label: {
             HStack(alignment: .center, spacing: Spacing.xs) {
                 Image(systemName: reference.kind == .image ? "photo" : "link")
                     .font(CiderFont.caption)

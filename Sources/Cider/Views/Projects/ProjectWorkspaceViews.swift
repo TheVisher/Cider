@@ -116,7 +116,7 @@ struct ProjectWorkspaceOverviewView: View {
 
     private func resourceLink(_ resource: ProjectWorkspaceResourceRow) -> some View {
         Button {
-            NSWorkspace.shared.open(resource.url)
+            CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(resource.url))
         } label: {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: resource.systemImage)
@@ -577,7 +577,7 @@ private struct ProjectWorkspaceCoreDocPreview: View {
             Spacer(minLength: Spacing.md)
 
             Button {
-                NSWorkspace.shared.activateFileViewerSelecting([artifact.fileURL])
+                CiderOpenPolicy.shared.openIfAllowed(.revealInFinder(artifact.fileURL))
             } label: {
                 Image(systemName: "folder")
                     .font(CiderFont.bodySemibold)

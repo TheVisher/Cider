@@ -255,34 +255,29 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
         beforeDiskWrite: @Sendable () -> Void
     ) throws -> AgentRoomsRoomExportResult {
         beforeDiskWrite()
-        guard destination.isFileURL,
-              !destination.lastPathComponent.isEmpty,
-              destination.standardizedFileURL == destination.resolvingSymlinksInPath().standardizedFileURL
-                    || !fileManager.fileExists(atPath: destination.path)
-        else { throw AgentRoomsRoomExportError.invalidDestination }
-        guard !fileManager.fileExists(atPath: destination.path) else {
-            throw AgentRoomsRoomExportError.destinationExists
-        }
-        var parentIsDirectory: ObjCBool = false
-        guard fileManager.fileExists(
-            atPath: destination.deletingLastPathComponent().path,
-            isDirectory: &parentIsDirectory
-        ), parentIsDirectory.boolValue else {
-            throw AgentRoomsRoomExportError.invalidDestination
-        }
-
         let markdownURL = destination.appendingPathComponent(Self.markdownFileName)
         let manifestURL = destination.appendingPathComponent(Self.manifestFileName)
-        var createdDestination = false
         do {
-            try fileManager.createDirectory(at: destination, withIntermediateDirectories: false)
-            createdDestination = true
-            try Data(package.markdown.utf8).write(to: markdownURL, options: [.atomic])
-            try package.manifestData.write(to: manifestURL, options: [.atomic])
-        } catch {
-            if createdDestination {
-                try? fileManager.removeItem(at: destination)
+            try CiderExportWritePolicy(fileManager: fileManager).writeDirectory(
+                to: destination,
+                overwrite: .prohibit
+            ) { staging in
+                try Data(package.markdown.utf8).write(
+                    to: staging.appendingPathComponent(Self.markdownFileName),
+                    options: [.withoutOverwriting]
+                )
+                try package.manifestData.write(
+                    to: staging.appendingPathComponent(Self.manifestFileName),
+                    options: [.withoutOverwriting]
+                )
             }
+        } catch CiderExportWriteError.destinationExists {
+            throw AgentRoomsRoomExportError.destinationExists
+        } catch CiderExportWriteError.invalidDestination,
+                CiderExportWriteError.unsafeDestination,
+                CiderExportWriteError.destinationChanged {
+            throw AgentRoomsRoomExportError.invalidDestination
+        } catch {
             throw AgentRoomsRoomExportError.writeFailed
         }
         return AgentRoomsRoomExportResult(

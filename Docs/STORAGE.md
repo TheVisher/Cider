@@ -124,6 +124,7 @@ The target future model is native structured sections rendered into dashboard/so
 - Avoid storage paths that let older sidecar/cache data overwrite newer SQLite state.
 - Compare before writing watcher-managed files to avoid write loops.
 - External file moves, folder moves, and URL rewrites must persist identity rather than adopting duplicate rows.
+- User-selected filesystem exports must use `CiderExportWritePolicy`. The default is create-new/no-replace; explicit confirmed replacement is limited to typed single-file intent, while directory/package export never overwrites. Staging, redirect/identity revalidation, cancellation cleanup, and bounded rollback apply only to the filesystem boundary and do not imply a cross-database transaction.
 - Keep backups usable and test restore logic in isolated databases.
 
 ## Vault Shape

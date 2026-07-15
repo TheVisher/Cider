@@ -102,7 +102,7 @@ struct JournalDetailMarkdownPresentationTests {
         let journalViews = try String(contentsOf: journalViewsURL, encoding: .utf8)
 
         #expect(journalViews.contains(".environment(\\.openURL, OpenURLAction"))
-        #expect(journalViews.contains("openURLSafely(url)"))
+        #expect(journalViews.contains("CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))"))
         #expect(journalViews.contains("isCanonicalItemResolvable: isCanonicalItemResolvable"))
         #expect(journalViews.contains("onOpenCanonicalItem(ref)"))
         #expect(journalViews.contains("return .discarded"))

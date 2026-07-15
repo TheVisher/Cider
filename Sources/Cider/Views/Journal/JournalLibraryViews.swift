@@ -254,7 +254,7 @@ private struct JournalCaptureCardsView: View {
                                     isCanonicalItemResolvable: isCanonicalItemResolvable
                                 ) {
                                 case .external(let url):
-                                    openURLSafely(url)
+                                    CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
                                     return .handled
                                 case .item(let ref):
                                     onOpenCanonicalItem(ref)

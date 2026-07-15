@@ -104,7 +104,7 @@ private struct AboutLink: View {
 
     private func openURL() {
         if let url = URL(string: url) {
-            NSWorkspace.shared.open(url)
+            CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
         }
     }
 }

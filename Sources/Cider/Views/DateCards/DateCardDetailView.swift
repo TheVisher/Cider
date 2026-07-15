@@ -76,10 +76,13 @@ struct DateCardDetailView: View {
                     }
 
                     if let url = dateCard.actionURL {
-                        Link(destination: url) {
+                        Button {
+                            CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
+                        } label: {
                             Label("Open Link", systemImage: "link")
                                 .font(CiderFont.bodyMedium)
                         }
+                        .buttonStyle(.link)
                         .help(dateCard.actionURLString ?? "Open action link")
                     }
 

@@ -300,11 +300,11 @@ struct VaultFileCardView: View {
     }
 
     private func openInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([file.absoluteURL])
+        CiderOpenPolicy.shared.openIfAllowed(.revealInFinder(file.absoluteURL))
     }
 
     private func openWithDefaultApp() {
-        NSWorkspace.shared.open(file.absoluteURL)
+        CiderOpenPolicy.shared.openIfAllowed(.localFile(file.absoluteURL))
     }
 
     private func loadThumbnail() async {
@@ -451,10 +451,10 @@ struct VaultFileListRow: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Open in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([file.absoluteURL])
+                CiderOpenPolicy.shared.openIfAllowed(.revealInFinder(file.absoluteURL))
             }
             Button("Open with Default App") {
-                NSWorkspace.shared.open(file.absoluteURL)
+                CiderOpenPolicy.shared.openIfAllowed(.localFile(file.absoluteURL))
             }
         }
     }

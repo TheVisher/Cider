@@ -31,10 +31,13 @@ struct TodoDetailView: View {
                 }
 
                 if let url = todo.actionURL {
-                    Link(destination: url) {
+                    Button {
+                        CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
+                    } label: {
                         Label("Open Link", systemImage: "link")
                             .font(CiderFont.bodyMedium)
                     }
+                    .buttonStyle(.link)
                     .help(todo.actionURLString ?? "Open action link")
                 }
 
@@ -205,13 +208,16 @@ struct TodoDetailView: View {
                                 .font(CiderFont.captionMedium)
                                 .foregroundColor(CiderColors.controlAccent)
                             if let url = URL(string: urlString.hasPrefix("http") ? urlString : "https://\(urlString)") {
-                                Link(destination: url) {
+                                Button {
+                                    CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
+                                } label: {
                                     Text(urlString)
                                         .font(CiderFont.caption)
                                         .foregroundColor(CiderColors.controlAccent)
                                         .lineLimit(1)
                                         .underline()
                                 }
+                                .buttonStyle(.plain)
                                 .help("Open \(urlString)")
                             } else {
                                 Text(urlString)

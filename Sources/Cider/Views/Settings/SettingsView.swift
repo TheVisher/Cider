@@ -155,9 +155,7 @@ struct SettingsView: View {
     }
 
     func openAccessibilityPreferences() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+        CiderOpenPolicy.shared.openIfAllowed(.system(.accessibilityPrivacySettings))
     }
 
     func sqliteBackupDirectory() -> URL? {
@@ -184,7 +182,7 @@ struct SettingsView: View {
     func revealSQLiteBackupsFolder() {
         guard let directory = sqliteBackupDirectory() else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(directory)
+        CiderOpenPolicy.shared.openIfAllowed(.localFile(directory))
     }
 }
 

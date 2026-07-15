@@ -357,7 +357,7 @@ private struct FloatingBookmarkDetailContent: View {
 
     private func openURL() {
         guard let url = URL(string: draft.sourceURL) else { return }
-        NSWorkspace.shared.open(url)
+        CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
     }
 
     private func copyURL() {

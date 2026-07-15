@@ -90,7 +90,7 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
             case "linkClicked":
                 if let urlString = message.body as? String,
                    let url = URL(string: urlString) {
-                    openURLSafely(url)
+                    CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
                 }
 
             case "editorError":
@@ -124,9 +124,11 @@ final class TipTapEditorCoordinator: NSObject, WKScriptMessageHandler, WKNavigat
         }
 
         if navigationAction.navigationType == .linkActivated {
-            // NSWorkspace.shared.open is AppKit — must be called on the main thread.
+            // External opening is AppKit-backed and must be called on the main thread.
             // This async delegate may be invoked off-main by WebKit, so hop explicitly.
-            await MainActor.run { openURLSafely(url) }
+            await MainActor.run {
+                CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
+            }
         }
         return .cancel
     }

@@ -769,6 +769,7 @@ extension CiderPanelView {
 
         do {
             try markdown.write(to: tempURL, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: tempURL) }
             CiderFileExporter.exportFile(
                 sourceURL: tempURL,
                 suggestedFileName: KanbanCardMarkdownExporter.suggestedFileName(for: card),
@@ -892,7 +893,7 @@ extension CiderPanelView {
     func openDetailURL() {
         guard let detailsDraft,
               let url = URL(string: detailsDraft.sourceURL) else { return }
-        NSWorkspace.shared.open(url)
+        CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
     }
 
     func changeDetailViewMode(_ mode: DetailViewMode) {

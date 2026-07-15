@@ -417,11 +417,11 @@ struct VaultFileMetadataInspectorView: View {
 
                 HStack(spacing: Spacing.xs) {
                     ItemMetadataActionButton(title: "Open", systemImage: "arrow.up.forward.app") {
-                        NSWorkspace.shared.open(file.absoluteURL)
+                        CiderOpenPolicy.shared.openIfAllowed(.localFile(file.absoluteURL))
                     }
 
                     ItemMetadataActionButton(title: "Finder", systemImage: "folder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([file.absoluteURL])
+                        CiderOpenPolicy.shared.openIfAllowed(.revealInFinder(file.absoluteURL))
                     }
                 }
             }

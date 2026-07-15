@@ -175,9 +175,12 @@ final class BookmarksStorage: ObservableObject {
         return importedCount
     }
 
-    func exportNetscapeHTML(to fileURL: URL) throws {
+    func exportNetscapeHTML(
+        to fileURL: URL,
+        overwrite: CiderExportOverwriteIntent = .prohibit
+    ) throws {
         let html = NetscapeBookmarksCodec.encode(bookmarks)
-        try html.write(to: fileURL, atomically: true, encoding: .utf8)
+        try CiderExportWritePolicy().writeText(html, to: fileURL, overwrite: overwrite)
     }
 
     func add(urlString: String, title: String?) -> Bookmark? {

@@ -1313,7 +1313,10 @@ struct AIAssistantPanelView: View {
                     panel.allowedContentTypes = [.init(filenameExtension: "md")!]
                     panel.nameFieldStringValue = "\(conv.title).md"
                     if panel.runModal() == .OK, let url = panel.url {
-                        try? md.write(to: url, atomically: true, encoding: .utf8)
+                        let overwrite: CiderExportOverwriteIntent = FileManager.default.fileExists(atPath: url.path)
+                            ? .replaceExisting
+                            : .prohibit
+                        try? CiderExportWritePolicy().writeText(md, to: url, overwrite: overwrite)
                     }
                 }
             } label: {

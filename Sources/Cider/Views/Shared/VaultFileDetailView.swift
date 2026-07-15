@@ -265,7 +265,7 @@ private struct ExternalAudioPreview: View {
                 .foregroundColor(CiderColors.secondary)
 
             Button("Open Externally") {
-                NSWorkspace.shared.open(file.absoluteURL)
+                CiderOpenPolicy.shared.openIfAllowed(.localFile(file.absoluteURL))
             }
         }
         .frame(maxWidth: .infinity)

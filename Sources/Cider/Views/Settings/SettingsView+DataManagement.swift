@@ -217,7 +217,10 @@ extension SettingsView {
             NSApp.activate(ignoringOtherApps: true)
             if panel.runModal() == .OK, let url = panel.url {
                 do {
-                    try VaultBookmarkService.shared.exportNetscapeHTML(to: url)
+                    let overwrite: CiderExportOverwriteIntent = FileManager.default.fileExists(atPath: url.path)
+                        ? .replaceExisting
+                        : .prohibit
+                    try VaultBookmarkService.shared.exportNetscapeHTML(to: url, overwrite: overwrite)
                     exportResult = "Exported successfully"
                 } catch {
                     exportResult = "Export failed"

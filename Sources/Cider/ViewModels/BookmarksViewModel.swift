@@ -341,7 +341,7 @@ final class BookmarksViewModel: ObservableObject {
 
     func open(_ bookmark: Bookmark) {
         guard let url = bookmark.url else { return }
-        NSWorkspace.shared.open(url)
+        CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
     }
 
     func setDisplayMode(_ mode: BookmarkDisplayMode) {

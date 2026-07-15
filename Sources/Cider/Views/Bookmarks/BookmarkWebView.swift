@@ -84,7 +84,7 @@ struct BookmarkWebView: NSViewRepresentable {
                 if url.host == currentHost && url.path == currentPath {
                     return .cancel
                 }
-                openURLSafely(url)
+                CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
                 return .cancel
             }
             return .allow
@@ -99,7 +99,7 @@ struct BookmarkWebView: NSViewRepresentable {
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
             if let url = navigationAction.request.url {
-                openURLSafely(url)
+                CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
             }
             return nil
         }

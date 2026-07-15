@@ -459,7 +459,7 @@ struct SearchPaletteView: View {
             }
         case .vaultFile:
             if let vaultFile = result.vaultFile {
-                NSWorkspace.shared.open(vaultFile.absoluteURL)
+                CiderOpenPolicy.shared.openIfAllowed(.localFile(vaultFile.absoluteURL))
             }
         }
     }

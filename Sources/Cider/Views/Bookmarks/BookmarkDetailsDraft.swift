@@ -869,20 +869,19 @@ struct BookmarkMetadataSidebar: View {
                 FileManager.default.fileExists(atPath: $0.path)
             }
             if !urls.isEmpty {
-                let config = NSWorkspace.OpenConfiguration()
-                NSWorkspace.shared.open(urls, withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"), configuration: config)
+                CiderOpenPolicy.shared.openIfAllowed(.localFiles(urls, application: .preview))
                 return
             }
         }
 
         if let originalFileURL = bookmark?.originalImageFileURL,
            FileManager.default.fileExists(atPath: originalFileURL.path) {
-            NSWorkspace.shared.open(originalFileURL)
+            CiderOpenPolicy.shared.openIfAllowed(.localFile(originalFileURL))
             return
         }
         if let remote = bookmark?.thumbnailRemoteURLString,
            let remoteURL = URL(string: remote) {
-            NSWorkspace.shared.open(remoteURL)
+            CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(remoteURL))
         }
     }
 
@@ -1184,7 +1183,7 @@ struct CarouselMetadataThumbnail: View {
                 .clipShape(RoundedRectangle(cornerRadius: Radius.xs, style: .continuous))
                 .contextMenu {
                     Button("Open in Preview") {
-                        NSWorkspace.shared.open(url)
+                        CiderOpenPolicy.shared.openIfAllowed(.localFile(url))
                     }
                     Divider()
                     Button("Remove", role: .destructive) {

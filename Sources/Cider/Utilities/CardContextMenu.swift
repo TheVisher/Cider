@@ -20,13 +20,17 @@ enum CiderFileExporter {
         guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
 
         do {
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try FileManager.default.removeItem(at: destinationURL)
-            }
-            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            let overwrite: CiderExportOverwriteIntent = FileManager.default.fileExists(atPath: destinationURL.path)
+                ? .replaceExisting
+                : .prohibit
+            try CiderExportWritePolicy().copyFile(
+                from: sourceURL,
+                to: destinationURL,
+                overwrite: overwrite
+            )
         } catch {
             NSSound.beep()
-            logger.error("Export failed: \(error.localizedDescription, privacy: .public)")
+            logger.error("Export failed with a bounded local write error.")
         }
     }
 

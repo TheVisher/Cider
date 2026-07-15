@@ -126,16 +126,6 @@ enum CiderBorder {
     static let thinStrokeWidth: CGFloat = 1
 }
 
-// MARK: - Safe URL Opening
-
-/// Opens a URL in the system browser only if it uses http or https.
-/// Prevents untrusted content from launching file:, app-specific, or OS deep-link schemes.
-func openURLSafely(_ url: URL) {
-    guard let scheme = url.scheme?.lowercased(),
-          scheme == "http" || scheme == "https" else { return }
-    NSWorkspace.shared.open(url)
-}
-
 // MARK: - Spacing Tokens
 
 enum Spacing {

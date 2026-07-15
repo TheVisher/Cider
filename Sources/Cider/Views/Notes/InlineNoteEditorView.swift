@@ -1201,7 +1201,7 @@ struct NoteMetadataSidebar: View {
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         ForEach(links, id: \.absoluteString) { url in
                             Button {
-                                NSWorkspace.shared.open(url)
+                                CiderOpenPolicy.shared.openIfAllowed(.untrustedWeb(url))
                             } label: {
                                 HStack(spacing: Spacing.xs) {
                                     Image(systemName: "link")
