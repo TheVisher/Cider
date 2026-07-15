@@ -10,21 +10,33 @@ struct CiderReviewActionCoordinatorTests {
         case writer
     }
 
-    @Test("Home and Journal use one typed mutation outcome and one durable receipt identity")
-    func homeAndJournalOutcomesAreSemanticallyEquivalent() throws {
+    @Test("Home Journal full Review Queue and CLI use one typed mutation outcome and durable receipt identity")
+    func supportedSurfaceOutcomesAreSemanticallyEquivalent() throws {
         let home = try makeFixture(candidateID: "shared-memory")
         defer { home.close() }
         let journal = try makeFixture(candidateID: "shared-memory")
         defer { journal.close() }
+        let fullReviewQueue = try makeFixture(candidateID: "shared-memory")
+        defer { fullReviewQueue.close() }
+        let cli = try makeFixture(candidateID: "shared-memory")
+        defer { cli.close() }
 
         let homeRequest = request(for: home.output, surface: .home, action: .approve)
         let journalRequest = request(for: journal.output, surface: .journal, action: .approve)
+        let fullReviewQueueRequest = request(for: fullReviewQueue.output, surface: .home, action: .approve)
+        let cliRequest = request(for: cli.output, surface: .cli, action: .approve)
         let homeOutcome = CiderReviewActionCoordinator(database: home.database).perform(homeRequest)
         let journalOutcome = CiderReviewActionCoordinator(database: journal.database).perform(journalRequest)
+        let fullReviewQueueOutcome = CiderReviewActionCoordinator(database: fullReviewQueue.database).perform(fullReviewQueueRequest)
+        let cliOutcome = CiderReviewActionCoordinator(database: cli.database).perform(cliRequest)
 
         #expect(homeOutcome.isSuccessful)
         #expect(journalOutcome.isSuccessful)
+        #expect(fullReviewQueueOutcome.isSuccessful)
+        #expect(cliOutcome.isSuccessful)
         #expect(homeOutcome.isSemanticallyEquivalentMutation(to: journalOutcome))
+        #expect(homeOutcome.isSemanticallyEquivalentMutation(to: fullReviewQueueOutcome))
+        #expect(homeOutcome.isSemanticallyEquivalentMutation(to: cliOutcome))
         #expect(homeOutcome.changed)
         #expect(homeOutcome.resultingReviewState == "accepted")
         #expect(homeOutcome.truthBoundary == "accepted_memory_candidate")
@@ -32,9 +44,58 @@ struct CiderReviewActionCoordinatorTests {
         #expect(homeOutcome.mutationAuthority == .reviewApprovedCandidate)
         #expect(homeOutcome.actionReceiptID != nil)
         #expect(homeOutcome.actionReceiptID == journalOutcome.actionReceiptID)
+        #expect(homeOutcome.actionReceiptID == fullReviewQueueOutcome.actionReceiptID)
+        #expect(homeOutcome.actionReceiptID == cliOutcome.actionReceiptID)
         #expect(try scalarCount("action_receipts", in: home.database) == 1)
         #expect(try scalarCount("action_receipts", in: journal.database) == 1)
-        print("CID837-PARITY receipt=\(homeOutcome.actionReceiptID ?? "missing") homeChanged=\(homeOutcome.changed) journalChanged=\(journalOutcome.changed)")
+        #expect(try scalarCount("action_receipts", in: fullReviewQueue.database) == 1)
+        #expect(try scalarCount("action_receipts", in: cli.database) == 1)
+        print("CID837-PARITY receipt=\(homeOutcome.actionReceiptID ?? "missing") homeChanged=\(homeOutcome.changed) journalChanged=\(journalOutcome.changed) fullReviewChanged=\(fullReviewQueueOutcome.changed) cliChanged=\(cliOutcome.changed)")
+    }
+
+    @Test("Every supported graph and memory action has semantic parity across production surfaces")
+    func allSupportedFamilyActionsHaveSurfaceParity() throws {
+        let cases: [(CiderReviewCandidateFamily, CiderReviewAction)] = [
+            (.memoryCandidate, .approve), (.memoryCandidate, .reject), (.memoryCandidate, .defer), (.memoryCandidate, .correct),
+            (.graphCandidate, .approve), (.graphCandidate, .reject), (.graphCandidate, .defer), (.graphCandidate, .correct),
+        ]
+        for (index, actionCase) in cases.enumerated() {
+            let surfaces: [CiderReviewInvokingSurface] = actionCase.1 == .correct
+                ? [.journal, .cli]
+                : [.home, .journal, .home, .cli]
+            var fixtures: [Fixture] = []
+            defer { fixtures.forEach { $0.close() } }
+            var outcomes: [CiderReviewActionOutcome] = []
+            for (surfaceIndex, surface) in surfaces.enumerated() {
+                let fixture = try makeFixture(
+                    candidateID: "surface-parity-\(index)",
+                    family: actionCase.0
+                )
+                fixtures.append(fixture)
+                let target = actionCase.0 == .graphCandidate
+                    && (actionCase.1 == .approve || actionCase.1 == .correct)
+                    ? try #require(graphTargetOptions(for: fixture.output, in: fixture.database).first).optionRef
+                    : nil
+                let candidateRequest = request(
+                    for: fixture.output,
+                    surface: surface,
+                    action: actionCase.1,
+                    correction: actionCase.1 == .correct && actionCase.0 == .memoryCandidate
+                        ? "Corrected parity wording."
+                        : nil,
+                    target: target
+                )
+                let outcome = CiderReviewActionCoordinator(database: fixture.database).perform(candidateRequest)
+                #expect(outcome.isSuccessful, "family=\(actionCase.0.rawValue) action=\(actionCase.1.rawValue) surfaceIndex=\(surfaceIndex)")
+                #expect(outcome.changed)
+                outcomes.append(outcome)
+            }
+            let baseline = try #require(outcomes.first)
+            #expect(outcomes.dropFirst().allSatisfy { baseline.isSemanticallyEquivalentMutation(to: $0) })
+            #expect(Set(outcomes.compactMap(\.actionReceiptID)).count == 1)
+            fixtures.forEach { $0.close() }
+            fixtures.removeAll()
+        }
     }
 
     @Test("Stale and missing evidence failures leave every table and source file unchanged")
@@ -94,13 +155,19 @@ struct CiderReviewActionCoordinatorTests {
         )
         #expect(homeCorrection.error?.classification == .unsupportedActionForSurface)
 
-        var cliRequest = request(for: fixture.output, surface: .cli, action: .approve)
-        let cliOutcome = coordinator.perform(cliRequest)
-        #expect(cliOutcome.error?.classification == .unsupportedSurface)
+        let unsupportedSurfaceRequest = request(for: fixture.output, surface: .reviewQueue, action: .approve)
+        let unsupportedSurfaceOutcome = coordinator.perform(unsupportedSurfaceRequest)
+        #expect(unsupportedSurfaceOutcome.error?.classification == .unsupportedSurface)
 
-        cliRequest.surface = .journal
-        cliRequest.mutationAuthority = .inferredProposal
-        let inferredOutcome = coordinator.perform(cliRequest)
+        var weakenedCLIRequest = request(for: fixture.output, surface: .cli, action: .approve)
+        weakenedCLIRequest.exactEvidenceRequirement = .notRequired
+        let weakenedCLIOutcome = coordinator.perform(weakenedCLIRequest)
+        #expect(weakenedCLIOutcome.error?.classification == .exactEvidenceRequired)
+        #expect(!weakenedCLIOutcome.changed)
+
+        var inferredRequest = request(for: fixture.output, surface: .journal, action: .approve)
+        inferredRequest.mutationAuthority = .inferredProposal
+        let inferredOutcome = coordinator.perform(inferredRequest)
         #expect(inferredOutcome.error?.classification == .reviewApprovalRequired)
         #expect(try allTableFingerprints(in: fixture.database) == before)
     }
@@ -280,6 +347,32 @@ struct CiderReviewActionCoordinatorTests {
         #expect(Int64((firstDate.timeIntervalSince1970 * 1_000).rounded()) == Int64((secondDate.timeIntervalSince1970 * 1_000).rounded()))
         #expect(firstFingerprint != secondFingerprint)
         #expect(firstReceiptID != secondReceiptID)
+    }
+
+    @Test("checkpoint one default requests retain their receipt fingerprint identity")
+    func checkpointOneReceiptFingerprintIdentityIsStable() {
+        let expectedDate = Date(timeIntervalSince1970: 1_800_000_000.25)
+        let request = journalRequest(expectedUpdatedAt: expectedDate, correction: "private correction")
+        let fields = [
+            "journal-review-request-v1",
+            "memory_candidate:fingerprint-contract",
+            "memory_candidate",
+            "correct",
+            "fingerprint-stability-test",
+            "suggested",
+            String(format: "%016llx", expectedDate.timeIntervalSinceReferenceDate.bitPattern),
+            "private correction",
+            "",
+        ]
+        let canonical = fields.map { "\($0.utf8.count):\($0)" }.joined(separator: "|")
+        let checkpointOneFingerprint = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+
+        #expect(JournalIntelligenceReviewActionService.requestFingerprint(
+            for: request,
+            actor: "fingerprint-stability-test"
+        ) == checkpointOneFingerprint)
     }
 
     @Test("Intervening correction invalidates replay even while review state stays reviewable")
@@ -527,6 +620,25 @@ struct CiderReviewActionCoordinatorTests {
         #expect(!home.contains("CiderReviewCandidateActionService()"))
         #expect(journal.contains("CiderReviewActionCoordinator"))
         #expect(!journal.contains("JournalIntelligenceReviewActionService().perform"))
+    }
+
+    @Test("Production CLI graph and memory review actions use one typed coordinator adapter")
+    func productionCLICallSitesUseCoordinatorAdapter() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let cli = try String(
+            contentsOf: root.appendingPathComponent("Sources/CiderCLI/CiderCLI.swift"),
+            encoding: .utf8
+        )
+        let adapterURL = root.appendingPathComponent("Sources/CiderCLI/CiderReviewCLIActionAdapter.swift")
+
+        #expect(FileManager.default.fileExists(atPath: adapterURL.path))
+        #expect(cli.contains("CiderReviewCLIActionAdapter"))
+        #expect(!cli.contains("service.approveGraphCandidate("))
+        #expect(!cli.contains("service.rejectGraphCandidate("))
+        #expect(!cli.contains("service.deferGraphCandidate("))
+        #expect(!cli.contains("service.approveMemoryCandidate("))
+        #expect(!cli.contains("service.rejectMemoryCandidate("))
+        #expect(!cli.contains("service.deferMemoryCandidate("))
     }
 
     private struct Fixture {

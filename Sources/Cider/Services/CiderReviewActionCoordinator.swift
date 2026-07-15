@@ -97,6 +97,7 @@ struct CiderReviewActionRequest: Equatable, Sendable {
     var action: CiderReviewAction
     var correction: String?
     var targetOptionRef: String?
+    var reason: String?
     var actor: String
     var surface: CiderReviewInvokingSurface
     var exactEvidenceRequirement: CiderReviewExactEvidenceRequirement
@@ -108,6 +109,7 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         action: CiderReviewAction,
         correction: String? = nil,
         targetOptionRef: String? = nil,
+        reason: String? = nil,
         actor: String,
         surface: CiderReviewInvokingSurface,
         exactEvidenceRequirement: CiderReviewExactEvidenceRequirement,
@@ -118,6 +120,7 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         self.action = action
         self.correction = correction
         self.targetOptionRef = targetOptionRef
+        self.reason = reason
         self.actor = actor
         self.surface = surface
         self.exactEvidenceRequirement = exactEvidenceRequirement
@@ -195,7 +198,8 @@ final class CiderReviewActionCoordinator {
                     expectedUpdatedAt: request.expectedVersion.updatedAt,
                     action: request.action.journalAction,
                     correctedValue: request.correction,
-                    targetOptionRef: request.targetOptionRef
+                    targetOptionRef: request.targetOptionRef,
+                    reason: request.reason
                 ),
                 request.actor
             )
@@ -225,7 +229,7 @@ final class CiderReviewActionCoordinator {
         guard request.mutationAuthority == .reviewApprovedCandidate else {
             return failure(.reviewApprovalRequired)
         }
-        guard request.surface == .home || request.surface == .journal else {
+        guard request.surface == .home || request.surface == .journal || request.surface == .cli else {
             return failure(.unsupportedSurface)
         }
         guard request.identity.family == .memoryCandidate || request.identity.family == .graphCandidate else {

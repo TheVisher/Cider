@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import Cider
@@ -3110,6 +3111,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let suggestedCandidateDict = try #require(suggestedCandidate["candidate"] as? [String: Any])
         let suggestedCandidateID = try #require(suggestedCandidateDict["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedCandidateID], vault: vault)
 
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedCandidateID, "--actor", "cody-test", "--json"], vault: vault),
@@ -3273,6 +3275,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let acceptedCandidate = try #require(acceptedPayload["candidate"] as? [String: Any])
         let acceptedID = try #require(acceptedCandidate["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         let reviewablePayload = try assertStrictProcessJSON(
             runCLI(args: [
                 "item", "memory-suggest", "note", noteID,
@@ -3394,6 +3397,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let candidate = try #require(suggested["candidate"] as? [String: Any])
         let acceptedID = try #require(candidate["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -3489,6 +3493,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let candidate = try #require(suggested["candidate"] as? [String: Any])
         let acceptedID = try #require(candidate["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -3570,6 +3575,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let candidate = try #require(suggested["candidate"] as? [String: Any])
         let acceptedID = try #require(candidate["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -3646,6 +3652,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let candidate = try #require(suggested["candidate"] as? [String: Any])
         let acceptedID = try #require(candidate["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -3728,6 +3735,7 @@ struct CiderCLIAgentSafetyTests {
             command: "item.memory-suggest"
         )
         let acceptedID = try #require((suggested["candidate"] as? [String: Any])?["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -3850,6 +3858,7 @@ struct CiderCLIAgentSafetyTests {
             command: "item.memory-suggest"
         )
         let acceptedID = try #require((suggested["candidate"] as? [String: Any])?["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -3927,6 +3936,7 @@ struct CiderCLIAgentSafetyTests {
             command: "item.memory-suggest"
         )
         let acceptedID = try #require((suggested["candidate"] as? [String: Any])?["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -4008,6 +4018,7 @@ struct CiderCLIAgentSafetyTests {
         )
         let candidate = try #require(suggested["candidate"] as? [String: Any])
         let acceptedID = try #require(candidate["id"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [acceptedID], vault: vault)
         _ = try assertStrictProcessJSON(
             runCLI(args: ["item", "accept-memory-candidate", acceptedID, "--actor", "cody-test", "--json"], vault: vault),
             command: "item.accept-memory-candidate"
@@ -7043,6 +7054,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(storage["kind"] as? String == "memory_candidate")
 
         let candidateID = try #require(item["candidateID"] as? String)
+        try seedCoordinatorExactEvidence(candidateIDs: [candidateID], vault: vault)
         let acceptResult = try runCLI(args: ["item", "accept-memory-candidate", candidateID, "--actor", "codex-test", "--json"], vault: vault)
         let accept = try parseJSONObject(acceptResult.stdout)
         #expect(acceptResult.status == 0)
@@ -7053,10 +7065,10 @@ struct CiderCLIAgentSafetyTests {
         #expect(receipt["changed"] as? Bool == true)
         #expect((receipt["sourceRefs"] as? [String])?.contains("memory_candidate:\(candidateID)") == true)
 
-        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(journalID)", "--action", "accept", "--json"], vault: vault).stdout)
+        let ledger = try parseJSONObject(try runCLI(args: ["item", "action-ledger", "list", "--owner", "note:\(journalID)", "--action", "approve", "--json"], vault: vault).stdout)
         let entries = try #require(ledger["entries"] as? [[String: Any]])
         #expect(entries.contains { entry in
-            entry["command"] as? String == "item.accept-memory-candidate"
+            entry["command"] as? String == "review.memory-candidates.approve"
                 && entry["status"] as? String == "succeeded"
                 && entry["changed"] as? Bool == true
                 && (entry["sourceRefs"] as? [String])?.contains("memory_candidate:\(candidateID)") == true
@@ -9507,7 +9519,7 @@ struct CiderCLIAgentSafetyTests {
         #expect(inspected["objectHubCandidate"] as? [String: Any] != nil)
     }
 
-    @Test("item graph candidate mutations accept reject and delegate explicitly")
+    @Test("rich item graph compatibility mutations accept reject and delegate explicitly")
     func itemGraphCandidateMutationsAcceptRejectAndDelegateExplicitly() throws {
         let vault = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-cli-graph-candidate-mutations-\(UUID().uuidString)")
@@ -9568,9 +9580,15 @@ struct CiderCLIAgentSafetyTests {
         try service.record(rejectOutput)
         try service.record(delegateOutput)
         db.close()
+        try seedCoordinatorExactEvidence(
+            candidateIDs: [acceptOutput.id, rejectOutput.id, delegateOutput.id],
+            vault: vault
+        )
 
         let acceptResult = try runCLI(args: [
             "item", "accept-graph-candidate", acceptOutput.id,
+            "--target-owner", "graph_object:movie-the-way-way-back",
+            "--relation", "watched",
             "--actor", "codex-test",
             "--json",
         ], vault: vault)
@@ -11140,6 +11158,10 @@ struct CiderCLIAgentSafetyTests {
         let deferID = try suggest("Alex may like evening tea.")
         let correctID = try suggest("Jami likes pineapple drinks.")
         let delegateID = try suggest("Alex mentioned a favorite cafe.")
+        try seedCoordinatorExactEvidence(
+            candidateIDs: [acceptID, rejectID, deferID, correctID, delegateID],
+            vault: vault
+        )
 
         let acceptResult = try runCLI(args: [
             "item", "accept-memory-candidate", acceptID,
@@ -12021,6 +12043,777 @@ struct CiderCLIAgentSafetyTests {
                 candidatesJSON: nil
             )
         )
+    }
+
+    @Test("shared CLI review adapter preserves general and direct memory semantic parity and exact retry")
+    func sharedCLIReviewAdapterPreservesMemoryParityAndRetry() throws {
+        let homeVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-adapter-home-\(UUID().uuidString)", isDirectory: true)
+        let journalVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-adapter-journal-\(UUID().uuidString)", isDirectory: true)
+        let generalVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-adapter-general-\(UUID().uuidString)", isDirectory: true)
+        let directVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-adapter-direct-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: homeVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: journalVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: generalVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directVault, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: homeVault)
+            try? FileManager.default.removeItem(at: journalVault)
+            try? FileManager.default.removeItem(at: generalVault)
+            try? FileManager.default.removeItem(at: directVault)
+        }
+        let candidateID = "cli-parity-memory"
+        try seedCoordinatorMemoryCandidate(id: candidateID, vault: homeVault)
+        try seedCoordinatorMemoryCandidate(id: candidateID, vault: journalVault)
+        try seedCoordinatorMemoryCandidate(id: candidateID, vault: generalVault)
+        try seedCoordinatorMemoryCandidate(id: candidateID, vault: directVault)
+        let generalTablesBefore = try coordinatorCLITableFingerprint(vault: generalVault)
+        let generalFilesBefore = try coordinatorCLISourceFileFingerprint(vault: generalVault)
+        let homeOutcome = try performCoordinatorMemoryApproval(
+            candidateID: candidateID,
+            surface: .home,
+            actor: "cli-parity-actor",
+            vault: homeVault
+        )
+        let journalOutcome = try performCoordinatorMemoryApproval(
+            candidateID: candidateID,
+            surface: .journal,
+            actor: "cli-parity-actor",
+            vault: journalVault
+        )
+
+        let generalResult = try runCLI(args: [
+            "review", "approve", candidateID, "--actor", "cli-parity-actor", "--json",
+        ], vault: generalVault)
+        let directResult = try runCLI(args: [
+            "item", "accept-memory-candidate", candidateID, "--actor", "cli-parity-actor", "--json",
+        ], vault: directVault)
+        let general = try parseJSONObject(generalResult.stdout)
+        let direct = try parseJSONObject(directResult.stdout)
+
+        #expect(generalResult.status == 0)
+        #expect(directResult.status == 0)
+        for payload in [general, direct] {
+            #expect(payload["readOnly"] as? Bool == false)
+            #expect(payload["changed"] as? Bool == true)
+            #expect(payload["reviewState"] as? String == "accepted")
+            #expect(payload["truthBoundary"] as? String == "accepted_memory_candidate")
+            #expect(payload["availability"] as? String == "available")
+            #expect(payload["evidenceStatus"] as? String == "verified_exact_evidence")
+            #expect(payload["exactEvidenceRequirement"] as? String == "required")
+            #expect(payload["mutationAuthority"] as? String == "review_approved_candidate")
+            #expect(payload["actionReceiptID"] as? String != nil)
+            #expect(payload["expectedVersionSelector"] as? String != nil)
+        }
+        let homeSnapshot = reviewSemanticSnapshot(homeOutcome)
+        let generalSnapshot = try reviewSemanticSnapshot(general)
+        let directSnapshot = try reviewSemanticSnapshot(direct)
+        #expect(homeSnapshot == reviewSemanticSnapshot(journalOutcome))
+        #expect(homeSnapshot == generalSnapshot)
+        #expect(homeSnapshot == directSnapshot)
+        #expect(general["actionReceiptID"] as? String == direct["actionReceiptID"] as? String)
+        #expect(general["actionReceiptID"] as? String == homeOutcome.actionReceiptID)
+        #expect(try coordinatorCLITableFingerprint(vault: generalVault) != generalTablesBefore)
+        #expect(try coordinatorCLISourceFileFingerprint(vault: generalVault) == generalFilesBefore)
+        let generalReceipt = try #require(general["actionReceipt"] as? [String: Any])
+        let directReceipt = try #require(direct["actionReceipt"] as? [String: Any])
+        #expect(generalReceipt["id"] as? String == directReceipt["id"] as? String)
+        #expect(generalReceipt["command"] as? String == "review.memory-candidates.approve")
+        #expect(generalReceipt["action"] as? String == "approve")
+        #expect(direct["command"] as? String == "item.accept-memory-candidate")
+        #expect(directReceipt["command"] as? String == "item.accept-memory-candidate")
+        #expect(directReceipt["action"] as? String == "accept")
+        #expect(directReceipt["canonicalCommand"] as? String == "review.memory-candidates.approve")
+        #expect(directReceipt["canonicalAction"] as? String == "approve")
+
+        let selector = try #require(general["expectedVersionSelector"] as? String)
+        let beforeRetry = try coordinatorCLITableFingerprint(vault: generalVault)
+        let retryResult = try runCLI(args: [
+            "review", "approve", candidateID,
+            "--actor", "cli-parity-actor",
+            "--expected-version", selector,
+            "--json",
+        ], vault: generalVault)
+        let retry = try parseJSONObject(retryResult.stdout)
+        #expect(retryResult.status == 0)
+        #expect(retry["changed"] as? Bool == false)
+        #expect(retry["actionReceiptID"] as? String == general["actionReceiptID"] as? String)
+        #expect(try coordinatorCLITableFingerprint(vault: generalVault) == beforeRetry)
+        #expect(try coordinatorCLISourceFileFingerprint(vault: generalVault) == generalFilesBefore)
+
+        let safeCommands = try #require(general["safeVerificationCommands"] as? [String])
+        let ledgerSafe = try #require(safeCommands.first { $0.contains("item action-ledger list") })
+        #expect(ledgerSafe.contains("--command review.memory-candidates.approve"))
+        let safeArgs = ledgerSafe.split(separator: " ").map(String.init).dropFirst().map { $0 }
+        let safeResult = try runCLI(args: safeArgs, vault: generalVault)
+        let safePayload = try parseJSONObject(safeResult.stdout)
+        let safeEntries = try #require(safePayload["entries"] as? [[String: Any]])
+        #expect(safeResult.status == 0)
+        #expect(safeEntries.contains { $0["id"] as? String == general["actionReceiptID"] as? String })
+        #expect(safePayload["usage"] == nil)
+        print("CID837-CLI-SMOKE schema=ok,command,action,readOnly,changed,candidateRef,reviewFamily,reviewState,truthBoundary,availability,evidenceStatus,mutationAuthority,expectedVersionSelector,actionReceiptID,safeVerificationCommands receipt=\(general["actionReceiptID"] as? String ?? "missing") tablesBefore=\(coordinatorCLIFingerprintDigest(generalTablesBefore)) tablesAfter=\(coordinatorCLIFingerprintDigest(beforeRetry)) files=\(coordinatorCLIFingerprintDigest(generalFilesBefore)) retryUnchanged=true safeLedgerCount=\(safeEntries.count)")
+    }
+
+    @Test("shared CLI review adapter preserves general and direct graph target and receipt parity")
+    func sharedCLIReviewAdapterPreservesGraphParity() throws {
+        let generalVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-graph-general-\(UUID().uuidString)", isDirectory: true)
+        let directVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-graph-direct-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: generalVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directVault, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: generalVault)
+            try? FileManager.default.removeItem(at: directVault)
+        }
+        let candidateID = "cli-parity-graph"
+        try seedCoordinatorGraphCandidate(id: candidateID, vault: generalVault)
+        try seedCoordinatorGraphCandidate(id: candidateID, vault: directVault)
+        let inspect = try parseJSONObject(try runCLI(
+            args: ["item", "graph-candidate", candidateID, "--json"],
+            vault: generalVault
+        ).stdout)
+        let inspectedCandidate = try #require(inspect["candidate"] as? [String: Any])
+        let options = try #require(inspectedCandidate["targetOptions"] as? [[String: Any]])
+        let option = try #require(options.first)
+        let optionRef = try #require(option["optionRef"] as? String)
+
+        let generalResult = try runCLI(args: [
+            "review", "approve", candidateID,
+            "--target-option", optionRef,
+            "--actor", "cli-graph-parity-actor",
+            "--json",
+        ], vault: generalVault)
+        let directResult = try runCLI(args: [
+            "item", "graph-candidate-accept", candidateID,
+            "--target-option", optionRef,
+            "--actor", "cli-graph-parity-actor",
+            "--json",
+        ], vault: directVault)
+        let general = try parseJSONObject(generalResult.stdout)
+        let direct = try parseJSONObject(directResult.stdout)
+
+        #expect(generalResult.status == 0)
+        #expect(directResult.status == 0)
+        for payload in [general, direct] {
+            #expect(payload["changed"] as? Bool == true)
+            #expect(payload["reviewState"] as? String == "accepted")
+            #expect(payload["truthBoundary"] as? String == "accepted_graph_truth")
+            #expect(payload["availability"] as? String == "available")
+            #expect(payload["evidenceStatus"] as? String == "verified_exact_evidence")
+            #expect(payload["mutationAuthority"] as? String == "review_approved_candidate")
+        }
+        #expect(general["actionReceiptID"] as? String == direct["actionReceiptID"] as? String)
+        #expect((general["coordinatorOutcome"] as? [String: Any])?["targetOwnerRef"] as? String
+            == (direct["coordinatorOutcome"] as? [String: Any])?["targetOwnerRef"] as? String)
+        let relation = try #require(direct["relation"] as? [String: Any])
+        #expect(relation["relationType"] as? String == "visited")
+        #expect(direct["command"] as? String == "item.accept-graph-candidate")
+    }
+
+    @Test("shared CLI review adapter rejects changed correction against the original exact version without writes")
+    func sharedCLIReviewAdapterRejectsChangedCorrectionWithoutWrites() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-adapter-correction-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let candidateID = "cli-correction-memory"
+        try seedCoordinatorMemoryCandidate(id: candidateID, vault: vault)
+
+        let firstResult = try runCLI(args: [
+            "review", "correct", candidateID,
+            "--value", "Corrected private preference A.",
+            "--actor", "cli-correction-actor",
+            "--json",
+        ], vault: vault)
+        let first = try parseJSONObject(firstResult.stdout)
+        #expect(firstResult.status == 0)
+        #expect(first["changed"] as? Bool == true)
+        #expect(first["reviewState"] as? String == "needs_review")
+        let selector = try #require(first["expectedVersionSelector"] as? String)
+        let fingerprint = try coordinatorCLITableFingerprint(vault: vault)
+
+        let changedResult = try runCLI(args: [
+            "review", "correct", candidateID,
+            "--value", "Corrected private preference B.",
+            "--actor", "cli-correction-actor",
+            "--expected-version", selector,
+            "--json",
+        ], vault: vault)
+        let changed = try parseJSONObject(changedResult.stdout)
+        #expect(changedResult.status != 0)
+        #expect(changed["changed"] as? Bool == false)
+        #expect(changed["errorClassification"] as? String == "stale_expected_version")
+        #expect(changed["actionReceiptID"] is NSNull)
+        #expect(try coordinatorCLITableFingerprint(vault: vault) == fingerprint)
+        #expect(!changedResult.stdout.contains("Corrected private preference A."))
+        #expect(!changedResult.stdout.contains("Corrected private preference B."))
+    }
+
+    @Test("shared CLI review adapter fails closed for required evidence and unavailable graph targets without private output")
+    func sharedCLIReviewAdapterFailsClosedWithoutPrivateOutput() throws {
+        let memoryVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-missing-evidence-\(UUID().uuidString)", isDirectory: true)
+        let directMemoryVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-direct-missing-evidence-\(UUID().uuidString)", isDirectory: true)
+        let graphVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-target-unavailable-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: memoryVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directMemoryVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: graphVault, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: memoryVault)
+            try? FileManager.default.removeItem(at: directMemoryVault)
+            try? FileManager.default.removeItem(at: graphVault)
+        }
+        let memoryID = "cli-missing-evidence-memory"
+        try seedCoordinatorMemoryCandidate(id: memoryID, vault: memoryVault, exactEvidence: false)
+        try seedCoordinatorMemoryCandidate(id: memoryID, vault: directMemoryVault, exactEvidence: false)
+        let memoryTables = try coordinatorCLITableFingerprint(vault: memoryVault)
+        let memoryFiles = try coordinatorCLISourceFileFingerprint(vault: memoryVault)
+        let directMemoryTables = try coordinatorCLITableFingerprint(vault: directMemoryVault)
+        let directMemoryFiles = try coordinatorCLISourceFileFingerprint(vault: directMemoryVault)
+        let memoryReceiptCount = try coordinatorTableRowCount("action_receipts", vault: memoryVault)
+        let memoryActionCount = try coordinatorTableRowCount("agent_actions", vault: memoryVault)
+        let memoryRelationCount = try coordinatorTableRowCount("owner_relations", vault: memoryVault)
+        let directMemoryReceiptCount = try coordinatorTableRowCount("action_receipts", vault: directMemoryVault)
+        let directMemoryActionCount = try coordinatorTableRowCount("agent_actions", vault: directMemoryVault)
+        let directMemoryRelationCount = try coordinatorTableRowCount("owner_relations", vault: directMemoryVault)
+        let privateReason = "PRIVATE-REJECTION-REASON-6f2b"
+        let missingResult = try runCLI(args: [
+            "review", "reject", memoryID,
+            "--reason", privateReason,
+            "--actor", "cli-private-test",
+            "--json",
+        ], vault: memoryVault)
+        let missing = try parseJSONObject(missingResult.stdout)
+        #expect(missingResult.status != 0)
+        #expect(missing["errorClassification"] as? String == "missing_exact_evidence")
+        #expect(missing["evidenceStatus"] as? String == "missing_exact_evidence")
+        #expect(missing["actionReceiptID"] is NSNull)
+        #expect(!missingResult.stdout.contains(privateReason))
+        #expect(try coordinatorCLITableFingerprint(vault: memoryVault) == memoryTables)
+        #expect(try coordinatorCLISourceFileFingerprint(vault: memoryVault) == memoryFiles)
+        #expect(try coordinatorTableRowCount("action_receipts", vault: memoryVault) == memoryReceiptCount)
+        #expect(try coordinatorTableRowCount("agent_actions", vault: memoryVault) == memoryActionCount)
+        #expect(try coordinatorTableRowCount("owner_relations", vault: memoryVault) == memoryRelationCount)
+
+        let directMissingResult = try runCLI(args: [
+            "item", "reject-memory-candidate", memoryID,
+            "--reason", privateReason,
+            "--actor", "cli-private-test",
+            "--json",
+        ], vault: directMemoryVault)
+        let directMissing = try parseJSONObject(directMissingResult.stdout)
+        #expect(directMissingResult.status != 0)
+        #expect(directMissing["errorClassification"] as? String == "missing_exact_evidence")
+        #expect(directMissing["evidenceStatus"] as? String == "missing_exact_evidence")
+        #expect(directMissing["actionReceiptID"] is NSNull)
+        #expect(!directMissingResult.stdout.contains(privateReason))
+        #expect(try coordinatorCLITableFingerprint(vault: directMemoryVault) == directMemoryTables)
+        #expect(try coordinatorCLISourceFileFingerprint(vault: directMemoryVault) == directMemoryFiles)
+        #expect(try coordinatorTableRowCount("action_receipts", vault: directMemoryVault) == directMemoryReceiptCount)
+        #expect(try coordinatorTableRowCount("agent_actions", vault: directMemoryVault) == directMemoryActionCount)
+        #expect(try coordinatorTableRowCount("owner_relations", vault: directMemoryVault) == directMemoryRelationCount)
+        print("CID837-MISSING-EVIDENCE generalTables=\(coordinatorCLIFingerprintDigest(memoryTables)) generalFiles=\(coordinatorCLIFingerprintDigest(memoryFiles)) directTables=\(coordinatorCLIFingerprintDigest(directMemoryTables)) directFiles=\(coordinatorCLIFingerprintDigest(directMemoryFiles)) unchanged=true receiptsAdded=0 actionsAdded=0 relationsAdded=0")
+
+        let graphID = "cli-target-unavailable-graph"
+        try seedCoordinatorGraphCandidate(id: graphID, vault: graphVault)
+        let graphTables = try coordinatorCLITableFingerprint(vault: graphVault)
+        let privateTarget = "target-option:/private/graph-target-SENTINEL-91"
+        let unavailableResult = try runCLI(args: [
+            "review", "approve", graphID,
+            "--target-option", privateTarget,
+            "--actor", "cli-private-test",
+            "--json",
+        ], vault: graphVault)
+        let unavailable = try parseJSONObject(unavailableResult.stdout)
+        #expect(unavailableResult.status != 0)
+        #expect(unavailable["errorClassification"] as? String == "target_unavailable")
+        #expect(unavailable["actionReceiptID"] is NSNull)
+        #expect(!unavailableResult.stdout.contains(privateTarget))
+        #expect(try coordinatorCLITableFingerprint(vault: graphVault) == graphTables)
+    }
+
+    @Test("general and direct graph approval never select among multiple targets without an explicit option")
+    func sharedCLIReviewAdapterRequiresExplicitGraphTargetWithoutWrites() throws {
+        let generalVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-target-required-general-\(UUID().uuidString)", isDirectory: true)
+        let directVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-target-required-direct-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: generalVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directVault, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: generalVault)
+            try? FileManager.default.removeItem(at: directVault)
+        }
+        let candidateID = "cli-explicit-target-required"
+        try seedCoordinatorGraphCandidate(id: candidateID, vault: generalVault, includeMatchingOwners: true)
+        try seedCoordinatorGraphCandidate(id: candidateID, vault: directVault, includeMatchingOwners: true)
+        let generalOptions = try coordinatorGraphTargetOptions(candidateID: candidateID, vault: generalVault)
+        let directOptions = try coordinatorGraphTargetOptions(candidateID: candidateID, vault: directVault)
+        #expect(generalOptions.count >= 2)
+        #expect(directOptions.count >= 2)
+        let generalTables = try coordinatorCLITableFingerprint(vault: generalVault)
+        let generalFiles = try coordinatorCLISourceFileFingerprint(vault: generalVault)
+        let directTables = try coordinatorCLITableFingerprint(vault: directVault)
+        let directFiles = try coordinatorCLISourceFileFingerprint(vault: directVault)
+        let generalReceiptCount = try coordinatorTableRowCount("action_receipts", vault: generalVault)
+        let generalRelationCount = try coordinatorTableRowCount("owner_relations", vault: generalVault)
+        let directReceiptCount = try coordinatorTableRowCount("action_receipts", vault: directVault)
+        let directRelationCount = try coordinatorTableRowCount("owner_relations", vault: directVault)
+
+        let generalResult = try runCLI(args: [
+            "review", "approve", candidateID, "--actor", "cli-target-required", "--json",
+        ], vault: generalVault)
+        let directResult = try runCLI(args: [
+            "item", "accept-graph-candidate", candidateID, "--actor", "cli-target-required", "--json",
+        ], vault: directVault)
+        let general = try parseJSONObject(generalResult.stdout)
+        let direct = try parseJSONObject(directResult.stdout)
+
+        for (result, payload) in [(generalResult, general), (directResult, direct)] {
+            #expect(result.status != 0)
+            #expect(payload["changed"] as? Bool == false)
+            #expect(payload["errorClassification"] as? String == "target_required")
+            #expect(payload["actionReceiptID"] is NSNull)
+        }
+        #expect(try coordinatorCLITableFingerprint(vault: generalVault) == generalTables)
+        #expect(try coordinatorCLISourceFileFingerprint(vault: generalVault) == generalFiles)
+        #expect(try coordinatorCLITableFingerprint(vault: directVault) == directTables)
+        #expect(try coordinatorCLISourceFileFingerprint(vault: directVault) == directFiles)
+        #expect(try coordinatorTableRowCount("action_receipts", vault: generalVault) == generalReceiptCount)
+        #expect(try coordinatorTableRowCount("owner_relations", vault: generalVault) == generalRelationCount)
+        #expect(try coordinatorTableRowCount("action_receipts", vault: directVault) == directReceiptCount)
+        #expect(try coordinatorTableRowCount("owner_relations", vault: directVault) == directRelationCount)
+        print("CID837-NO-TARGET options=\(generalOptions.count) generalTables=\(coordinatorCLIFingerprintDigest(generalTables)) generalFiles=\(coordinatorCLIFingerprintDigest(generalFiles)) directTables=\(coordinatorCLIFingerprintDigest(directTables)) directFiles=\(coordinatorCLIFingerprintDigest(directFiles)) unchanged=true receiptsAdded=0 relationsAdded=0")
+    }
+
+    @Test("Home Journal general CLI and direct CLI preserve one checkpoint-one durable receipt")
+    func reviewSurfacesPreserveCheckpointOneDurableReceipt() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-review-durable-receipt-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        let candidateID = "cli-durable-receipt-memory"
+        let actor = "cli-durable-receipt-actor"
+        try seedCoordinatorMemoryCandidate(id: candidateID, vault: vault)
+
+        let databaseURL = vault.appendingPathComponent(".cider/cider.db")
+        let homeDatabase = CiderDatabase()
+        try homeDatabase.open(at: databaseURL)
+        let original = try #require(try SecondBrainEnrichmentOutputService(database: homeDatabase).output(id: candidateID))
+        let expectedSelector = CiderReviewCLIActionAdapter.expectedVersionSelector(
+            reviewState: original.reviewState,
+            updatedAt: original.updatedAt
+        )
+        let baseRequest = CiderReviewActionRequest(
+            identity: .init(candidateRef: "memory_candidate:\(candidateID)", family: .memoryCandidate),
+            expectedVersion: .init(reviewState: original.reviewState, updatedAt: original.updatedAt),
+            action: .approve,
+            actor: actor,
+            surface: .home,
+            exactEvidenceRequirement: .required,
+            mutationAuthority: .reviewApprovedCandidate
+        )
+        let homeOutcome = CiderReviewActionCoordinator(database: homeDatabase).perform(baseRequest)
+        let receiptID = try #require(homeOutcome.actionReceiptID)
+        let homeReceipt = try #require(
+            try SecondBrainActionReceiptLedgerService(database: homeDatabase).inspect(id: receiptID)
+        )
+        homeDatabase.close()
+
+        let journalDatabase = CiderDatabase()
+        try journalDatabase.open(at: databaseURL)
+        var journalRequest = baseRequest
+        journalRequest.surface = .journal
+        let journalOutcome = CiderReviewActionCoordinator(database: journalDatabase).perform(journalRequest)
+        let journalReceipt = try #require(
+            try SecondBrainActionReceiptLedgerService(database: journalDatabase).inspect(id: receiptID)
+        )
+        journalDatabase.close()
+
+        let generalResult = try runCLI(args: [
+            "review", "approve", candidateID,
+            "--actor", actor,
+            "--expected-version", expectedSelector,
+            "--json",
+        ], vault: vault)
+        let directResult = try runCLI(args: [
+            "item", "accept-memory-candidate", candidateID,
+            "--actor", actor,
+            "--expected-version", expectedSelector,
+            "--json",
+        ], vault: vault)
+        let general = try parseJSONObject(generalResult.stdout)
+        let direct = try parseJSONObject(directResult.stdout)
+        let generalReceipt = try coordinatorReceipt(id: receiptID, vault: vault)
+        let directReceipt = try coordinatorReceipt(id: receiptID, vault: vault)
+
+        #expect(homeOutcome.changed)
+        #expect(journalOutcome.isSuccessful)
+        #expect(!journalOutcome.changed)
+        #expect(generalResult.status == 0)
+        #expect(directResult.status == 0)
+        #expect(general["changed"] as? Bool == false)
+        #expect(direct["changed"] as? Bool == false)
+        #expect(general["actionReceiptID"] as? String == receiptID)
+        #expect(direct["actionReceiptID"] as? String == receiptID)
+        #expect(homeReceipt == journalReceipt)
+        #expect(homeReceipt == generalReceipt)
+        #expect(homeReceipt == directReceipt)
+
+        let ownerRef = original.owner.canonicalRef
+        let evidenceRef = try #require(original.metadata["source_evidence_ref"])
+        #expect(homeReceipt.command == "review.memory-candidates.approve")
+        #expect(homeReceipt.action == "approve")
+        #expect(homeReceipt.actor == actor)
+        #expect(homeReceipt.status == "succeeded")
+        #expect(homeReceipt.owner == original.owner)
+        #expect(homeReceipt.sourceRefs == ["memory_candidate:\(candidateID)", ownerRef])
+        #expect(homeReceipt.evidenceRefs == [evidenceRef])
+        #expect(!homeReceipt.readOnly)
+        #expect(homeReceipt.changed)
+        #expect(homeReceipt.errorCode == nil)
+        #expect(homeReceipt.correlationID == "journal-review:memory_candidate:\(candidateID)")
+        #expect(homeReceipt.safeVerificationCommands == [
+            "cider-cli item memory-facts inspect \(candidateID) --json",
+            "cider-cli item action-ledger list --owner \(ownerRef) --command review.memory-candidates.approve --json",
+            "cider-cli capture review-queue --kind memory_candidate --include-deferred --json",
+        ])
+        #expect(homeReceipt.safeNextCommands == [
+            "cider-cli item memory-facts inspect \(candidateID) --json",
+            "cider-cli capture review-queue --kind memory_candidate --json",
+            "cider-cli review summary --json",
+        ])
+        #expect(DatabaseHelpers.decodeJSON([String: String].self, from: homeReceipt.beforeJSON)?["reviewState"] == "suggested")
+        let after = try #require(DatabaseHelpers.decodeJSON([String: String].self, from: homeReceipt.afterJSON))
+        #expect(after["requestFingerprint"]?.count == 64)
+        #expect(after["resultingCandidateVersion"]?.count == 16)
+        #expect(after["reviewState"] == "accepted")
+        #expect(after["truthBoundary"] == "accepted_memory_candidate")
+        let receiptJSON = try #require(homeReceipt.receiptJSON)
+        let decodedReceipt = try #require(
+            JSONSerialization.jsonObject(with: Data(receiptJSON.utf8)) as? [String: Any]
+        )
+        #expect(decodedReceipt["command"] as? String == "review.memory-candidates.approve")
+        #expect(decodedReceipt["action"] as? String == "approve")
+
+        let projectedDirectReceipt = try #require(direct["actionReceipt"] as? [String: Any])
+        #expect(projectedDirectReceipt["command"] as? String == "item.accept-memory-candidate")
+        #expect(projectedDirectReceipt["action"] as? String == "accept")
+        #expect(projectedDirectReceipt["canonicalCommand"] as? String == homeReceipt.command)
+        #expect(projectedDirectReceipt["canonicalAction"] as? String == homeReceipt.action)
+        #expect(try coordinatorTableRowCount("action_receipts", vault: vault) == 1)
+        #expect(try coordinatorTableRowCount("agent_actions", vault: vault) == 1)
+        print("CID837-DURABLE-RECEIPT id=\(receiptID) command=\(homeReceipt.command) action=\(homeReceipt.action) sourceRefs=\(homeReceipt.sourceRefs.count) evidenceRefs=\(homeReceipt.evidenceRefs.count) identicalAcross=home,journal,general-cli,direct-cli")
+    }
+
+    @Test("candidate mutation help is side effect free for text JSON canonical commands and aliases")
+    func candidateMutationHelpIsSideEffectFree() throws {
+        let commands: [[String]] = [
+            ["review", "approve"], ["review", "reject"], ["review", "defer"], ["review", "correct"],
+            ["item", "accept-graph-candidate"], ["item", "graph-candidate-accept"],
+            ["item", "reject-graph-candidate"], ["item", "graph-candidate-reject"],
+            ["item", "accept-memory-candidate"], ["item", "memory-candidate-accept"],
+            ["item", "reject-memory-candidate"], ["item", "memory-candidate-reject"],
+            ["item", "defer-memory-candidate"], ["item", "memory-candidate-defer"],
+            ["item", "correct-memory-candidate"], ["item", "memory-candidate-correct"],
+        ]
+        for command in commands {
+            for json in [false, true] {
+                let vault = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("cider-cli-candidate-help-\(UUID().uuidString)")
+                var args = command + ["--help"]
+                if json { args.append("--json") }
+                let result = try runCLI(args: args, vault: vault)
+                #expect(result.status == 0)
+                if json {
+                    let payload = try parseJSONObject(result.stdout)
+                    #expect(payload["readOnly"] as? Bool == true)
+                    #expect(payload["changed"] as? Bool == false)
+                    #expect((payload["command"] as? String)?.hasSuffix(".help") == true)
+                } else {
+                    #expect(result.stdout.contains("Usage: cider-cli"))
+                }
+                #expect(!FileManager.default.fileExists(atPath: vault.path))
+            }
+        }
+    }
+
+    private struct ReviewSemanticSnapshot: Equatable {
+        var candidateRef: String
+        var family: String
+        var action: String
+        var actor: String
+        var availability: String
+        var evidenceRequirement: String
+        var evidenceStatus: String
+        var mutationAuthority: String
+        var changed: Bool
+        var reviewState: String
+        var truthBoundary: String
+        var actionReceiptID: String?
+        var targetOwnerRef: String?
+    }
+
+    private func reviewSemanticSnapshot(_ outcome: CiderReviewActionOutcome) -> ReviewSemanticSnapshot {
+        let availability: String
+        switch outcome.availability {
+        case .available: availability = "available"
+        case .unavailable: availability = "unavailable"
+        }
+        return ReviewSemanticSnapshot(
+            candidateRef: outcome.identity.candidateRef,
+            family: outcome.identity.family.rawValue,
+            action: outcome.action.rawValue,
+            actor: outcome.actor,
+            availability: availability,
+            evidenceRequirement: outcome.exactEvidenceRequirement.rawValue,
+            evidenceStatus: outcome.evidenceStatus.rawValue,
+            mutationAuthority: outcome.mutationAuthority.rawValue,
+            changed: outcome.changed,
+            reviewState: outcome.resultingReviewState,
+            truthBoundary: outcome.truthBoundary,
+            actionReceiptID: outcome.actionReceiptID,
+            targetOwnerRef: outcome.targetOwnerRef
+        )
+    }
+
+    private func reviewSemanticSnapshot(_ payload: [String: Any]) throws -> ReviewSemanticSnapshot {
+        let outcome = try #require(payload["coordinatorOutcome"] as? [String: Any])
+        return ReviewSemanticSnapshot(
+            candidateRef: try #require(outcome["candidateRef"] as? String),
+            family: try #require(outcome["reviewFamily"] as? String),
+            action: try #require(outcome["action"] as? String),
+            actor: try #require(outcome["actor"] as? String),
+            availability: try #require(outcome["availability"] as? String),
+            evidenceRequirement: try #require(outcome["evidenceRequirement"] as? String),
+            evidenceStatus: try #require(outcome["evidenceStatus"] as? String),
+            mutationAuthority: try #require(outcome["mutationAuthority"] as? String),
+            changed: try #require(outcome["changed"] as? Bool),
+            reviewState: try #require(outcome["reviewState"] as? String),
+            truthBoundary: try #require(outcome["truthBoundary"] as? String),
+            actionReceiptID: outcome["actionReceiptID"] as? String,
+            targetOwnerRef: outcome["targetOwnerRef"] as? String
+        )
+    }
+
+    private func performCoordinatorMemoryApproval(
+        candidateID: String,
+        surface: CiderReviewInvokingSurface,
+        actor: String,
+        vault: URL
+    ) throws -> CiderReviewActionOutcome {
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let output = try #require(try SecondBrainEnrichmentOutputService(database: database).output(id: candidateID))
+        return CiderReviewActionCoordinator(database: database).perform(
+            CiderReviewActionRequest(
+                identity: .init(candidateRef: "memory_candidate:\(candidateID)", family: .memoryCandidate),
+                expectedVersion: .init(reviewState: output.reviewState, updatedAt: output.updatedAt),
+                action: .approve,
+                actor: actor,
+                surface: surface,
+                exactEvidenceRequirement: .required,
+                mutationAuthority: .reviewApprovedCandidate
+            )
+        )
+    }
+
+    private func seedCoordinatorMemoryCandidate(
+        id: String,
+        vault: URL,
+        exactEvidence: Bool = true
+    ) throws {
+        let noteID = try createNote(
+            title: "CLI coordinator source",
+            content: "A private source-backed statement.",
+            vault: vault
+        )
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_001)
+        let updatedTimestamp = timestamp.addingTimeInterval(1)
+        let owner = SecondBrainOwnerRef(ownerType: "note", ownerID: noteID)
+        var output = SecondBrainEnrichmentOutput(
+            id: id,
+            owner: owner,
+            kind: "memory_candidate",
+            value: "A durable memory candidate.",
+            normalizedValue: "a durable memory candidate.",
+            label: "Memory candidate",
+            evidence: "A private source-backed statement.",
+            source: "test.cli.review.coordinator",
+            confidence: 0.91,
+            reviewState: "suggested",
+            metadata: [
+                "memory_kind": "preference",
+                "candidate_kind": "preference",
+                "requires_review": "true",
+                "truth_boundary": "reviewable_candidate_not_truth",
+            ],
+            createdAt: timestamp,
+            updatedAt: updatedTimestamp
+        )
+        if exactEvidence {
+            output.metadata["capture_event_id"] = "capture-\(id)"
+            output.metadata["source_span_start"] = "0"
+            output.metadata["source_span_end"] = String(output.evidence.count)
+        }
+        try SecondBrainEnrichmentOutputService(database: database).record(output)
+    }
+
+    private func seedCoordinatorGraphCandidate(
+        id: String,
+        vault: URL,
+        exactEvidence: Bool = true,
+        includeMatchingOwners: Bool = false
+    ) throws {
+        let noteID = try createNote(
+            title: "CLI graph coordinator source",
+            content: "Visited Private Target.",
+            vault: vault
+        )
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_101)
+        var output = try SecondBrainGraphCandidateContract.makeOutput(
+            sourceOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: noteID),
+            candidateKind: .objectRelation,
+            mentionText: "Private Target",
+            sourceQuote: "Visited Private Target.",
+            sourceKind: "journal",
+            objectTypeGuesses: [.place],
+            relationGuesses: [.visited],
+            confidence: 0.91,
+            source: "test.cli.review.coordinator"
+        )
+        output.id = id
+        output.createdAt = timestamp
+        output.updatedAt = timestamp.addingTimeInterval(1)
+        if exactEvidence {
+            output.metadata["capture_event_id"] = "capture-\(id)"
+            output.metadata["source_span_start"] = "0"
+            output.metadata["source_span_end"] = String(output.evidence.count)
+        }
+        try SecondBrainEnrichmentOutputService(database: database).record(output)
+        if includeMatchingOwners {
+            let labels = SecondBrainOwnerLabelIndexService(database: database)
+            _ = try labels.upsertLabel(
+                owner: SecondBrainOwnerRef(ownerType: "place", ownerID: "private-target-a"),
+                ownerKind: "place",
+                canonicalLabel: "Private Target",
+                sourceRefs: ["place:private-target-a"],
+                labelSource: "test.cli.review.coordinator"
+            )
+            _ = try labels.upsertLabel(
+                owner: SecondBrainOwnerRef(ownerType: "place", ownerID: "private-target-b"),
+                ownerKind: "place",
+                canonicalLabel: "Private Target Annex",
+                aliases: ["Private Target"],
+                sourceRefs: ["place:private-target-b"],
+                labelSource: "test.cli.review.coordinator"
+            )
+        }
+    }
+
+    private func coordinatorGraphTargetOptions(candidateID: String, vault: URL) throws -> [CiderGraphCandidateTargetOption] {
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let item = try #require(
+            try CiderReviewQueueService(database: database)
+                .list(limit: Int.max, includeDeferred: true)
+                .items
+                .first { $0.candidateRef == "graph_candidate:\(candidateID)" }
+        )
+        return item.targetOptions
+    }
+
+    private func seedCoordinatorExactEvidence(candidateIDs: [String], vault: URL) throws {
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let service = SecondBrainEnrichmentOutputService(database: database)
+        for (index, candidateID) in candidateIDs.enumerated() {
+            var output = try #require(try service.output(id: candidateID))
+            output.metadata["capture_event_id"] = "capture-\(candidateID)"
+            output.metadata["source_span_start"] = "0"
+            output.metadata["source_span_end"] = String(output.evidence.count)
+            output.updatedAt = output.updatedAt.addingTimeInterval(Double(index + 1))
+            try service.record(output)
+        }
+    }
+
+    private func coordinatorReceipt(id: String, vault: URL) throws -> SecondBrainActionReceiptRecord {
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        return try #require(try SecondBrainActionReceiptLedgerService(database: database).inspect(id: id))
+    }
+
+    private func coordinatorTableRowCount(_ table: String, vault: URL) throws -> Int {
+        let allowed = ["action_receipts", "agent_actions", "owner_relations"]
+        precondition(allowed.contains(table))
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let statement = try database.prepare("SELECT COUNT(*) FROM \(table);")
+        guard try statement.step() else { return 0 }
+        return statement.int(at: 0)
+    }
+
+    private func coordinatorCLITableFingerprint(vault: URL) throws -> [String] {
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        let tableStatement = try database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
+        var tables: [String] = []
+        while try tableStatement.step() { tables.append(tableStatement.string(at: 0)) }
+        return try tables.map { table in
+            let pragma = try database.prepare("PRAGMA table_info(\"\(table.replacingOccurrences(of: "\"", with: "\"\""))\");")
+            var columns: [String] = []
+            while try pragma.step() { columns.append(pragma.string(at: 1)) }
+            let pairs = columns.flatMap { ["'\($0)'", "quote(\"\($0)\")"] }.joined(separator: ", ")
+            let rowsStatement = try database.prepare("SELECT json_object(\(pairs)) FROM \"\(table.replacingOccurrences(of: "\"", with: "\"\""))\";")
+            var rows: [String] = []
+            while try rowsStatement.step() { rows.append(rowsStatement.string(at: 0)) }
+            let digest = SHA256.hash(data: Data(rows.sorted().joined(separator: "\n").utf8))
+                .map { String(format: "%02x", $0) }
+                .joined()
+            return "\(table):count=\(rows.count);sha256=\(digest)"
+        }
+    }
+
+    private func coordinatorCLISourceFileFingerprint(vault: URL) throws -> [String] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: vault,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var fingerprints: [String] = []
+        for case let url as URL in enumerator {
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            let relative = url.path.replacingOccurrences(of: vault.path + "/", with: "")
+            let digest = SHA256.hash(data: try Data(contentsOf: url))
+                .map { String(format: "%02x", $0) }
+                .joined()
+            fingerprints.append("\(relative):sha256=\(digest)")
+        }
+        return fingerprints.sorted()
+    }
+
+    private func coordinatorCLIFingerprintDigest(_ fingerprints: [String]) -> String {
+        SHA256.hash(data: Data(fingerprints.joined(separator: "\n").utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func insertFolderRow(relativePath: String, vault: URL) throws {

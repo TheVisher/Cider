@@ -297,6 +297,37 @@ struct CiderCLI {
             return true
         }
 
+        if command == "review",
+           let subcommand,
+           ["approve", "reject", "defer", "correct"].contains(subcommand),
+           hasHelpArg(args) {
+            let usage: String
+            switch subcommand {
+            case "approve":
+                usage = "cider-cli review approve <item-id|candidate-id> [--target-option <graph-option-ref>] [--actor user|agent] [--expected-version <state@version>] [--json]"
+            case "reject":
+                usage = "cider-cli review reject <candidate-id> [--reason <text>] [--actor user|agent] [--expected-version <state@version>] [--json]"
+            case "defer":
+                usage = "cider-cli review defer <item-id|candidate-id> [--reason <text>] [--actor user|agent] [--expected-version <state@version>] [--json]"
+            default:
+                usage = "cider-cli review correct <item-id|candidate-id> ((--folder <name|path>|--path <target-folder-path>|--inbox)|--value <corrected-memory>|--target-option <graph-option-ref>) [--reason <text>] [--actor user|agent] [--expected-version <state@version>] [--json]"
+            }
+            if args.contains("--json") {
+                outputJSON([
+                    "ok": true,
+                    "command": "review.\(subcommand).help",
+                    "usage": usage,
+                    "readOnly": true,
+                    "changed": false,
+                    "truthBoundary": "help_contract_only_not_vault_truth",
+                    "safeVerificationCommands": ["cider-cli review \(subcommand) --help --json"],
+                ])
+            } else {
+                print("Usage: \(usage)")
+            }
+            return true
+        }
+
         if command == "export",
            subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
             handleExport(subcommand: "help", args: args)
@@ -402,9 +433,58 @@ struct CiderCLI {
                     "cider-cli item journal-intelligence --date YYYY-MM-DD --json",
                 ]
             )
+        case "accept-graph-candidate", "graph-candidate-accept",
+             "reject-graph-candidate", "graph-candidate-reject",
+             "accept-memory-candidate", "memory-candidate-accept",
+             "reject-memory-candidate", "memory-candidate-reject",
+             "defer-memory-candidate", "memory-candidate-defer",
+             "correct-memory-candidate", "memory-candidate-correct":
+            return candidateMutationHelpContractPayload(subcommand: subcommand)
         default:
             return nil
         }
+    }
+
+    static func candidateMutationHelpContractPayload(subcommand: String) -> [String: Any] {
+        let canonical: String
+        let family: String
+        let action: String
+        switch subcommand {
+        case "accept-graph-candidate", "graph-candidate-accept":
+            canonical = "accept-graph-candidate"; family = "graph_candidate"; action = "accept"
+        case "reject-graph-candidate", "graph-candidate-reject":
+            canonical = "reject-graph-candidate"; family = "graph_candidate"; action = "reject"
+        case "accept-memory-candidate", "memory-candidate-accept":
+            canonical = "accept-memory-candidate"; family = "memory_candidate"; action = "accept"
+        case "reject-memory-candidate", "memory-candidate-reject":
+            canonical = "reject-memory-candidate"; family = "memory_candidate"; action = "reject"
+        case "defer-memory-candidate", "memory-candidate-defer":
+            canonical = "defer-memory-candidate"; family = "memory_candidate"; action = "defer"
+        default:
+            canonical = "correct-memory-candidate"; family = "memory_candidate"; action = "correct"
+        }
+        let usage: String
+        if family == "graph_candidate", action == "accept" {
+            usage = "cider-cli item \(subcommand) <candidate-id> [--target-option <option-ref>|--target-owner <type:id>] [--relation <type>] [--actor <name>] [--expected-version <state@version>] [--json]"
+        } else if family == "memory_candidate", action == "correct" {
+            usage = "cider-cli item \(subcommand) <candidate-id> --value <corrected-memory> [--reason <text>] [--actor <name>] [--expected-version <state@version>] [--json]"
+        } else {
+            usage = "cider-cli item \(subcommand) <candidate-id> [--reason <text>] [--actor <name>] [--expected-version <state@version>] [--json]"
+        }
+        var payload: [String: Any] = [
+            "ok": true,
+            "status": "ok",
+            "command": "item.\(subcommand).help",
+            "subcommand": subcommand,
+            "usage": usage,
+            "description": "Explicit \(action) action for one reviewable \(family) through the shared review coordinator.",
+            "readOnly": true,
+            "changed": false,
+            "truthBoundary": "help_contract_only_not_vault_truth",
+            "safeVerificationCommands": ["cider-cli item \(subcommand) --help --json"],
+        ]
+        if subcommand != canonical { payload["aliasOf"] = "item.\(canonical)" }
+        return payload
     }
 
     static func recallHelpContractPayload(
@@ -717,6 +797,14 @@ struct CiderCLI {
             return "cider-cli item daily-episode --date YYYY-MM-DD [--json]"
         case "journal-intelligence", "journal-intelligence-receipt":
             return "cider-cli item journal-intelligence --date YYYY-MM-DD [--json]"
+        case "accept-graph-candidate", "graph-candidate-accept":
+            return "cider-cli item \(subcommand ?? "accept-graph-candidate") <candidate-id> [--target-option <option-ref>|--target-owner <type:id>] [--relation <type>] [--actor <name>] [--expected-version <state@version>] [--json]"
+        case "reject-graph-candidate", "graph-candidate-reject":
+            return "cider-cli item \(subcommand ?? "reject-graph-candidate") <candidate-id> [--reason <text>] [--actor <name>] [--expected-version <state@version>] [--json]"
+        case "accept-memory-candidate", "memory-candidate-accept", "reject-memory-candidate", "memory-candidate-reject", "defer-memory-candidate", "memory-candidate-defer":
+            return "cider-cli item \(subcommand ?? "accept-memory-candidate") <candidate-id> [--reason <text>] [--actor <name>] [--expected-version <state@version>] [--json]"
+        case "correct-memory-candidate", "memory-candidate-correct":
+            return "cider-cli item \(subcommand ?? "correct-memory-candidate") <candidate-id> --value <corrected-memory> [--reason <text>] [--actor <name>] [--expected-version <state@version>] [--json]"
         case "weekly-chapter", "chapter-weekly":
             return "cider-cli item weekly-chapter --week YYYY-MM-DD [--json]"
         case "monthly-chapter", "chapter-monthly":
@@ -1027,14 +1115,14 @@ struct CiderCLI {
         case "routing", "route":
             return isMutationSubcommand(subcommand, in: ["approve", "correct", "rerun"])
         case "review":
-            return isMutationSubcommand(subcommand, in: ["approve", "correct", "defer", "enrich", "enrich-batch"])
+            return isMutationSubcommand(subcommand, in: ["approve", "reject", "correct", "defer", "enrich", "enrich-batch"])
         case "dev-fixture", "fixture":
             return true
         case "item":
             if subcommand == "journal-candidate-reconcile" || subcommand == "reconcile-journal-candidates" {
                 return args.contains("--apply")
             }
-            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "backfill-journals", "journal-backfill", "accept-similarity", "accept-graph-candidate", "reject-graph-candidate", "delegate-graph-candidate", "accept-memory-candidate", "reject-memory-candidate", "defer-memory-candidate", "correct-memory-candidate", "delegate-memory-candidate", "sync-project", "project-sync"])
+            return isMutationSubcommand(subcommand, in: ["move", "unfile", "delete", "rm", "rebuild-index", "rebuild-vault-index", "route", "link", "backfill-kanban", "rebuild-chunks", "rebuild-content", "rebuild-enrichment", "rebuild-similarity", "dogfood-intelligence", "backfill-journals", "journal-backfill", "accept-similarity", "accept-graph-candidate", "graph-candidate-accept", "reject-graph-candidate", "graph-candidate-reject", "delegate-graph-candidate", "graph-candidate-delegate", "accept-memory-candidate", "memory-candidate-accept", "reject-memory-candidate", "memory-candidate-reject", "defer-memory-candidate", "memory-candidate-defer", "correct-memory-candidate", "memory-candidate-correct", "delegate-memory-candidate", "memory-candidate-delegate", "sync-project", "project-sync"])
         case "test-run", "testrun":
             return isMutationSubcommand(subcommand, in: ["cleanup"])
         case "label", "tag":
@@ -2761,6 +2849,7 @@ struct CiderCLI {
                     "--target-owner-type",
                     "--target-owner-id",
                     "--relation",
+                    "--expected-version",
                 ]
             ) else {
                 printCLIError("Usage: cider-cli review approve <item-id|candidate-id> [--target-option <option-ref>|--corrected-target-owner <type:id>|--corrected-target-owner-type <type> --corrected-target-owner-id <id>|--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--corrected-relation <type>|--relation <type>] [--actor user|agent] [--json]")
@@ -2774,21 +2863,23 @@ struct CiderCLI {
                     return
                 }
                 if isGraphCandidateRef(itemRef) {
-                    let result = try service.approveGraphCandidate(
-                        candidateID: itemRef,
+                    performReviewCandidateCLIAction(
+                        candidateRef: itemRef,
+                        family: .graphCandidate,
+                        action: .approve,
                         actor: actor,
-                        targetOptionRef: parseFlag("--target-option", from: args),
-                        correctedTargetOwner: graphReviewCorrectedTargetOwner(from: args),
-                        correctedRelationType: parseFlag("--corrected-relation", from: args),
-                        targetOwner: graphReviewTargetOwner(from: args),
-                        relationType: parseFlag("--relation", from: args)
+                        args: args
                     )
-                    printReviewCandidateQueueActionResult(result)
                     return
                 }
                 if isMemoryCandidateRef(itemRef) {
-                    let result = try service.approveMemoryCandidate(candidateID: itemRef, actor: actor)
-                    printReviewCandidateQueueActionResult(result)
+                    performReviewCandidateCLIAction(
+                        candidateRef: itemRef,
+                        family: .memoryCandidate,
+                        action: .approve,
+                        actor: actor,
+                        args: args
+                    )
                     return
                 }
                 let itemID = try service.resolveItemID(ref: itemRef)
@@ -2828,7 +2919,7 @@ struct CiderCLI {
             }
 
         case "reject":
-            guard let candidateRef = firstPositionalArgument(from: args, valueFlags: ["--reason", "--actor"]) else {
+            guard let candidateRef = firstPositionalArgument(from: args, valueFlags: ["--reason", "--actor", "--expected-version"]) else {
                 printCLIError("Usage: cider-cli review reject <candidate-id> --reason <text> [--actor user|agent] [--json]")
                 return
             }
@@ -2841,13 +2932,23 @@ struct CiderCLI {
                     return
                 }
                 if isGraphCandidateRef(candidateRef) {
-                    let result = try service.rejectGraphCandidate(candidateID: candidateRef, reason: reason, actor: actor)
-                    printReviewCandidateQueueActionResult(result)
+                    performReviewCandidateCLIAction(
+                        candidateRef: candidateRef,
+                        family: .graphCandidate,
+                        action: .reject,
+                        actor: actor,
+                        args: args
+                    )
                     return
                 }
                 if isMemoryCandidateRef(candidateRef) {
-                    let result = try service.rejectMemoryCandidate(candidateID: candidateRef, reason: reason, actor: actor)
-                    printReviewCandidateQueueActionResult(result)
+                    performReviewCandidateCLIAction(
+                        candidateRef: candidateRef,
+                        family: .memoryCandidate,
+                        action: .reject,
+                        actor: actor,
+                        args: args
+                    )
                     return
                 }
                 printCLIError("No review candidate found matching '\(candidateRef)'.")
@@ -2856,8 +2957,30 @@ struct CiderCLI {
             }
 
         case "correct":
-            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor"]) else {
-                printCLIError("Usage: cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]")
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor", "--value", "--correction", "--target-option", "--expected-version"]) else {
+                printCLIError("Usage: cider-cli review correct <item-id|candidate-id> ((--folder <name|path>|--path <target-folder-path>|--inbox)|--value <corrected-memory>|--target-option <graph-option-ref>) [--reason <text>] [--actor user|agent] [--expected-version <selector>] [--json]")
+                return
+            }
+
+            let correctionActor = parseFlag("--actor", from: args) ?? "user"
+            if isGraphCandidateRef(itemRef) {
+                performReviewCandidateCLIAction(
+                    candidateRef: itemRef,
+                    family: .graphCandidate,
+                    action: .correct,
+                    actor: correctionActor,
+                    args: args
+                )
+                return
+            }
+            if isMemoryCandidateRef(itemRef) {
+                performReviewCandidateCLIAction(
+                    candidateRef: itemRef,
+                    family: .memoryCandidate,
+                    action: .correct,
+                    actor: correctionActor,
+                    args: args
+                )
                 return
             }
 
@@ -2927,7 +3050,7 @@ struct CiderCLI {
             }
 
         case "defer":
-            guard let itemRef = args.first else {
+            guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--reason", "--actor", "--expected-version"]) else {
                 print("Error: Usage: cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]")
                 return
             }
@@ -2943,21 +3066,23 @@ struct CiderCLI {
                     return
                 }
                 if isGraphCandidateRef(itemRef) {
-                    let result = try service.deferGraphCandidate(
-                        candidateID: itemRef,
-                        reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
-                        actor: actor
+                    performReviewCandidateCLIAction(
+                        candidateRef: itemRef,
+                        family: .graphCandidate,
+                        action: .defer,
+                        actor: actor,
+                        args: args
                     )
-                    printReviewCandidateQueueActionResult(result)
                     return
                 }
                 if isMemoryCandidateRef(itemRef) {
-                    let result = try service.deferMemoryCandidate(
-                        candidateID: itemRef,
-                        reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
-                        actor: actor
+                    performReviewCandidateCLIAction(
+                        candidateRef: itemRef,
+                        family: .memoryCandidate,
+                        action: .defer,
+                        actor: actor,
+                        args: args
                     )
-                    printReviewCandidateQueueActionResult(result)
                     return
                 }
                 let itemID = try service.resolveItemID(ref: itemRef)
@@ -23625,7 +23750,7 @@ struct CiderCLI {
             "contextCommands": ["cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json"],
             "verificationCommands": [
                 "cider-cli item memory-facts inspect \(output.id) --json",
-                "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+                "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command review.memory-candidates.approve --json",
             ],
             "sourceRefs": acceptedMemoryFactSourceRefs(fact),
             "citations": acceptedMemoryFactCitations(output),
@@ -23710,7 +23835,7 @@ struct CiderCLI {
             "contextCommands": ["cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json"],
             "verificationCommands": [
                 "cider-cli item memory-facts inspect \(output.id) --json",
-                "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+                "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command review.memory-candidates.approve --json",
             ],
             "safeNextCommands": acceptedMemoryFactSafeCommands(output),
         ]
@@ -23899,7 +24024,7 @@ struct CiderCLI {
         do {
             let records = try SecondBrainActionReceiptLedgerService(database: .shared).list(filter: SecondBrainActionReceiptFilter(
                 owner: output.owner,
-                command: "item.accept-memory-candidate",
+                command: "review.memory-candidates.approve",
                 sourceRef: "memory_candidate:\(output.id)",
                 limit: 10
             ))
@@ -23916,7 +24041,7 @@ struct CiderCLI {
             "cider-cli item memory-facts list --json",
             "cider-cli item recall-context --item \(output.owner.ownerType) \(output.owner.ownerID) --json",
             "cider-cli item owner-get \(output.owner.ownerType) \(output.owner.ownerID) --json",
-            "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command item.accept-memory-candidate --json",
+            "cider-cli item action-ledger list --owner \(output.owner.canonicalRef) --command review.memory-candidates.approve --json",
         ]
         commands.append(contentsOf: memoryCandidateSafeCommands(owner: output.owner))
         var seen = Set<String>()
@@ -23982,6 +24107,29 @@ struct CiderCLI {
             return
         }
 
+        if action != "delegate" && !(action == "correct" && hasAdvancedMemoryCandidateCorrectionFlags(args)) {
+            let coordinatorAction: CiderReviewAction
+            switch action {
+            case "accept": coordinatorAction = .approve
+            case "reject": coordinatorAction = .reject
+            case "defer": coordinatorAction = .defer
+            case "correct": coordinatorAction = .correct
+            default:
+                printCLIError("Unsupported memory candidate action '\(action)'.")
+                return
+            }
+            performReviewCandidateCLIAction(
+                candidateRef: candidateID,
+                family: .memoryCandidate,
+                action: coordinatorAction,
+                actor: parseFlag("--actor", from: args) ?? "user",
+                args: args,
+                surfaceCommand: "item.\(action)-memory-candidate",
+                includeCandidatePayload: true
+            )
+            return
+        }
+
         do {
             let payload: [String: Any]
             switch action {
@@ -24010,6 +24158,13 @@ struct CiderCLI {
         } catch {
             printCLIError(error.localizedDescription)
         }
+    }
+
+    static func hasAdvancedMemoryCandidateCorrectionFlags(_ args: [String]) -> Bool {
+        [
+            "--evidence", "--kind", "--linked-owner", "--observed-date", "--memory-key",
+            "--memory-status", "--status", "--confidence", "--source",
+        ].contains { args.contains($0) }
     }
 
     static func acceptMemoryCandidatePayload(
@@ -24764,6 +24919,260 @@ struct CiderCLI {
         } else {
             print("Review candidate action: \(result.candidateRef) -> \(result.reviewState)")
         }
+    }
+
+    static func performReviewCandidateCLIAction(
+        candidateRef: String,
+        family: CiderReviewCandidateFamily,
+        action: CiderReviewAction,
+        actor: String,
+        args: [String],
+        surfaceCommand: String? = nil,
+        includeCandidatePayload: Bool = false
+    ) {
+        let command = surfaceCommand ?? "review.\(family == .graphCandidate ? "graph" : "memory")-candidates.\(action.rawValue)"
+        do {
+            let targetOptionRef = family == .graphCandidate
+                ? graphCoordinatorTargetOptionRef(candidateRef: candidateRef, args: args)
+                : nil
+            let correction = parseFlag("--value", from: args) ?? parseFlag("--correction", from: args)
+            let result = try CiderReviewCLIActionAdapter().perform(
+                candidateRef: candidateRef,
+                family: family,
+                action: action,
+                correction: correction,
+                targetOptionRef: targetOptionRef,
+                reason: parseFlag("--reason", from: args),
+                actor: actor,
+                expectedVersionSelector: parseFlag("--expected-version", from: args)
+            )
+            let payload = reviewCandidateCoordinatorPayload(
+                result,
+                command: command,
+                includeCandidatePayload: includeCandidatePayload
+            )
+            if !result.outcome.isSuccessful {
+                processExitCode = 1
+            }
+            if jsonOutput {
+                outputJSON(payload)
+            } else if result.outcome.isSuccessful {
+                if surfaceCommand != nil {
+                    let directAction = action == .approve ? "accept" : action.rawValue
+                    let directFamily = family == .graphCandidate ? "graph" : "memory"
+                    print("\(directAction) \(directFamily) candidate: \(result.after.id)")
+                    print("  State: \(result.outcome.resultingReviewState)")
+                } else {
+                    print("Review candidate action: \(result.outcome.identity.candidateRef) -> \(result.outcome.resultingReviewState)")
+                }
+            } else {
+                print("Error: \(result.outcome.message)")
+            }
+        } catch let error as CiderReviewCLIActionAdapterError {
+            processExitCode = 1
+            let safeCommands = reviewCandidateFallbackCommands(candidateRef: candidateRef, family: family)
+            let payload: [String: Any] = [
+                "ok": false,
+                "command": command,
+                "action": action.rawValue,
+                "readOnly": false,
+                "changed": false,
+                "candidateRef": normalizedReviewCandidateRef(candidateRef, family: family),
+                "reviewFamily": family.rawValue,
+                "reviewState": "unknown",
+                "truthBoundary": "reviewable_candidate_not_truth",
+                "availability": "unavailable",
+                "evidenceStatus": "not_checked",
+                "mutationAuthority": CiderReviewMutationAuthority.reviewApprovedCandidate.rawValue,
+                "errorCode": error.classification.rawValue,
+                "errorClassification": error.classification.rawValue,
+                "error": error.localizedDescription,
+                "actionReceiptID": NSNull(),
+                "safeVerificationCommands": safeCommands,
+                "safeNextCommands": safeCommands,
+            ]
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        } catch {
+            processExitCode = 1
+            let safeCommands = reviewCandidateFallbackCommands(candidateRef: candidateRef, family: family)
+            let payload: [String: Any] = [
+                "ok": false,
+                "command": command,
+                "action": action.rawValue,
+                "readOnly": false,
+                "changed": false,
+                "candidateRef": normalizedReviewCandidateRef(candidateRef, family: family),
+                "reviewFamily": family.rawValue,
+                "reviewState": "unknown",
+                "truthBoundary": "reviewable_candidate_not_truth",
+                "availability": "unavailable",
+                "evidenceStatus": "not_checked",
+                "mutationAuthority": CiderReviewMutationAuthority.reviewApprovedCandidate.rawValue,
+                "errorCode": CiderReviewActionErrorClassification.databaseFailure.rawValue,
+                "errorClassification": CiderReviewActionErrorClassification.databaseFailure.rawValue,
+                "error": "Cider could not safely load this suggestion. Nothing was changed; refresh and try again.",
+                "actionReceiptID": NSNull(),
+                "safeVerificationCommands": safeCommands,
+                "safeNextCommands": safeCommands,
+            ]
+            if jsonOutput { outputJSON(payload) } else { print("Error: Cider could not safely load this suggestion. Nothing was changed; refresh and try again.") }
+        }
+    }
+
+    static func reviewCandidateCoordinatorPayload(
+        _ result: CiderReviewCLIActionAdapterResult,
+        command: String,
+        includeCandidatePayload: Bool
+    ) -> [String: Any] {
+        let outcome = result.outcome
+        let candidateID = result.after.id
+        let safeVerificationCommands = result.safeVerificationCommands
+        let safeNextCommands = result.safeNextCommands
+        let availability: String
+        switch outcome.availability {
+        case .available: availability = "available"
+        case .unavailable: availability = "unavailable"
+        }
+        let presentedAction = command.hasPrefix("item.accept-") ? "accept" : outcome.action.rawValue
+        var receipt: [String: Any]
+        if let canonicalReceipt = result.canonicalReceipt {
+            receipt = actionReceiptRecordToDict(canonicalReceipt)
+            if canonicalReceipt.command != command {
+                receipt["canonicalCommand"] = canonicalReceipt.command
+                receipt["command"] = command
+            }
+            if canonicalReceipt.action != presentedAction {
+                receipt["canonicalAction"] = canonicalReceipt.action
+                receipt["action"] = presentedAction
+            }
+            receipt["truthBoundary"] = outcome.truthBoundary
+        } else {
+            receipt = [
+                "id": NSNull(),
+                "command": command,
+                "action": outcome.action.rawValue,
+                "actor": outcome.actor,
+                "status": outcome.error == nil ? "succeeded" : "failed",
+                "readOnly": false,
+                "changed": false,
+                "truthBoundary": outcome.truthBoundary,
+                "safeVerificationCommands": safeVerificationCommands,
+                "safeNextCommands": safeNextCommands,
+            ]
+            if let error = outcome.error { receipt["errorCode"] = error.classification.rawValue }
+        }
+        var payload: [String: Any] = [
+            "ok": outcome.isSuccessful,
+            "command": command,
+            "action": presentedAction,
+            "readOnly": false,
+            "changed": outcome.changed,
+            "candidateID": candidateID,
+            "candidateRef": outcome.identity.candidateRef,
+            "reviewFamily": outcome.identity.family.rawValue,
+            "reviewState": outcome.resultingReviewState,
+            "truthBoundary": outcome.truthBoundary,
+            "beforeState": result.request.expectedVersion.reviewState,
+            "afterState": outcome.resultingReviewState,
+            "actor": outcome.actor,
+            "availability": availability,
+            "evidenceStatus": outcome.evidenceStatus.rawValue,
+            "exactEvidenceRequirement": outcome.exactEvidenceRequirement.rawValue,
+            "mutationAuthority": outcome.mutationAuthority.rawValue,
+            "expectedVersionSelector": result.expectedVersionSelector,
+            "actionReceiptID": outcome.actionReceiptID ?? NSNull(),
+            "actionReceipt": receipt,
+            "coordinatorOutcome": result.coordinatorOutcomeDictionary(),
+            "provenance": reviewCandidateCoordinatorProvenance(result),
+            "safeVerificationCommands": safeVerificationCommands,
+            "safeNextCommands": safeNextCommands,
+        ]
+        if includeCandidatePayload {
+            payload["candidate"] = outcome.identity.family == .graphCandidate
+                ? graphCandidateToDict(result.after)
+                : memoryCandidateToDict(result.after)
+            payload["safeCommands"] = safeNextCommands
+            if let targetOwnerRef = outcome.targetOwnerRef,
+               let owner = try? ownerRefFromCanonical(targetOwnerRef) {
+                payload["targetOwner"] = ownerToDict(owner)
+            }
+            if let relation = result.canonicalRelation {
+                payload["relation"] = ownerRelationToDict(relation)
+            }
+            if outcome.identity.family == .memoryCandidate, outcome.action == .correct {
+                payload["changedFields"] = ["value"]
+            }
+        }
+        if let error = outcome.error {
+            payload["errorCode"] = error.classification.rawValue
+            payload["errorClassification"] = error.classification.rawValue
+            if error.classification == .alreadyReviewed {
+                payload["error"] = "This candidate is already \(result.after.reviewState). Refresh before choosing another action."
+            } else {
+                payload["error"] = error.message
+            }
+        }
+        return payload
+    }
+
+    static func reviewCandidateCoordinatorProvenance(
+        _ result: CiderReviewCLIActionAdapterResult
+    ) -> [String: Any] {
+        var provenance: [String: Any] = [
+            "sourceRef": result.after.owner.canonicalRef,
+            "candidateRef": result.outcome.identity.candidateRef,
+            "storage": "enrichment_outputs",
+        ]
+        if let evidenceRef = result.after.metadata["source_evidence_ref"] {
+            provenance["evidenceRef"] = evidenceRef
+        }
+        if let targetOwnerRef = result.outcome.targetOwnerRef {
+            provenance["targetOwnerRef"] = targetOwnerRef
+        }
+        if let relationType = result.after.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedRelationType] {
+            provenance["relationType"] = relationType
+        }
+        return provenance
+    }
+
+    static func graphCoordinatorTargetOptionRef(
+        candidateRef: String,
+        args: [String]
+    ) -> String? {
+        if let explicit = parseFlag("--target-option", from: args) { return explicit }
+        let normalizedRef = normalizedReviewCandidateRef(candidateRef, family: .graphCandidate)
+        guard let item = try? CiderReviewQueueService().list(limit: Int.max, includeDeferred: true).items
+            .first(where: { $0.candidateRef == normalizedRef }) else {
+            return nil
+        }
+        let requestedOwner = graphReviewCorrectedTargetOwner(from: args) ?? graphReviewTargetOwner(from: args)
+        let requestedRelation = parseFlag("--corrected-relation", from: args) ?? parseFlag("--relation", from: args)
+        if let requestedOwner {
+            let matches = item.targetOptions.filter { option in
+                option.targetOwner == requestedOwner && (requestedRelation == nil || option.relationType == requestedRelation)
+            }
+            return matches.count == 1 ? matches[0].optionRef : nil
+        }
+        return nil
+    }
+
+    static func normalizedReviewCandidateRef(
+        _ candidateRef: String,
+        family: CiderReviewCandidateFamily
+    ) -> String {
+        let id = candidateRef.replacingOccurrences(of: "\(family.rawValue):", with: "")
+        return "\(family.rawValue):\(id)"
+    }
+
+    static func reviewCandidateFallbackCommands(
+        candidateRef: String,
+        family: CiderReviewCandidateFamily
+    ) -> [String] {
+        let id = candidateRef.replacingOccurrences(of: "\(family.rawValue):", with: "")
+        let inspect = family == .graphCandidate
+            ? "cider-cli item graph-candidate \(id) --json"
+            : "cider-cli item memory-facts inspect \(id) --json"
+        return [inspect, "cider-cli capture review-queue --kind \(family.rawValue) --include-deferred --json"]
     }
 
     static func printReviewEventDateFactActionResult(
@@ -26360,6 +26769,29 @@ struct CiderCLI {
             return
         }
 
+        let usesAdvancedAcceptCompatibility = action == "accept"
+            && graphAcceptRequiresLegacyCompatibility(candidateID: candidateID, args: args)
+        if action != "delegate" && !usesAdvancedAcceptCompatibility {
+            let coordinatorAction: CiderReviewAction
+            switch action {
+            case "accept": coordinatorAction = .approve
+            case "reject": coordinatorAction = .reject
+            default:
+                printCLIError("Unsupported graph candidate action '\(action)'.")
+                return
+            }
+            performReviewCandidateCLIAction(
+                candidateRef: candidateID,
+                family: .graphCandidate,
+                action: coordinatorAction,
+                actor: parseFlag("--actor", from: args) ?? "user",
+                args: args,
+                surfaceCommand: "item.\(action)-graph-candidate",
+                includeCandidatePayload: true
+            )
+            return
+        }
+
         do {
             let payload: [String: Any]
             switch action {
@@ -26394,6 +26826,23 @@ struct CiderCLI {
                 )
             )
         }
+    }
+
+    static func graphAcceptRequiresLegacyCompatibility(
+        candidateID: String,
+        args: [String]
+    ) -> Bool {
+        let legacyFlags = [
+            "--alias", "--allow-conflicts", "--approve-conflicts", "--source",
+            "--target-owner", "--relation", "--corrected-target-owner", "--corrected-relation",
+        ]
+        if legacyFlags.contains(where: args.contains) { return true }
+        let service = SecondBrainEnrichmentOutputService(database: .shared)
+        guard let output = try? graphCandidateOutputForMutation(candidateID, action: "accept", service: service),
+              let candidate = try? SecondBrainGraphCandidateContract.validate(output) else {
+            return true
+        }
+        return !graphObjectHubConflicts(candidate: candidate, output: output).isEmpty
     }
 
     static func acceptGraphCandidatePayload(

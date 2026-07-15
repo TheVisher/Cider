@@ -111,6 +111,7 @@ struct JournalIntelligenceReviewActionRequest: Equatable {
     var action: JournalIntelligenceReviewAction
     var correctedValue: String? = nil
     var targetOptionRef: String? = nil
+    var reason: String? = nil
 
     init(
         candidateRef: String,
@@ -119,7 +120,8 @@ struct JournalIntelligenceReviewActionRequest: Equatable {
         expectedUpdatedAt: Date,
         action: JournalIntelligenceReviewAction,
         correctedValue: String? = nil,
-        targetOptionRef: String? = nil
+        targetOptionRef: String? = nil,
+        reason: String? = nil
     ) {
         self.candidateRef = candidateRef
         self.family = family
@@ -128,6 +130,7 @@ struct JournalIntelligenceReviewActionRequest: Equatable {
         self.action = action
         self.correctedValue = correctedValue
         self.targetOptionRef = targetOptionRef
+        self.reason = reason
     }
 
     init(
@@ -143,7 +146,8 @@ struct JournalIntelligenceReviewActionRequest: Equatable {
             expectedUpdatedAt: proposal.candidateUpdatedAt,
             action: action,
             correctedValue: correctedValue,
-            targetOptionRef: targetOptionRef
+            targetOptionRef: targetOptionRef,
+            reason: nil
         )
     }
 }
@@ -304,13 +308,13 @@ final class JournalIntelligenceReviewActionService {
                 actionResult = try queue.correctMemoryCandidate(
                     candidateID: selector.id,
                     correctedValue: value,
-                    reason: "Corrected from Journal Review.",
+                    reason: Self.normalizedReason(request.reason, fallback: "Corrected from Journal Review."),
                     actor: actor
                 )
             case ("memory_candidate", .reject):
                 actionResult = try queue.rejectMemoryCandidate(
                     candidateID: selector.id,
-                    reason: "Rejected from Journal Review.",
+                    reason: Self.normalizedReason(request.reason, fallback: "Rejected from Journal Review."),
                     actor: actor
                 )
             case ("memory_candidate", .defer):
@@ -319,7 +323,7 @@ final class JournalIntelligenceReviewActionService {
                 }
                 actionResult = try queue.deferMemoryCandidate(
                     candidateID: selector.id,
-                    reason: "Deferred from Journal Review.",
+                    reason: Self.normalizedReason(request.reason, fallback: "Deferred from Journal Review."),
                     actor: actor
                 )
             case ("graph_candidate", .approve):
@@ -338,13 +342,13 @@ final class JournalIntelligenceReviewActionService {
                 actionResult = try queue.correctGraphCandidate(
                     candidateID: selector.id,
                     targetOptionRef: normalizedTargetOptionRef,
-                    reason: "Corrected from Journal Review without approval.",
+                    reason: Self.normalizedReason(request.reason, fallback: "Corrected from Journal Review without approval."),
                     actor: actor
                 )
             case ("graph_candidate", .reject):
                 actionResult = try queue.rejectGraphCandidate(
                     candidateID: selector.id,
-                    reason: "Rejected from Journal Review.",
+                    reason: Self.normalizedReason(request.reason, fallback: "Rejected from Journal Review."),
                     actor: actor
                 )
             case ("graph_candidate", .defer):
@@ -353,7 +357,7 @@ final class JournalIntelligenceReviewActionService {
                 }
                 actionResult = try queue.deferGraphCandidate(
                     candidateID: selector.id,
-                    reason: "Deferred from Journal Review.",
+                    reason: Self.normalizedReason(request.reason, fallback: "Deferred from Journal Review."),
                     actor: actor
                 )
             default:
@@ -600,7 +604,7 @@ final class JournalIntelligenceReviewActionService {
         } else {
             candidateRef = request.candidateRef.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let fields = [
+        var fields = [
             "journal-review-request-v1",
             candidateRef,
             family,
@@ -611,6 +615,10 @@ final class JournalIntelligenceReviewActionService {
             normalizedCorrection(request.correctedValue),
             normalizedTargetOptionRef(request.targetOptionRef) ?? "",
         ]
+        let normalizedReason = normalizedCorrection(request.reason)
+        if !normalizedReason.isEmpty {
+            fields.append("reason:\(normalizedReason)")
+        }
         let canonical = fields.map { field in
             "\(field.utf8.count):\(field)"
         }.joined(separator: "|")
@@ -629,6 +637,11 @@ final class JournalIntelligenceReviewActionService {
 
     private static func normalizedCorrection(_ value: String?) -> String {
         value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func normalizedReason(_ value: String?, fallback: String) -> String {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return normalized.isEmpty ? fallback : normalized
     }
 
     private static func normalizedTargetOptionRef(_ value: String?) -> String? {
