@@ -17,6 +17,52 @@ struct NoteAttachmentReferenceScan: Equatable, Sendable {
 /// Manages notes as .md files on disk with a lightweight JSON index for UUID mapping.
 @MainActor
 final class NotesStorage: ObservableObject {
+    enum ImageTransactionStage: Hashable, Sendable {
+        case beforeFileReplace
+        case afterFileReplaceBeforeDatabase
+        case insideCanonicalDatabasePersist
+        case insideContentIndexRebuild
+        case postPersistVerification
+        case beforeCompensationRestore
+    }
+
+    struct ImageTransactionHooks {
+        var atStage: (ImageTransactionStage) throws -> Void
+
+        init(atStage: @escaping (ImageTransactionStage) throws -> Void = { _ in }) {
+            self.atStage = atStage
+        }
+    }
+
+    enum ImageTransactionPreviousFile: Equatable, Sendable {
+        case missing
+        case bytes(Data)
+    }
+
+    struct ImageTransactionFileExpectation: Equatable, Sendable {
+        let noteID: UUID
+        let fileURL: URL
+        let previousFile: ImageTransactionPreviousFile
+    }
+
+    struct ImageTransactionPersistenceError: Error, Equatable, LocalizedError, Sendable {
+        enum Outcome: Equatable, Sendable {
+            case notCommitted
+            case indeterminate
+        }
+
+        let outcome: Outcome
+
+        var errorDescription: String? {
+            switch outcome {
+            case .notCommitted:
+                "Cider could not commit the note image transaction. The prior note was restored."
+            case .indeterminate:
+                "Cider could not confirm recovery of the note image transaction. The prepared asset was retained."
+            }
+        }
+    }
+
     static let shared = NotesStorage()
 
     @Published private(set) var notes: [Note] = []
@@ -29,6 +75,8 @@ final class NotesStorage: ObservableObject {
     /// Explicit database reference for testing. Production uses `CiderDatabase.shared`.
     private var database: CiderDatabase?
     private var directoryURL: URL
+    private var vaultRootURLOverride: URL?
+    private let imageTransactionHooks: ImageTransactionHooks
     private var directoryFileDescriptor: Int32 = -1
     private var directorySource: DispatchSourceFileSystemObject?
     private var inboxFileDescriptor: Int32 = -1
@@ -77,6 +125,8 @@ final class NotesStorage: ObservableObject {
 
     private init() {
         self.directoryURL = StoragePaths.directoryURL(for: .notes)
+        self.vaultRootURLOverride = nil
+        self.imageTransactionHooks = .init()
         ensureDirectory()
         startDirectoryWatcher()
         startVaultFilesystemObservation()
@@ -130,9 +180,16 @@ final class NotesStorage: ObservableObject {
 
     /// Testing-only initializer with an explicit database.
     /// Does NOT call loadNotes() — tests call loadNotesFromDatabase() directly.
-    init(database: CiderDatabase) {
+    init(
+        database: CiderDatabase,
+        notesDirectoryURL: URL? = nil,
+        vaultRootURL: URL? = nil,
+        imageTransactionHooks: ImageTransactionHooks = .init()
+    ) {
         self.database = database
-        self.directoryURL = StoragePaths.directoryURL(for: .notes)
+        self.directoryURL = (notesDirectoryURL ?? StoragePaths.directoryURL(for: .notes)).standardizedFileURL
+        self.vaultRootURLOverride = vaultRootURL?.standardizedFileURL
+        self.imageTransactionHooks = imageTransactionHooks
     }
 
     /// The base directory URL where notes metadata index is stored (.cider/notes/).
@@ -140,16 +197,19 @@ final class NotesStorage: ObservableObject {
 
     /// The Inbox/Notes/ directory for unfiled note content files.
     private var inboxNotesDirectoryURL: URL {
-        StoragePaths.cachedInboxSubdirectoryURL(for: .notes)
+        vaultRoot.appendingPathComponent(StoragePaths.inboxDir).appendingPathComponent("Notes")
     }
 
     /// The vault root directory.
-    private var vaultRoot: URL { StoragePaths.cachedVaultDirectoryURL }
+    private var vaultRoot: URL { vaultRootURLOverride ?? StoragePaths.cachedVaultDirectoryURL }
 
     /// Resolves the absolute file URL for a note.
     /// Uses Note.absoluteFileURL which handles both Notes/-based and vault-folder-based paths.
     func noteFileURL(for note: Note) -> URL {
-        note.absoluteFileURL
+        if note.relativePath.contains("/") {
+            return vaultRoot.appendingPathComponent(note.relativePath)
+        }
+        return directoryURL.appendingPathComponent(note.relativePath)
     }
 
     // MARK: - Directory Management
@@ -740,31 +800,35 @@ final class NotesStorage: ObservableObject {
     }
 
     private func removeDuplicateProjectNoteRelations(relativePath: String, keeping keptID: UUID) {
-        guard let db = resolvedDatabase else { return }
         do {
-            let keptOwnerID = DatabaseHelpers.encode(keptID)
-            let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
-            let select = try db.prepare("""
-                SELECT id, source_owner_id, metadata
-                FROM owner_relations
-                WHERE source_owner_type = 'note'
-                  AND target_owner_type = 'project'
-                  AND relation_type = 'artifact_of';
-                """)
-            var duplicateIDs: [String] = []
-            while try select.step() {
-                let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: select.optionalString(at: 2)) ?? [:]
-                guard Self.normalizedNoteRelativePath(metadata["path"] ?? "") == normalizedPath else { continue }
-                guard select.string(at: 1) != keptOwnerID else { continue }
-                duplicateIDs.append(select.string(at: 0))
-            }
-            for relationID in duplicateIDs {
-                let delete = try db.prepare("DELETE FROM owner_relations WHERE id = ?;")
-                delete.bind(relationID, at: 1)
-                try delete.step()
-            }
+            try removeDuplicateProjectNoteRelationsThrowing(relativePath: relativePath, keeping: keptID)
         } catch {
             logger.error("Failed to remove duplicate project note relations: \(error.localizedDescription)")
+        }
+    }
+
+    private func removeDuplicateProjectNoteRelationsThrowing(relativePath: String, keeping keptID: UUID) throws {
+        guard let db = resolvedDatabase else { return }
+        let keptOwnerID = DatabaseHelpers.encode(keptID)
+        let normalizedPath = Self.normalizedNoteRelativePath(relativePath)
+        let select = try db.prepare("""
+            SELECT id, source_owner_id, metadata
+            FROM owner_relations
+            WHERE source_owner_type = 'note'
+              AND target_owner_type = 'project'
+              AND relation_type = 'artifact_of';
+            """)
+        var duplicateIDs: [String] = []
+        while try select.step() {
+            let metadata = DatabaseHelpers.decodeJSON([String: String].self, from: select.optionalString(at: 2)) ?? [:]
+            guard Self.normalizedNoteRelativePath(metadata["path"] ?? "") == normalizedPath else { continue }
+            guard select.string(at: 1) != keptOwnerID else { continue }
+            duplicateIDs.append(select.string(at: 0))
+        }
+        for relationID in duplicateIDs {
+            let delete = try db.prepare("DELETE FROM owner_relations WHERE id = ?;")
+            delete.bind(relationID, at: 1)
+            try delete.step()
         }
     }
 
@@ -1229,6 +1293,210 @@ final class NotesStorage: ObservableObject {
         let noteDir = note.absoluteFileURL.deletingLastPathComponent()
         return NotesMarkdownPathCodec.markdownForPersistence(markdown, notesDirectoryURL: noteDir)
     }
+
+    /// Throwing, compensating persistence boundary used only by the editor image
+    /// transaction. The prior file identity is caller-supplied from the editor's
+    /// exact disk-truth snapshot; canonical SQLite state and searchable chunks
+    /// commit together, and observable in-memory state is published last.
+    @discardableResult
+    func persistImageTransaction(
+        note: Note,
+        expected: ImageTransactionFileExpectation
+    ) throws -> Note {
+        guard expected.noteID == note.id,
+              expected.fileURL.standardizedFileURL == noteFileURL(for: note).standardizedFileURL,
+              let db = resolvedDatabase,
+              let noteIndex = notes.firstIndex(where: { $0.id == note.id }) else {
+            throw ImageTransactionPersistenceError(outcome: .notCommitted)
+        }
+
+        let fileURL = expected.fileURL.standardizedFileURL
+        let previousNote = notes[noteIndex]
+        let previousCache = contentCache[note.id]
+        let previousIOIssue = lastContentIOIssue
+        let parentURL = fileURL.deletingLastPathComponent()
+        let parentExisted = FileManager.default.fileExists(atPath: parentURL.path)
+
+        guard currentImageTransactionFileState(at: fileURL) == expected.previousFile else {
+            throw ImageTransactionPersistenceError(outcome: .notCommitted)
+        }
+
+        var replacementMayHaveChangedDisk = false
+        do {
+            try imageTransactionHooks.atStage(.beforeFileReplace)
+            guard currentImageTransactionFileState(at: fileURL) == expected.previousFile else {
+                throw ImageTransactionPersistenceError(outcome: .notCommitted)
+            }
+            try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
+            replacementMayHaveChangedDisk = true
+            try Data(note.content.utf8).write(to: fileURL, options: .atomic)
+            guard currentImageTransactionFileState(at: fileURL) == .bytes(Data(note.content.utf8)) else {
+                throw ImageTransactionPersistenceError(outcome: .notCommitted)
+            }
+            try imageTransactionHooks.atStage(.afterFileReplaceBeforeDatabase)
+
+            var committedNote = note
+            committedNote.modifiedAt = Date()
+            try db.withTransaction {
+                try persistNoteToDatabaseInner(db, note: committedNote, failOnProjectRelationCleanupError: true)
+                try imageTransactionHooks.atStage(.insideCanonicalDatabasePersist)
+                let indexResult = try SecondBrainItemContentIndexingService(database: db).rebuild(
+                    owner: SecondBrainOwnerRef(ownerType: "note", ownerID: note.id.uuidString)
+                )
+                try imageTransactionHooks.atStage(.insideContentIndexRebuild)
+                try imageTransactionHooks.atStage(.postPersistVerification)
+                try verifyImageTransactionPersistence(
+                    db,
+                    note: committedNote,
+                    fileURL: fileURL,
+                    indexResult: indexResult
+                )
+            }
+
+            notes[noteIndex] = committedNote
+            contentCache[note.id] = (committedNote.modifiedAt, committedNote.content)
+            lastContentIOIssue = nil
+            if expected.previousFile != .bytes(Data(note.content.utf8)) {
+                scheduleAttachmentCleanup()
+            }
+            return committedNote
+        } catch let error as ImageTransactionPersistenceError where !replacementMayHaveChangedDisk {
+            throw error
+        } catch {
+            notes[noteIndex] = previousNote
+            if let previousCache {
+                contentCache[note.id] = previousCache
+            } else {
+                contentCache.removeValue(forKey: note.id)
+            }
+            lastContentIOIssue = previousIOIssue
+
+            let currentFileState = currentImageTransactionFileState(at: fileURL)
+            if currentFileState == expected.previousFile {
+                if !parentExisted,
+                   (try? FileManager.default.contentsOfDirectory(atPath: parentURL.path).isEmpty) == true {
+                    try? FileManager.default.removeItem(at: parentURL)
+                }
+                throw ImageTransactionPersistenceError(outcome: .notCommitted)
+            }
+            guard currentFileState == .bytes(Data(note.content.utf8)) else {
+                throw ImageTransactionPersistenceError(outcome: .indeterminate)
+            }
+
+            do {
+                try imageTransactionHooks.atStage(.beforeCompensationRestore)
+                try restoreImageTransactionFile(expected.previousFile, at: fileURL)
+                guard currentImageTransactionFileState(at: fileURL) == expected.previousFile else {
+                    throw ImageTransactionPersistenceError(outcome: .indeterminate)
+                }
+                if !parentExisted,
+                   (try? FileManager.default.contentsOfDirectory(atPath: parentURL.path).isEmpty) == true {
+                    try? FileManager.default.removeItem(at: parentURL)
+                }
+                throw ImageTransactionPersistenceError(outcome: .notCommitted)
+            } catch let persistenceError as ImageTransactionPersistenceError {
+                throw persistenceError
+            } catch {
+                throw ImageTransactionPersistenceError(outcome: .indeterminate)
+            }
+        }
+    }
+
+    private func currentImageTransactionFileState(at fileURL: URL) -> ImageTransactionPreviousFile {
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let bytes = try? Data(contentsOf: fileURL) else {
+            return .missing
+        }
+        return .bytes(bytes)
+    }
+
+    private func restoreImageTransactionFile(
+        _ previous: ImageTransactionPreviousFile,
+        at fileURL: URL
+    ) throws {
+        switch previous {
+        case .missing:
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+            }
+        case .bytes(let bytes):
+            try bytes.write(to: fileURL, options: .atomic)
+        }
+    }
+
+    private func verifyImageTransactionPersistence(
+        _ db: CiderDatabase,
+        note: Note,
+        fileURL: URL,
+        indexResult: SecondBrainItemContentIndexResult
+    ) throws {
+        guard currentImageTransactionFileState(at: fileURL) == .bytes(Data(note.content.utf8)) else {
+            throw ImageTransactionPersistenceError(outcome: .notCommitted)
+        }
+
+        let item = try db.prepare("""
+            SELECT i.title, i.created_at, i.updated_at, i.folder_id, i.relative_path,
+                   n.content, n.summary, n.is_pinned
+            FROM items i JOIN notes n ON n.item_id = i.id
+            WHERE i.id = ? AND i.type = 'note';
+            """)
+        item.bind(DatabaseHelpers.encode(note.id), at: 1)
+        let expectedFolderID = try resolveSafeFolderID(db, folderID: note.folderID)
+        guard try item.step(),
+              item.string(at: 0) == note.title,
+              item.optionalString(at: 3) == expectedFolderID,
+              (item.optionalString(at: 4) ?? "") == note.relativePath,
+              item.string(at: 5) == note.content,
+              item.optionalString(at: 6) == note.summary,
+              item.bool(at: 7) == note.isPinned else {
+            throw ImageTransactionPersistenceError(outcome: .notCommitted)
+        }
+
+        let expectedLabels = Set(try existingLabelIDs(db, candidates: note.labelIDs))
+        guard Set(try loadLabelIDs(db, itemID: note.id)) == expectedLabels,
+              Set(try loadTags(db, itemID: note.id)) == Set(note.tags),
+              indexResult.chunkCount == 1 else {
+            throw ImageTransactionPersistenceError(outcome: .notCommitted)
+        }
+
+        let chunks = try db.prepare("SELECT body FROM content_chunks WHERE owner_type = 'note' AND owner_id = ? ORDER BY chunk_index;")
+        chunks.bind(note.id.uuidString, at: 1)
+        var chunkBodies: [String] = []
+        while try chunks.step() { chunkBodies.append(chunks.string(at: 0)) }
+        guard chunkBodies.count == indexResult.chunkCount,
+              chunkBodies.count == 1,
+              chunkBodies[0].contains(note.content) else {
+            throw ImageTransactionPersistenceError(outcome: .notCommitted)
+        }
+
+        if note.isProjectArtifact {
+            let relation = try db.prepare("""
+                SELECT COUNT(*) FROM owner_relations
+                WHERE source_owner_type = 'note' AND source_owner_id = ?
+                  AND target_owner_type = 'project' AND relation_type = 'artifact_of'
+                  AND source = 'project_notes';
+                """)
+            relation.bind(note.id.uuidString, at: 1)
+            guard try relation.step(), relation.int(at: 0) == 1 else {
+                throw ImageTransactionPersistenceError(outcome: .notCommitted)
+            }
+        }
+    }
+
+    private func existingLabelIDs(_ db: CiderDatabase, candidates: [UUID]) throws -> [UUID] {
+        let statement = try db.prepare("SELECT 1 FROM labels WHERE id = ? LIMIT 1;")
+        var result: [UUID] = []
+        for candidate in candidates {
+            statement.reset()
+            statement.bind(DatabaseHelpers.encode(candidate), at: 1)
+            if try statement.step() { result.append(candidate) }
+        }
+        return result
+    }
+
+    var hasPendingAttachmentCleanupForTesting: Bool { attachmentCleanupWorkItem != nil }
+
+    func cachedContentForTesting(noteID: UUID) -> String? { contentCache[noteID]?.content }
 
     @discardableResult
     func save(note: Note, createSnapshot: Bool = true) -> Bool {
@@ -2009,24 +2277,6 @@ final class NotesStorage: ObservableObject {
                 self?.rescan()
             }
         }
-    }
-
-    // MARK: - Image Storage
-
-    /// Save image data to the `.attachments` subdirectory next to the note, returning the file URL.
-    func saveImage(data: Data, filename: String, for note: Note) -> URL {
-        let noteDir = note.absoluteFileURL.deletingLastPathComponent()
-        let attachmentsDir = noteDir.appendingPathComponent(attachmentsDirectoryName, isDirectory: true)
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: attachmentsDir.path) {
-            try? fm.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
-        }
-
-        // Prefix with short UUID to avoid collisions
-        let uniqueName = "\(UUID().uuidString)-\(filename)"
-        let fileURL = attachmentsDir.appendingPathComponent(uniqueName)
-        try? data.write(to: fileURL, options: .atomic)
-        return fileURL
     }
 
     // MARK: - Helpers
@@ -2833,7 +3083,11 @@ final class NotesStorage: ObservableObject {
     }
 
     /// Core persist logic for a single note — must be called inside a transaction.
-    private func persistNoteToDatabaseInner(_ db: CiderDatabase, note: Note) throws {
+    private func persistNoteToDatabaseInner(
+        _ db: CiderDatabase,
+        note: Note,
+        failOnProjectRelationCleanupError: Bool = false
+    ) throws {
         // Scrub folder_id against target DB to defuse FK failures during the
         // first-run migration (or any drift between in-memory state and DB).
         let folderIDText = try resolveSafeFolderID(db, folderID: note.folderID)
@@ -2928,7 +3182,11 @@ final class NotesStorage: ObservableObject {
 
         try replaceProjectArtifactRelationIfNeeded(db, note: note)
         if note.isProjectArtifact {
-            removeDuplicateProjectNoteRelations(relativePath: note.relativePath, keeping: note.id)
+            if failOnProjectRelationCleanupError {
+                try removeDuplicateProjectNoteRelationsThrowing(relativePath: note.relativePath, keeping: note.id)
+            } else {
+                removeDuplicateProjectNoteRelations(relativePath: note.relativePath, keeping: note.id)
+            }
         }
     }
 

@@ -276,15 +276,8 @@ final class TipTapWebView: WKWebView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         if let fileURL = textFileDropURL(sender) {
-            Task { @MainActor [weak viewModel, logger] in
-                do {
-                    let content = try await Task.detached(priority: .userInitiated) {
-                        try String(contentsOf: fileURL, encoding: .utf8)
-                    }.value
-                    viewModel?.handleDroppedTextFileContent(content, provenance: .textFile(fileURL))
-                } catch {
-                    logger.error("Failed to read dropped text file: \(error.localizedDescription, privacy: .public)")
-                }
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleDroppedTextFile(at: fileURL, provenance: .textFile(fileURL))
             }
             return true
         }
@@ -379,19 +372,8 @@ final class TipTapWebView: WKWebView {
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL],
            let imageURL = urls.first(where: { Self.imageExtensions.contains($0.pathExtension.lowercased()) }) {
-            Task { @MainActor [weak viewModel, logger] in
-                do {
-                    let data = try await Task.detached(priority: .userInitiated) {
-                        try Data(contentsOf: imageURL)
-                    }.value
-                    viewModel?.handleImageDrop(
-                        data: data,
-                        filename: imageURL.lastPathComponent,
-                        provenance: .imageFile(imageURL)
-                    )
-                } catch {
-                    logger.error("Failed to read dropped image file: \(error.localizedDescription, privacy: .public)")
-                }
+            Task { @MainActor [weak viewModel] in
+                viewModel?.handleLocalImageImport(at: imageURL, provenance: .imageFile(imageURL))
             }
             return true
         }

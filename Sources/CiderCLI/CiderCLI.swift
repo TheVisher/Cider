@@ -4097,17 +4097,22 @@ struct CiderCLI {
             }
             let imagePath = NSString(string: args[1]).expandingTildeInPath
             let imageURL = URL(fileURLWithPath: imagePath)
-            guard FileManager.default.fileExists(atPath: imageURL.path) else {
-                print("Error: File not found: \(imageURL.path)")
-                return
-            }
-            guard let data = try? Data(contentsOf: imageURL) else {
-                print("Error: Could not read file: \(imageURL.path)")
-                return
-            }
             let filename = imageURL.lastPathComponent
-            let savedURL = storage.saveImage(data: data, filename: filename, for: note)
-            print("Attached '\(filename)' to '\(note.title)' → \(savedURL.path)")
+            do {
+                let savedURL = try await NotesRelativeAssetIntakeService().importLocalImage(
+                    at: imageURL,
+                    noteID: note.id,
+                    noteDirectoryURL: note.absoluteFileURL.deletingLastPathComponent(),
+                    displayName: filename
+                ) { asset in
+                    asset.fileURL
+                }
+                print("Attached '\(filename)' to '\(note.title)' → \(savedURL.path)")
+            } catch let error as NotesRelativeAssetIntakeError {
+                printCLIError(error.localizedDescription)
+            } catch {
+                printCLIError("Cider could not safely attach that image.")
+            }
 
         default:
             printCLIError("Unknown note command: \(subcommand ?? "nil"). Commands: list, create, daily, get, pin, move, delete, update, tag, untag, snapshots, restore-snapshot, attach-image")
