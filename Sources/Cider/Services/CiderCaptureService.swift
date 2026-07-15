@@ -1079,8 +1079,7 @@ enum CiderCaptureError: LocalizedError {
     case missingSource
     case unsupportedSource(String)
     case storeFailed(String)
-    case fileNotFound(String)
-    case fileCopyFailed(String)
+    case fileIntake(LocalFileIntakeError)
 
     var errorDescription: String? {
         switch self {
@@ -1090,10 +1089,8 @@ enum CiderCaptureError: LocalizedError {
             return "Unsupported capture source: \(source)"
         case .storeFailed(let source):
             return "Could not store capture source: \(source)"
-        case .fileNotFound(let path):
-            return "Capture file does not exist: \(path)"
-        case .fileCopyFailed(let path):
-            return "Could not copy capture file into the vault: \(path)"
+        case .fileIntake(let error):
+            return error.localizedDescription
         }
     }
 }
@@ -1510,6 +1507,8 @@ final class CiderCaptureService {
     private let vaultFileStorage: VaultFileStorage
     private let routingDecisionService: CiderRoutingDecisionService?
     private let database: CiderDatabase?
+    private let localFileValidator: LocalFileIntakeValidator
+    private let vaultFileIngestionService: VaultFileIngestionService?
     private let noteAssignmentHandler: (UUID, UUID?) -> Bool
     private let thumbnailAssignmentHandler: (UUID, Data, String?) -> Bool
     private let todoUpdateHandler: (TodoCard) -> Bool
@@ -1525,6 +1524,8 @@ final class CiderCaptureService {
         vaultFileStorage: VaultFileStorage = .shared,
         database: CiderDatabase? = CiderDatabase.shared.isOpen ? CiderDatabase.shared : nil,
         routingDecisionService: CiderRoutingDecisionService? = CiderRoutingDecisionService(),
+        localFileValidator: LocalFileIntakeValidator = LocalFileIntakeValidator(),
+        vaultFileIngestionService: VaultFileIngestionService? = nil,
         noteAssignmentHandler: ((UUID, UUID?) -> Bool)? = nil,
         thumbnailAssignmentHandler: ((UUID, Data, String?) -> Bool)? = nil,
         todoUpdateHandler: ((TodoCard) -> Bool)? = nil,
@@ -1539,6 +1540,15 @@ final class CiderCaptureService {
         self.vaultFileStorage = vaultFileStorage
         self.database = database
         self.routingDecisionService = routingDecisionService
+        self.localFileValidator = localFileValidator
+        self.vaultFileIngestionService = vaultFileIngestionService ?? database.map {
+            VaultFileIngestionService(
+                database: $0,
+                vaultRoot: StoragePaths.cachedVaultDirectoryURL,
+                storage: vaultFileStorage,
+                validator: localFileValidator
+            )
+        }
         self.noteAssignmentHandler = noteAssignmentHandler ?? { [notesStorage] noteID, folderID in
             notesStorage.assignNote(noteID, toFolder: folderID)
         }
@@ -2200,39 +2210,35 @@ final class CiderCaptureService {
         let source = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty else { throw CiderCaptureError.missingSource }
         let sourceURL = URL(fileURLWithPath: NSString(string: source).expandingTildeInPath)
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory),
-              !isDirectory.boolValue else {
-            throw CiderCaptureError.fileNotFound(source)
-        }
-
-        let fileType = VaultFileType.from(extension: sourceURL.pathExtension)
-        let destinationDirectory = fileDestinationDirectory(fileType: fileType, folderID: folderID)
-        try FileManager.default.createDirectory(at: destinationDirectory.url, withIntermediateDirectories: true)
-        let destinationURL = uniqueDestinationURL(for: sourceURL, in: destinationDirectory.url)
+        let validated: LocalFileValidatedMetadata
         do {
-            if sourceURL.standardizedFileURL != destinationURL.standardizedFileURL {
-                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-            }
-        } catch {
-            throw CiderCaptureError.fileCopyFailed(source)
+            validated = try localFileValidator.validate(sourceURL)
+        } catch let error as LocalFileIntakeError {
+            throw CiderCaptureError.fileIntake(error)
         }
 
-        let values = try? destinationURL.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
-        let file = VaultFile(
-            id: UUID(),
-            filename: destinationURL.lastPathComponent,
-            relativePath: destinationDirectory.relativePathPrefix.isEmpty
-                ? destinationURL.lastPathComponent
-                : "\(destinationDirectory.relativePathPrefix)/\(destinationURL.lastPathComponent)",
-            fileType: fileType,
-            fileSize: Int64(values?.fileSize ?? 0),
-            createdAt: values?.creationDate ?? Date(),
-            modifiedAt: values?.contentModificationDate ?? Date(),
-            folderID: destinationDirectory.folderID,
-            title: normalizedTitle(title)
-        )
-        vaultFileStorage.persistVaultFileToDatabase(file)
+        let fileType = VaultFileType.from(extension: validated.fileExtension)
+        let destinationDirectory = fileDestinationDirectory(fileType: fileType, folderID: folderID)
+        guard let vaultFileIngestionService else {
+            throw CiderCaptureError.fileIntake(.init(.persistenceFailed))
+        }
+        let ingestion: VaultFileIngestionService.Result
+        do {
+            ingestion = try vaultFileIngestionService.ingest(.init(
+                validated: validated,
+                fileID: UUID(),
+                destinationRelativeDirectory: destinationDirectory.relativePathPrefix,
+                filename: validated.displayName,
+                filenameStrategy: .preserveWithUniqueSuffix,
+                fileType: fileType,
+                folderID: destinationDirectory.folderID,
+                title: normalizedTitle(title),
+                timestamp: nil
+            ))
+        } catch let error as LocalFileIntakeError {
+            throw CiderCaptureError.fileIntake(error)
+        }
+        let file = ingestion.file
         recordVaultFileCreateAudit(file)
 
         let target = routingTarget(
@@ -2975,18 +2981,6 @@ final class CiderCaptureService {
         )
     }
 
-    private func uniqueDestinationURL(for sourceURL: URL, in directoryURL: URL) -> URL {
-        let base = (sourceURL.lastPathComponent as NSString).deletingPathExtension
-        let ext = (sourceURL.lastPathComponent as NSString).pathExtension
-        var candidate = directoryURL.appendingPathComponent(sourceURL.lastPathComponent)
-        var counter = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let filename = ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)"
-            candidate = directoryURL.appendingPathComponent(filename)
-            counter += 1
-        }
-        return candidate
-    }
 }
 
 struct CiderBookmarkCaptureAdapterResult {

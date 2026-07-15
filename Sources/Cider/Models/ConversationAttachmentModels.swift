@@ -24,6 +24,7 @@ enum ConversationAttachmentTransportCapability: Equatable, Sendable {
 
 struct ConversationStagedAttachment: Identifiable, Equatable, Sendable {
     let id: UUID
+    let vaultFileID: UUID
     let displayName: String
     let kind: ConversationAttachmentKind
     let contentType: String
@@ -34,6 +35,7 @@ struct ConversationStagedAttachment: Identifiable, Equatable, Sendable {
     let textPreview: String?
     let imagePreviewData: Data?
     let sourceURL: URL
+    let validatedMetadata: LocalFileValidatedMetadata
 }
 
 struct ConversationAttachmentTransportPayload: Equatable, Sendable {
