@@ -636,6 +636,17 @@ struct SecondBrainFoundationTests {
         let captureProvenance = try #require(contextPayload["captureProvenance"] as? [[String: Any]])
         #expect(captureProvenance.contains { entry in
             entry["sourceKind"] as? String == "journal"
+                && entry["hasSourceText"] as? Bool == true
+                && entry["sourceText"] == nil
+        })
+
+        let trustedContextPayload = try jsonObject(from: runCLI([
+            "item", "context", "note", noteID, "--include-private-provenance", "--json",
+        ], vaultURL: vault))
+        let trustedCaptureProvenance = try #require(trustedContextPayload["captureProvenance"] as? [[String: Any]])
+        #expect(trustedCaptureProvenance.contains { entry in
+            entry["projection"] as? String == "trusted_local"
+                && entry["containsPrivateData"] as? Bool == true
                 && entry["sourceText"] as? String == "Evening commute note"
         })
 
@@ -757,7 +768,8 @@ struct SecondBrainFoundationTests {
         let captureProvenance = try #require(contextPayload["captureProvenance"] as? [[String: Any]])
         #expect(captureProvenance.contains { entry in
             entry["sourceKind"] as? String == "journal"
-                && entry["sourceText"] as? String == "Daily append must not bypass capture provenance."
+                && entry["hasSourceText"] as? Bool == true
+                && entry["sourceText"] == nil
         })
 
         let database = CiderDatabase()

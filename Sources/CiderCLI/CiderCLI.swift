@@ -297,6 +297,12 @@ struct CiderCLI {
             return true
         }
 
+        if command == "export",
+           subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
+            handleExport(subcommand: "help", args: args)
+            return true
+        }
+
         guard command == "item" else {
             return false
         }
@@ -353,7 +359,7 @@ struct CiderCLI {
                 command: "item.\(subcommand).help",
                 subcommand: subcommand,
                 aliasOf: isAlias ? "item.recall-context" : nil,
-                usage: "cider-cli item \(usageName) (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]",
+                usage: "cider-cli item \(usageName) (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--include-private-provenance] [--json]",
                 description: isAlias
                     ? "Read-only alias for source-backed recall bundles with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata."
                     : "Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata.",
@@ -368,6 +374,7 @@ struct CiderCLI {
                     optionContract("--history-since", value: "<iso|yyyy-mm-dd>", description: "Include action history at or after this time."),
                     optionContract("--history-before", value: "<iso|yyyy-mm-dd>", description: "Include action history before this time."),
                     optionContract("--history-limit", value: "<n>", description: "Maximum action history rows per anchor."),
+                    optionContract("--include-private-provenance", description: "Trusted-local opt-in that includes exact raw capture provenance and marks the projection as private."),
                     optionContract("--json", description: "Emit a machine-readable recall context bundle."),
                     optionContract("--help", description: "Show this command contract."),
                 ],
@@ -445,7 +452,7 @@ struct CiderCLI {
 
     static let itemHelpText = """
     Item graph commands:
-      cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]
+      cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--include-private-provenance] [--json]
         Valid --scope values: all, personalMemory, projectKanban, qaArtifacts, files.
         Use one scope value at a time; do not combine scope names.
         Valid --sort values: relevance, newest, oldest. Default is relevance; newest/oldest use capture provenance timestamps when present, otherwise item updated/created timestamps.
@@ -454,15 +461,16 @@ struct CiderCLI {
         Read-only source-backed natural preference/item recall over journaled and captured items.
       cider-cli item memory-recall <natural question>|--query <natural question> [--limit <n>] [--json]
         Read-only source-backed natural personal/work memory recall over Cider items.
-      cider-cli item search-debug <query> [--limit <n>] [--json]
-      cider-cli item get <type> <id-or-ref> [--json]
+      cider-cli item search-debug <query> [--limit <n>] [--include-private-provenance] [--json]
+      cider-cli item get <type> <id-or-ref> [--include-private-provenance] [--json]
       cider-cli item thumbnail-plan bookmark <id-or-ref> [--json]
       cider-cli item owner-get <owner-type> <owner-id-or-ref> [--json]
         Use owner-get folder <id|path|name|Inbox> for read-only folder metadata, counts, and health.
       cider-cli item open <type> <id-or-ref> [--json]
-      cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]
-      cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--json]
-      cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
+      cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--include-private-provenance] [--json]
+      cider-cli item context <type> <id-or-ref> [--max-sections <n>] [--max-chunks <n>] [--max-related <n>] [--max-history <n>] [--max-body <chars>] [--include-private-provenance] [--json]
+      cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--include-private-provenance] [--json]
+        Capture provenance is privacy-safe by default. Use --include-private-provenance only for deliberate trusted-local inspection; output is marked containsPrivateData=true.
       cider-cli item due-to-surface [--limit <n>] [--stale-after-days <n>] [--include-suppressed] [--json]
       cider-cli item reminder-ping-intents [--limit <n>] [--stale-after-days <n>] [--json]
       cider-cli item reminder-ping-delivery-preview [--transport <name>] [--surface <name>] [--limit <n>] [--stale-after-days <n>] [--json]
@@ -555,8 +563,9 @@ struct CiderCLI {
         switch subcommand {
         case "recall-context", "context-bundle", "recall-bundle":
             print("""
-            Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--json]
+            Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--include-private-provenance] [--json]
             Read-only source-backed recall bundle with anchors, accepted facts, reviewable candidates, action history, safe follow-up commands, and read-only actionReceipt metadata.
+            Capture provenance is privacy-safe by default; the trusted-local flag deliberately restores raw private values.
             """)
         case "action-ledger", "actions", "activity":
             switch positional.first {
@@ -675,7 +684,11 @@ struct CiderCLI {
         case "backlinks":
             return "cider-cli item backlinks <owner-type> <owner-id-or-ref> [--json]"
         case "hub", "library-hub", "card-hub":
-            return "cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--json]"
+            return "cider-cli item hub (<type> <id-or-ref>|--query <text>) [--limit <n>] [--include-private-provenance] [--json]"
+        case "get", "inspect":
+            return "cider-cli item get <type> <id-or-ref> [--include-private-provenance] [--json]"
+        case "context", "agent-context":
+            return "cider-cli item context <type> <id-or-ref> [--include-private-provenance] [--json]"
         case "backfill-kanban":
             return "cider-cli item backfill-kanban [--board <name-or-id>] [--json]"
         case "rebuild-references", "reference-rebuild", "references-rebuild":
@@ -6519,6 +6532,7 @@ struct CiderCLI {
                 return
             }
             let limit = Int(parseFlag("--limit", from: args) ?? "") ?? 20
+            let provenanceProjection = directCLIProvenanceProjection(from: args)
             do {
                 let space = resolveOptionalSpaceFlag(from: args)
                 if parseFlag("--space", from: args) != nil, space == nil { return }
@@ -6527,11 +6541,11 @@ struct CiderCLI {
                 let results = try contextService.search(query, limit: limit, inSpaceID: space?.id, scope: scope, sort: sort)
                 if jsonOutput {
                     if let space {
-                        outputJSON(itemSearchResponseToDict(query: query, scope: scope, sort: sort, space: space, results: results))
+                        outputJSON(itemSearchResponseToDict(query: query, scope: scope, sort: sort, space: space, results: results, provenanceProjection: provenanceProjection))
                     } else if parseFlag("--scope", from: args) != nil {
-                        outputJSON(itemSearchResponseToDict(query: query, scope: scope, sort: sort, space: nil, results: results))
+                        outputJSON(itemSearchResponseToDict(query: query, scope: scope, sort: sort, space: nil, results: results, provenanceProjection: provenanceProjection))
                     } else {
-                        outputJSON(unscopedItemSearchArrayPayload(results: results))
+                        outputJSON(unscopedItemSearchArrayPayload(results: results, provenanceProjection: provenanceProjection))
                     }
                 } else if results.isEmpty {
                     if let space {
@@ -6602,7 +6616,10 @@ struct CiderCLI {
             do {
                 let report = try contextService.searchDiagnostics(query, limit: limit)
                 if jsonOutput {
-                    outputJSON(itemSearchDiagnosticsReportToDict(report))
+                    outputJSON(itemSearchDiagnosticsReportToDict(
+                        report,
+                        provenanceProjection: directCLIProvenanceProjection(from: args)
+                    ))
                 } else {
                     print("Item search diagnostics for '\(report.query)':")
                     print("  Ranked results: \(report.exactMatches.count)")
@@ -6904,7 +6921,12 @@ struct CiderCLI {
                     }
                     let bundle = try contextService.context(for: ref)
                     if jsonOutput {
-                        outputJSON(itemGetResponseToDict(bundle, requestedType: positional[0], requestedRef: positional[1]))
+                        outputJSON(itemGetResponseToDict(
+                            bundle,
+                            requestedType: positional[0],
+                            requestedRef: positional[1],
+                            provenanceProjection: directCLIProvenanceProjection(from: args)
+                        ))
                     } else {
                         print("\(bundle.item.type.rawValue):\(bundle.item.id.uuidString)")
                         print("  Title: \(bundle.item.title)")
@@ -6934,7 +6956,11 @@ struct CiderCLI {
 
         case "recall-context", "context-bundle", "recall-bundle":
             do {
-                let payload = try recallContextPayload(args: args, contextService: contextService)
+                let payload = try recallContextPayload(
+                    args: args,
+                    contextService: contextService,
+                    provenanceProjection: directCLIProvenanceProjection(from: args)
+                )
                 if jsonOutput {
                     outputJSON(payload)
                 } else {
@@ -7223,7 +7249,12 @@ struct CiderCLI {
                 }
                 let packet = try contextService.agentContext(for: ref, limits: itemAgentContextLimits(from: args))
                 if jsonOutput {
-                    outputJSON(itemAgentContextResponseToDict(packet, requestedType: positional[0], requestedRef: positional[1]))
+                    outputJSON(itemAgentContextResponseToDict(
+                        packet,
+                        requestedType: positional[0],
+                        requestedRef: positional[1],
+                        provenanceProjection: directCLIProvenanceProjection(from: args)
+                    ))
                 } else {
                     print("\(packet.item.type.rawValue):\(packet.item.id.uuidString)")
                     print("  Title: \(packet.item.title)")
@@ -9023,11 +9054,13 @@ struct CiderCLI {
         case nil, "help", "--help", "-h":
             print("""
             Agent-safe export commands:
-              cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]
-              cider-cli export item <type> <id-or-ref> --format json|md [--json]
+              cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--include-private-provenance] [--json]
+              cider-cli export item <type> <id-or-ref> --format json|md [--include-private-provenance] [--json]
               cider-cli export card <board-id/card-id|card-id> --format json|md [--json]
               cider-cli export project <project-id-or-name> --format json|md [--limit <n>] [--json]
 
+            Portable exports omit raw capture provenance by default while preserving intentionally exported item content.
+            --include-private-provenance is a trusted-local opt-in and marks JSON output containsPrivateData=true.
             Whole-vault export is intentionally unavailable; export bounded folders, projects, cards, or items.
             """)
         case "folder":
@@ -9063,7 +9096,7 @@ struct CiderCLI {
         guard let folderRef = positional.first else {
             printExportError(
                 command: "export.folder",
-                message: "Usage: cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--json]",
+                message: "Usage: cider-cli export folder <relative-path|id|Inbox> --format json|md [--limit <n>] [--include-private-provenance] [--json]",
                 safeNextCommands: ["cider-cli item owner-get folder <relative-path-or-id> --json"]
             )
             return
@@ -9148,7 +9181,8 @@ struct CiderCLI {
                 "cider-cli export folder \"\(folderPath)\" --format json --limit \(limit) --json",
                 "cider-cli export folder \"\(folderPath)\" --format md --limit \(limit)",
                 "cider-cli item owner-get folder \"\(folderPath)\" --json",
-            ]
+            ],
+            provenanceProjection: directCLIProvenanceProjection(from: args, defaultContext: .portableExport)
         )
         printExportPayload(payload, format: format)
     }
@@ -9156,7 +9190,7 @@ struct CiderCLI {
     static func handleItemExport(args: [String]) {
         let positional = leadingPositionalArgs(from: args)
         guard positional.count >= 2 else {
-            printExportError(command: "export.item", message: "Usage: cider-cli export item <type> <id-or-ref> --format json|md [--json]")
+            printExportError(command: "export.item", message: "Usage: cider-cli export item <type> <id-or-ref> --format json|md [--include-private-provenance] [--json]")
             return
         }
         do {
@@ -9181,7 +9215,8 @@ struct CiderCLI {
                 safeNextCommands: [
                     "cider-cli item get \(ref.type.rawValue) \(ref.entityID.uuidString) --json",
                     "cider-cli export item \(ref.type.rawValue) \(ref.entityID.uuidString) --format md",
-                ]
+                ],
+                provenanceProjection: directCLIProvenanceProjection(from: args, defaultContext: .portableExport)
             )
             printExportPayload(payload, format: format)
         } catch {
@@ -9286,6 +9321,13 @@ struct CiderCLI {
         return raw == "markdown" ? "md" : raw
     }
 
+    static func directCLIProvenanceProjection(
+        from args: [String],
+        defaultContext: CiderPrivacyProjectionContext = .cliDefault
+    ) -> CiderPrivacyProjectionContext {
+        args.contains("--include-private-provenance") ? .trustedLocal : defaultContext
+    }
+
     static func exportFormatIsSupported(_ format: String) -> Bool {
         format == "json" || format == "md"
     }
@@ -9320,9 +9362,12 @@ struct CiderCLI {
         scope: [String: Any],
         refs: [LibraryEntityRef],
         limit: Int,
-        safeNextCommands: [String]
+        safeNextCommands: [String],
+        provenanceProjection: CiderPrivacyProjectionContext = .portableExport
     ) -> [String: Any] {
-        let items = refs.prefix(limit).map(exportedItemDict)
+        let items = refs.prefix(limit).map {
+            exportedItemDict($0, provenanceProjection: provenanceProjection)
+        }
         return [
             "ok": true,
             "command": command,
@@ -9342,7 +9387,10 @@ struct CiderCLI {
         ]
     }
 
-    static func exportedItemDict(_ ref: LibraryEntityRef) -> [String: Any] {
+    static func exportedItemDict(
+        _ ref: LibraryEntityRef,
+        provenanceProjection: CiderPrivacyProjectionContext = .portableExport
+    ) -> [String: Any] {
         let store = SecondBrainStore(database: .shared)
         let contextService = CiderItemContextService(database: .shared, secondBrainStore: store)
         var dict: [String: Any] = [
@@ -9386,7 +9434,9 @@ struct CiderCLI {
                 relationCandidates: bundle.relationCandidates
             )
             dict["routingDecisions"] = bundle.routingDecisions.map(routingDecisionToDict)
-            dict["captureProvenance"] = bundle.captureProvenance.map(captureProvenanceToDict)
+            dict["captureProvenance"] = bundle.captureProvenance.map {
+                captureProvenanceToDict($0, projection: provenanceProjection)
+            }
         } else {
             dict["related"] = []
             dict["ownerRelations"] = []
@@ -13451,7 +13501,7 @@ struct CiderCLI {
     }
 
     static var itemSearchUsageLine: String {
-        "Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--json]"
+        "Usage: cider-cli item search <query> [--scope all|personalMemory|projectKanban|qaArtifacts|files] [--sort relevance|newest|oldest] [--space <space-id|name>] [--limit <n>] [--include-private-provenance] [--json]"
     }
 
     static var itemSearchScopeGuidance: String {
@@ -13480,6 +13530,7 @@ struct CiderCLI {
           cider-cli item search "event" --scope personalMemory --json
           cider-cli item search "event" --scope all --json
           cider-cli item search "Panda Express" --sort newest --limit 5 --json
+          cider-cli item get note <id> --include-private-provenance --json  # trusted local; contains private data
         """
     }
 
@@ -21225,7 +21276,8 @@ struct CiderCLI {
 
     static func recallContextPayload(
         args: [String],
-        contextService: CiderItemContextService
+        contextService: CiderItemContextService,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
     ) throws -> [String: Any] {
         let limit = max(1, Int(parseFlag("--limit", from: args) ?? "") ?? 5)
         let query = parseFlag("--query", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -21301,6 +21353,9 @@ struct CiderCLI {
                 "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
                 "owner": ownerToDict(bundle.owner),
                 "citation": citation,
+                "captureProvenance": bundle.captureProvenance.map {
+                    captureProvenanceToDict($0, projection: provenanceProjection)
+                },
                 "recallScore": scoringService.score(anchorReasons),
                 "scoreReasons": scoreReasonsToDict(anchorReasons),
             ]
@@ -22296,7 +22351,10 @@ struct CiderCLI {
         }
     }
 
-    static func itemContextBundleToDict(_ bundle: CiderItemContextBundle) -> [String: Any] {
+    static func itemContextBundleToDict(
+        _ bundle: CiderItemContextBundle,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [String: Any] {
         var dict: [String: Any] = [
             "item": itemSummaryToDict(bundle.item, ownerRelations: bundle.ownerRelations),
             "owner": ownerToDict(bundle.owner),
@@ -22318,7 +22376,9 @@ struct CiderCLI {
             "routingDecisions": bundle.routingDecisions.map(routingDecisionToDict),
             "agentActions": bundle.agentActions.map(agentActionToDict),
             "enrichmentOutputs": bundle.enrichmentOutputs.map(enrichmentOutputToDict),
-            "captureProvenance": bundle.captureProvenance.map(captureProvenanceToDict),
+            "captureProvenance": bundle.captureProvenance.map {
+                captureProvenanceToDict($0, projection: provenanceProjection)
+            },
         ]
         addReviewableIntentDictionaries(for: bundle, to: &dict)
         CiderAgentDecisionContract.merge(itemContextBundleDecisionDictionary(for: bundle), into: &dict)
@@ -22379,7 +22439,8 @@ struct CiderCLI {
     }
 
     static func libraryHubReadModelToDict(_ hub: CiderLibraryHubReadModel, sourceArgs: [String] = []) -> [String: Any] {
-        [
+        let provenanceProjection = directCLIProvenanceProjection(from: sourceArgs)
+        return [
             "ok": true,
             "command": "item.hub",
             "readOnly": true,
@@ -22391,8 +22452,10 @@ struct CiderCLI {
             ],
             "hub": [
                 "title": hub.anchor.item.title,
-                "anchor": itemContextBundleToDict(hub.anchor),
-                "relatedItems": hub.relatedItems.map(libraryHubRelatedItemToDict),
+                "anchor": itemContextBundleToDict(hub.anchor, provenanceProjection: provenanceProjection),
+                "relatedItems": hub.relatedItems.map {
+                    libraryHubRelatedItemToDict($0, provenanceProjection: provenanceProjection)
+                },
                 "groups": hub.groups.map(libraryHubGroupToDict),
                 "domainFacets": hub.domainFacets.map(libraryHubDomainFacetToDict),
                 "presentation": libraryHubFacetPresentationToDict(LibraryHubFacetPresentationModel(hub: hub)),
@@ -22455,13 +22518,18 @@ struct CiderCLI {
         ]
     }
 
-    static func libraryHubRelatedItemToDict(_ related: CiderLibraryHubRelatedItem) -> [String: Any] {
+    static func libraryHubRelatedItemToDict(
+        _ related: CiderLibraryHubRelatedItem,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [String: Any] {
         var dict: [String: Any] = [
             "item": itemSummaryToDict(related.item, ownerRelations: related.relation.map { [$0] } ?? []),
             "owner": ownerToDict(related.owner),
             "relationType": related.relationType,
             "relationDirection": related.relationDirection,
-            "captureProvenance": related.captureProvenance.map(captureProvenanceToDict),
+            "captureProvenance": related.captureProvenance.map {
+                captureProvenanceToDict($0, projection: provenanceProjection)
+            },
             "sourceSummary": [
                 "relationSource": related.relation?.source ?? "item_link",
                 "captureSourceKinds": Array(Set(related.captureProvenance.map(\.sourceKind))).sorted(),
@@ -22617,25 +22685,117 @@ struct CiderCLI {
     }
 
     static func captureProvenanceToDict(_ provenance: CiderItemCaptureProvenance) -> [String: Any] {
+        captureProvenanceToDict(provenance, projection: .cliDefault)
+    }
+
+    static func captureProvenanceToDict(
+        _ provenance: CiderItemCaptureProvenance,
+        projection: CiderPrivacyProjectionContext
+    ) -> [String: Any] {
+        let decision = CiderPrivacyProjectionPolicy.captureProvenanceDecision(for: projection)
+        let hasSenderIdentity = provenance.senderID != nil || provenance.senderName != nil
+        let hasTransportIdentifiers = provenance.channelID != nil
+            || provenance.threadID != nil
+            || provenance.messageID != nil
+        let metadataKeys = decision.includesRawPrivateValues
+            ? provenance.metadata.keys.sorted()
+            : CiderPrivacyProjectionPolicy.safeProvenanceMetadataKeys(provenance.metadata.keys)
+        var omittedPrivateFields: [String] = []
+        if !decision.includesRawPrivateValues {
+            if provenance.channelID != nil { omittedPrivateFields.append("channelID") }
+            if provenance.messageID != nil { omittedPrivateFields.append("messageID") }
+            if !provenance.metadata.isEmpty { omittedPrivateFields.append("metadata") }
+            if !provenance.relation.evidence.isEmpty { omittedPrivateFields.append("relation.evidence") }
+            if !provenance.relation.metadata.isEmpty { omittedPrivateFields.append("relation.metadata") }
+            if !provenance.relation.actor.isEmpty { omittedPrivateFields.append("relation.actor") }
+            if !provenance.relation.source.isEmpty { omittedPrivateFields.append("relation.source") }
+            if provenance.senderID != nil { omittedPrivateFields.append("senderID") }
+            if provenance.senderName != nil { omittedPrivateFields.append("senderName") }
+            if provenance.sourceFile != nil { omittedPrivateFields.append("sourceFile") }
+            if provenance.sourceText != nil { omittedPrivateFields.append("sourceText") }
+            if provenance.sourceURL != nil { omittedPrivateFields.append("sourceURL") }
+            if provenance.threadID != nil { omittedPrivateFields.append("threadID") }
+        }
+
         var dict: [String: Any] = [
+            "projection": decision.projection,
+            "containsPrivateData": decision.containsPrivateData,
+            "omittedPrivateFields": omittedPrivateFields.sorted(),
             "eventID": provenance.eventID,
             "owner": ownerToDict(provenance.owner),
             "sourceKind": provenance.sourceKind,
             "attachmentCount": provenance.attachmentCount,
-            "metadata": provenance.metadata,
+            "metadataKeys": metadataKeys,
+            "metadataCount": provenance.metadata.count,
+            "hasMetadata": !provenance.metadata.isEmpty,
+            "hasSourceURL": provenance.sourceURL != nil,
+            "hasSourceFile": provenance.sourceFile != nil,
+            "hasSourceText": provenance.sourceText != nil,
+            "hasSenderIdentity": hasSenderIdentity,
+            "hasTransportIdentifiers": hasTransportIdentifiers,
+            "hasChannelID": provenance.channelID != nil,
+            "hasThreadID": provenance.threadID != nil,
+            "hasMessageID": provenance.messageID != nil,
             "createdAt": ISO8601DateFormatter().string(from: provenance.createdAt),
-            "relation": ownerRelationToDict(provenance.relation),
+            "relation": captureProvenanceRelationToDict(
+                provenance.relation,
+                includesRawPrivateValues: decision.includesRawPrivateValues
+            ),
         ]
-        if let surface = provenance.surface { dict["surface"] = surface }
-        if let channel = provenance.channel { dict["channel"] = channel }
-        if let channelID = provenance.channelID { dict["channelID"] = channelID }
-        if let threadID = provenance.threadID { dict["threadID"] = threadID }
-        if let messageID = provenance.messageID { dict["messageID"] = messageID }
-        if let senderID = provenance.senderID { dict["senderID"] = senderID }
-        if let senderName = provenance.senderName { dict["senderName"] = senderName }
-        if let sourceURL = provenance.sourceURL { dict["sourceURL"] = sourceURL }
-        if let sourceFile = provenance.sourceFile { dict["sourceFile"] = sourceFile }
-        if let sourceText = provenance.sourceText { dict["sourceText"] = sourceText }
+        if let surfaceCategory = CiderPrivacyProjectionPolicy.safeProvenanceCategory(provenance.surface) {
+            dict["surfaceCategory"] = surfaceCategory
+        }
+        if let channelCategory = CiderPrivacyProjectionPolicy.safeProvenanceCategory(provenance.channel) {
+            dict["channelCategory"] = channelCategory
+        }
+        if decision.includesRawPrivateValues {
+            dict["metadata"] = provenance.metadata
+            if let surface = provenance.surface { dict["surface"] = surface }
+            if let channel = provenance.channel { dict["channel"] = channel }
+            if let channelID = provenance.channelID { dict["channelID"] = channelID }
+            if let threadID = provenance.threadID { dict["threadID"] = threadID }
+            if let messageID = provenance.messageID { dict["messageID"] = messageID }
+            if let senderID = provenance.senderID { dict["senderID"] = senderID }
+            if let senderName = provenance.senderName { dict["senderName"] = senderName }
+            if let sourceURL = provenance.sourceURL { dict["sourceURL"] = sourceURL }
+            if let sourceFile = provenance.sourceFile { dict["sourceFile"] = sourceFile }
+            if let sourceText = provenance.sourceText { dict["sourceText"] = sourceText }
+        }
+        return dict
+    }
+
+    private static func captureProvenanceRelationToDict(
+        _ relation: SecondBrainRelation,
+        includesRawPrivateValues: Bool
+    ) -> [String: Any] {
+        let metadataKeys = includesRawPrivateValues
+            ? relation.metadata.keys.sorted()
+            : CiderPrivacyProjectionPolicy.safeProvenanceMetadataKeys(relation.metadata.keys)
+        var dict: [String: Any] = [
+            "id": relation.id,
+            "sourceOwner": ownerToDict(relation.sourceOwner),
+            "targetOwner": ownerToDict(relation.targetOwner),
+            "relationType": relation.relationType,
+            "hasEvidence": !relation.evidence.isEmpty,
+            "metadataKeys": metadataKeys,
+            "metadataCount": relation.metadata.count,
+            "createdAt": ISO8601DateFormatter().string(from: relation.createdAt),
+            "updatedAt": ISO8601DateFormatter().string(from: relation.updatedAt),
+        ]
+        if let confidence = relation.confidence { dict["confidence"] = confidence }
+        if includesRawPrivateValues {
+            dict["source"] = relation.source
+            dict["actor"] = relation.actor
+            dict["evidence"] = relation.evidence
+            dict["metadata"] = relation.metadata
+        } else {
+            if let sourceCategory = CiderPrivacyProjectionPolicy.safeProvenanceCategory(relation.source) {
+                dict["sourceCategory"] = sourceCategory
+            }
+            if let actorCategory = CiderPrivacyProjectionPolicy.safeProvenanceCategory(relation.actor) {
+                dict["actorCategory"] = actorCategory
+            }
+        }
         return dict
     }
 
@@ -28660,7 +28820,8 @@ struct CiderCLI {
         scope: CiderItemSearchScope,
         sort: CiderItemSearchSort,
         space: CiderSpace?,
-        results: [CiderItemSearchResult]
+        results: [CiderItemSearchResult],
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
     ) -> [String: Any] {
         var payload: [String: Any] = [
             "ok": true,
@@ -28668,7 +28829,9 @@ struct CiderCLI {
             "searchScope": scope.rawValue,
             "searchSort": sort.rawValue,
             "sortExplanation": itemSearchSortExplanation(sort),
-            "results": results.map(itemSearchResultToDict),
+            "results": results.map {
+                itemSearchResultToDict($0, provenanceProjection: provenanceProjection)
+            },
         ]
         if let space {
             payload["space"] = spaceToDict(space)
@@ -28682,16 +28845,20 @@ struct CiderCLI {
         return payload
     }
 
-    static func unscopedItemSearchArrayPayload(results: [CiderItemSearchResult]) -> [[String: Any]] {
-        results.map(itemSearchResultToDict)
+    static func unscopedItemSearchArrayPayload(
+        results: [CiderItemSearchResult],
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [[String: Any]] {
+        results.map { itemSearchResultToDict($0, provenanceProjection: provenanceProjection) }
     }
 
     static func itemAgentContextResponseToDict(
         _ packet: CiderItemAgentContextPacket,
         requestedType: String,
-        requestedRef: String
+        requestedRef: String,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
     ) -> [String: Any] {
-        var dict = itemAgentContextPacketToDict(packet)
+        var dict = itemAgentContextPacketToDict(packet, provenanceProjection: provenanceProjection)
         dict["ok"] = true
         dict["sourceRef"] = [
             "type": requestedType,
@@ -28712,9 +28879,10 @@ struct CiderCLI {
     static func itemGetResponseToDict(
         _ bundle: CiderItemContextBundle,
         requestedType: String,
-        requestedRef: String
+        requestedRef: String,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
     ) -> [String: Any] {
-        var dict = itemContextBundleToDict(bundle)
+        var dict = itemContextBundleToDict(bundle, provenanceProjection: provenanceProjection)
         dict["ok"] = true
         dict["command"] = "item.get"
         dict["readOnly"] = true
@@ -28912,7 +29080,10 @@ struct CiderCLI {
         return nil
     }
 
-    static func itemAgentContextPacketToDict(_ packet: CiderItemAgentContextPacket) -> [String: Any] {
+    static func itemAgentContextPacketToDict(
+        _ packet: CiderItemAgentContextPacket,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [String: Any] {
         var dict: [String: Any] = [
             "ok": true,
             "command": "item.context",
@@ -28935,7 +29106,9 @@ struct CiderCLI {
                 relationCandidates: packet.relationCandidates
             ),
             "memoryCandidates": packet.memoryCandidates.map(memoryCandidateToDict),
-            "captureProvenance": packet.captureProvenance.map(captureProvenanceToDict),
+            "captureProvenance": packet.captureProvenance.map {
+                captureProvenanceToDict($0, projection: provenanceProjection)
+            },
             "surfacing": surfacingExplanationToDict(packet.surfacing),
             "recentHistory": packet.recentHistory.map(itemAgentContextHistoryToDict),
             "safeCommands": packet.safeCommands,
@@ -29148,7 +29321,10 @@ struct CiderCLI {
         return dict
     }
 
-    static func itemSearchResultToDict(_ result: CiderItemSearchResult) -> [String: Any] {
+    static func itemSearchResultToDict(
+        _ result: CiderItemSearchResult,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [String: Any] {
         var dict: [String: Any] = [
             "id": result.id,
             "kind": result.kind.rawValue,
@@ -29191,7 +29367,9 @@ struct CiderCLI {
             dict["rankFactors"] = result.rankFactors
         }
         if !result.captureProvenance.isEmpty {
-            dict["captureProvenance"] = result.captureProvenance.map(captureProvenanceToDict)
+            dict["captureProvenance"] = result.captureProvenance.map {
+                captureProvenanceToDict($0, projection: provenanceProjection)
+            }
         }
         if let relatedSavedPlacesHint = result.relatedSavedPlacesHint {
             dict["relatedSavedPlacesHint"] = itemRelatedSavedPlacesSearchHintToDict(relatedSavedPlacesHint)
@@ -29727,8 +29905,13 @@ struct CiderCLI {
         return String(normalized[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func itemSearchDiagnosticsReportToDict(_ report: CiderItemSearchDiagnosticsReport) -> [String: Any] {
-        let rankedResults = report.exactMatches.map(itemSearchResultToDict)
+    static func itemSearchDiagnosticsReportToDict(
+        _ report: CiderItemSearchDiagnosticsReport,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [String: Any] {
+        let rankedResults = report.exactMatches.map {
+            itemSearchResultToDict($0, provenanceProjection: provenanceProjection)
+        }
         var payload: [String: Any] = [
             "ok": report.errors.isEmpty,
             "command": report.command,
@@ -29739,7 +29922,9 @@ struct CiderCLI {
             "rankedResults": rankedResults,
             "exactMatches": rankedResults,
             "fallbackStages": report.fallbackStages.map(itemSearchFallbackStageToDict),
-            "matchedChunks": report.matchedChunks.map(itemSearchDiagnosticsChunkMatchToDict),
+            "matchedChunks": report.matchedChunks.map {
+                itemSearchDiagnosticsChunkMatchToDict($0, provenanceProjection: provenanceProjection)
+            },
             "candidateItems": report.candidateItems.map(itemSummaryToDict),
             "excludedItems": report.excludedItems.map(itemSearchDiagnosticsWarningToDict),
             "indexWarnings": report.indexWarnings.map(itemSearchIndexWarningToDict),
@@ -29804,13 +29989,18 @@ struct CiderCLI {
         ]
     }
 
-    static func itemSearchDiagnosticsChunkMatchToDict(_ match: CiderItemSearchDiagnosticsChunkMatch) -> [String: Any] {
+    static func itemSearchDiagnosticsChunkMatchToDict(
+        _ match: CiderItemSearchDiagnosticsChunkMatch,
+        provenanceProjection: CiderPrivacyProjectionContext = .cliDefault
+    ) -> [String: Any] {
         var dict: [String: Any] = [
             "id": match.id,
-            "searchResult": itemSearchResultToDict(match.searchResult),
+            "searchResult": itemSearchResultToDict(match.searchResult, provenanceProjection: provenanceProjection),
             "chunk": itemChunkToDict(match.chunk),
             "routingDecisions": match.routingDecisions.map(routingDecisionToDict),
-            "captureProvenance": match.captureProvenance.map(captureProvenanceToDict),
+            "captureProvenance": match.captureProvenance.map {
+                captureProvenanceToDict($0, projection: provenanceProjection)
+            },
             "indexFreshness": itemSearchIndexFreshnessToDict(match.indexFreshness),
         ]
         if let item = match.item {

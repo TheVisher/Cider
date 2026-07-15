@@ -5237,6 +5237,185 @@ struct CiderCLIAgentSafetyTests {
         #expect(result.stdout.contains("Markdown export body"))
     }
 
+    @Test("CLI provenance is private by default and exact only after trusted-local opt in")
+    func cliProvenanceProjectionIsSafeByDefaultAndTrustedLocalOnOptIn() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-private-provenance-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        let intentionalBody = "CID834_INTENTIONAL_EXPORTED_BODY_ALLOWED"
+        let captureResult = try runCLI(
+            args: [
+                "capture", "add", "--kind", "note",
+                "--title", "CID834 Safe Export Subject",
+                "--content", intentionalBody,
+                "--json",
+            ],
+            vault: vault
+        )
+        let capture = try parseJSONObject(captureResult.stdout)
+        let item = try #require(capture["item"] as? [String: Any])
+        let noteID = try #require(item["id"] as? String)
+        let relativePath = try #require(item["relativePath"] as? String)
+        let provenanceReceipt = try #require(capture["provenance"] as? [String: Any])
+        let eventID = try #require(provenanceReceipt["captureEventID"] as? String)
+
+        let sentinels: [String: String] = [
+            "sourceURL": "https://user:CID834_URL_SECRET@private.example/journal?token=CID834_TOKEN_SECRET",
+            "sourceFile": "/Users/private/CID834_PATH_SECRET/journal.md",
+            "sourceText": "CID834_SOURCE_TEXT_SECRET private journal paragraph",
+            "channelID": "CID834_CHANNEL_ID_SECRET",
+            "threadID": "CID834_THREAD_ID_SECRET",
+            "messageID": "CID834_MESSAGE_ID_SECRET",
+            "senderID": "CID834_SENDER_ID_SECRET",
+            "senderName": "CID834_SENDER_NAME_SECRET",
+            "metadataKey": "CID834_METADATA_KEY_SECRET",
+            "metadataValue": "CID834_METADATA_VALUE_SECRET",
+        ]
+        let metadataData = try JSONSerialization.data(
+            withJSONObject: [sentinels["metadataKey"]!: sentinels["metadataValue"]!],
+            options: [.sortedKeys]
+        )
+        let metadataJSON = String(decoding: metadataData, as: UTF8.self)
+        let databaseURL = vault.appendingPathComponent(".cider/cider.db")
+        let database = CiderDatabase()
+        try database.open(at: databaseURL)
+        do {
+            let update = try database.prepare("""
+                UPDATE capture_events
+                SET surface = ?, channel = ?, channel_id = ?, thread_id = ?, message_id = ?,
+                    sender_id = ?, sender_name = ?, source_url = ?, source_file = ?, source_text = ?, metadata = ?
+                WHERE id = ?;
+                """)
+            update.bind("chat", at: 1)
+                .bind("discord", at: 2)
+                .bind(sentinels["channelID"]!, at: 3)
+                .bind(sentinels["threadID"]!, at: 4)
+                .bind(sentinels["messageID"]!, at: 5)
+                .bind(sentinels["senderID"]!, at: 6)
+                .bind(sentinels["senderName"]!, at: 7)
+                .bind(sentinels["sourceURL"]!, at: 8)
+                .bind(sentinels["sourceFile"]!, at: 9)
+                .bind(sentinels["sourceText"]!, at: 10)
+                .bind(metadataJSON, at: 11)
+                .bind(eventID, at: 12)
+            try update.step()
+        }
+        database.close()
+
+        func canonicalEventSnapshot() throws -> [String] {
+            let snapshotDatabase = CiderDatabase()
+            try snapshotDatabase.open(at: databaseURL)
+            defer { snapshotDatabase.close() }
+            let statement = try snapshotDatabase.prepare("""
+                SELECT surface, channel, channel_id, thread_id, message_id, sender_id, sender_name,
+                       source_url, source_file, source_text, metadata, attachment_count, created_at
+                FROM capture_events WHERE id = ?;
+                """)
+            statement.bind(eventID, at: 1)
+            #expect(try statement.step())
+            return (0...10).map { statement.optionalString(at: $0) ?? "<nil>" }
+                + [String(statement.int(at: 11)), String(statement.double(at: 12))]
+        }
+
+        let canonicalBefore = try canonicalEventSnapshot()
+        let noteURL = vault.appendingPathComponent(relativePath)
+        let noteBefore = try Data(contentsOf: noteURL)
+        let defaultCommands: [[String]] = [
+            ["item", "get", "note", noteID, "--json"],
+            ["item", "context", "note", noteID, "--json"],
+            ["item", "recall-context", "--item", "note", noteID, "--json"],
+            ["export", "item", "note", noteID, "--format", "json", "--json"],
+            ["export", "folder", "Inbox", "--format", "json", "--limit", "10", "--json"],
+        ]
+        var defaultOutputs: [[String]: String] = [:]
+        for command in defaultCommands {
+            let result = try runCLI(args: command, vault: vault)
+            #expect(result.status == 0)
+            #expect(!result.stdout.isEmpty)
+            for sentinel in sentinels.values {
+                #expect(!result.stdout.contains(sentinel))
+            }
+            defaultOutputs[command] = result.stdout
+        }
+        #expect(defaultOutputs[defaultCommands[3]]?.contains(intentionalBody) == true)
+        #expect(defaultOutputs[defaultCommands[4]]?.contains(intentionalBody) == true)
+
+        let defaultGetPayload = try parseJSONObject(try #require(defaultOutputs[defaultCommands[0]]))
+        let defaultGetProvenance = try #require(defaultGetPayload["captureProvenance"] as? [[String: Any]])
+        #expect(defaultGetProvenance.first?["projection"] as? String == "cli_default")
+        #expect(defaultGetProvenance.first?["containsPrivateData"] as? Bool == false)
+        let defaultContextPayload = try parseJSONObject(try #require(defaultOutputs[defaultCommands[1]]))
+        let defaultContextProvenance = try #require(defaultContextPayload["captureProvenance"] as? [[String: Any]])
+        #expect(defaultContextProvenance.first?["projection"] as? String == "cli_default")
+        let defaultRecallPayload = try parseJSONObject(try #require(defaultOutputs[defaultCommands[2]]))
+        let defaultRecallAnchors = try #require(defaultRecallPayload["anchors"] as? [[String: Any]])
+        let defaultRecallProvenance = try #require(defaultRecallAnchors.first?["captureProvenance"] as? [[String: Any]])
+        #expect(defaultRecallProvenance.first?["projection"] as? String == "cli_default")
+        for exportCommand in [defaultCommands[3], defaultCommands[4]] {
+            let exportPayload = try parseJSONObject(try #require(defaultOutputs[exportCommand]))
+            let exportedItems = try #require(exportPayload["items"] as? [[String: Any]])
+            let exportProvenance = try #require(exportedItems.first?["captureProvenance"] as? [[String: Any]])
+            #expect(exportProvenance.first?["projection"] as? String == "portable_export")
+            #expect(exportProvenance.first?["containsPrivateData"] as? Bool == false)
+        }
+
+        let repeatedGet = try runCLI(args: defaultCommands[0], vault: vault)
+        let firstGetPayload = defaultGetPayload
+        let repeatedGetPayload = try parseJSONObject(repeatedGet.stdout)
+        let firstProjectedProvenance = try #require(firstGetPayload["captureProvenance"] as? [[String: Any]])
+        let repeatedProjectedProvenance = try #require(repeatedGetPayload["captureProvenance"] as? [[String: Any]])
+        #expect(
+            try JSONSerialization.data(withJSONObject: firstProjectedProvenance, options: [.sortedKeys])
+                == JSONSerialization.data(withJSONObject: repeatedProjectedProvenance, options: [.sortedKeys])
+        )
+
+        let trustedCommands: [[String]] = [
+            ["item", "get", "note", noteID, "--include-private-provenance", "--json"],
+            ["item", "context", "note", noteID, "--include-private-provenance", "--json"],
+            ["item", "recall-context", "--item", "note", noteID, "--include-private-provenance", "--json"],
+            ["export", "item", "note", noteID, "--format", "json", "--include-private-provenance", "--json"],
+            ["export", "folder", "Inbox", "--format", "json", "--limit", "10", "--include-private-provenance", "--json"],
+        ]
+        for command in trustedCommands {
+            let result = try runCLI(args: command, vault: vault)
+            #expect(result.status == 0)
+            #expect(result.stdout.contains("\"projection\" : \"trusted_local\""), "Trusted command did not declare its projection: \(command)")
+            #expect(result.stdout.contains("\"containsPrivateData\" : true"), "Trusted command did not declare private output: \(command)")
+            let trustedPayloadDescription = String(describing: try parseJSONObject(result.stdout))
+            for sentinel in sentinels.values {
+                #expect(trustedPayloadDescription.contains(sentinel), "Trusted command did not restore \(sentinel): \(command)")
+            }
+        }
+
+        #expect(try canonicalEventSnapshot() == canonicalBefore)
+        #expect(try Data(contentsOf: noteURL) == noteBefore)
+    }
+
+    @Test("private provenance opt in is documented by early help without vault access")
+    func privateProvenanceOptInHelpIsEarlyAndExplicit() throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-private-provenance-help-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vault) }
+
+        for args in [
+            ["item", "get", "--help"],
+            ["item", "context", "--help"],
+            ["item", "recall-context", "--help"],
+            ["item", "search", "--help"],
+            ["export", "help"],
+        ] {
+            let result = try runCLI(args: args, vault: vault)
+            #expect(result.status == 0)
+            #expect(result.stdout.contains("--include-private-provenance"))
+        }
+        let exportHelp = try runCLI(args: ["export", "help"], vault: vault)
+        #expect(exportHelp.stdout.contains("trusted-local"))
+        #expect(exportHelp.stdout.contains("containsPrivateData=true"))
+        #expect(!FileManager.default.fileExists(atPath: vault.path))
+    }
+
     @Test("export vault refuses unbounded dumps")
     func exportVaultRefusesUnboundedDumps() throws {
         let result = try runCLI(args: ["export", "vault", "--format", "json", "--json"])

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 struct PrivacyProjectionPolicyTests {
     @Test("private values are preserved canonically but redacted from outward projections")
@@ -17,12 +18,18 @@ struct PrivacyProjectionPolicyTests {
             let privateValue = CiderPrivateValue(kind: kind, rawValue: sentinel)
             #expect(privateValue.rawValue == sentinel)
 
-            for context in CiderPrivacyProjectionContext.allCases {
+            for context in [
+                CiderPrivacyProjectionContext.systemLog,
+                .userFacingDiagnostic,
+                .cliDefault,
+                .portableExport,
+            ] {
                 let projection = CiderPrivacyProjectionPolicy.project(privateValue, for: context)
                 #expect(!projection.contains(sentinel))
                 #expect(!projection.contains("CID833_"))
                 #expect(projection.contains(kind.rawValue))
             }
+            #expect(CiderPrivacyProjectionPolicy.project(privateValue, for: .trustedLocal) == sentinel)
         }
     }
 
@@ -40,6 +47,100 @@ struct PrivacyProjectionPolicyTests {
         #expect(!message.contains(result.urlString))
         #expect(!message.contains(result.title!))
         #expect(!message.contains("CID833_"))
+    }
+
+    @MainActor
+    @Test("capture provenance defaults to a deterministic private-data-safe CLI projection")
+    func captureProvenanceDefaultsToSafeCLIProjection() throws {
+        let owner = SecondBrainOwnerRef(ownerType: "capture_event", ownerID: "CID834-EVENT-SAFE-ID")
+        let target = SecondBrainOwnerRef(ownerType: "note", ownerID: UUID().uuidString)
+        let privateSentinels = [
+            "https://user:CID834_URL_SECRET@private.example/journal?token=CID834_TOKEN_SECRET",
+            "/Users/private/CID834_PATH_SECRET/journal.md",
+            "CID834_SOURCE_TEXT_SECRET private journal paragraph",
+            "CID834_CHANNEL_ID_SECRET",
+            "CID834_THREAD_ID_SECRET",
+            "CID834_MESSAGE_ID_SECRET",
+            "CID834_SENDER_ID_SECRET",
+            "CID834_SENDER_NAME_SECRET",
+            "CID834_METADATA_VALUE_SECRET",
+            "CID834_METADATA_KEY_SECRET",
+            "CID834_RELATION_SOURCE_SECRET",
+            "CID834_RELATION_ACTOR_SECRET",
+        ]
+        let provenance = CiderItemCaptureProvenance(
+            eventID: owner.ownerID,
+            owner: owner,
+            sourceKind: "journal",
+            surface: "chat",
+            channel: "discord",
+            channelID: privateSentinels[3],
+            threadID: privateSentinels[4],
+            messageID: privateSentinels[5],
+            senderID: privateSentinels[6],
+            senderName: privateSentinels[7],
+            sourceURL: privateSentinels[0],
+            sourceFile: privateSentinels[1],
+            sourceText: privateSentinels[2],
+            attachmentCount: 2,
+            metadata: [privateSentinels[9]: privateSentinels[8]],
+            createdAt: Date(timeIntervalSince1970: 1_752_500_000),
+            relation: SecondBrainRelation(
+                sourceOwner: owner,
+                targetOwner: target,
+                relationType: "produced_item",
+                evidence: "Capture produced note.",
+                source: privateSentinels[10],
+                actor: privateSentinels[11],
+                confidence: 1,
+                metadata: [:]
+            )
+        )
+
+        let first = CiderCLI.captureProvenanceToDict(provenance)
+        let second = CiderCLI.captureProvenanceToDict(provenance)
+        let firstData = try JSONSerialization.data(withJSONObject: first, options: [.sortedKeys])
+        let secondData = try JSONSerialization.data(withJSONObject: second, options: [.sortedKeys])
+        let projectedText = String(decoding: firstData, as: UTF8.self)
+
+        #expect(firstData == secondData)
+        #expect(first["projection"] as? String == "cli_default")
+        #expect(first["containsPrivateData"] as? Bool == false)
+        #expect(first["sourceKind"] as? String == "journal")
+        #expect(first["surfaceCategory"] as? String == "chat")
+        #expect(first["channelCategory"] as? String == "discord")
+        #expect(first["attachmentCount"] as? Int == 2)
+        #expect(first["metadataKeys"] as? [String] == ["other"])
+        #expect(first["metadataCount"] as? Int == 1)
+        #expect(first["hasSourceURL"] as? Bool == true)
+        #expect(first["hasSourceFile"] as? Bool == true)
+        #expect(first["hasSourceText"] as? Bool == true)
+        #expect(first["hasSenderIdentity"] as? Bool == true)
+        #expect(first["hasTransportIdentifiers"] as? Bool == true)
+        #expect(first["hasMetadata"] as? Bool == true)
+        #expect(first["omittedPrivateFields"] as? [String] == [
+            "channelID", "messageID", "metadata", "relation.actor", "relation.evidence", "relation.source",
+            "senderID", "senderName", "sourceFile", "sourceText", "sourceURL", "threadID",
+        ])
+        for sentinel in privateSentinels {
+            #expect(!projectedText.contains(sentinel))
+        }
+
+        let trusted = CiderCLI.captureProvenanceToDict(provenance, projection: .trustedLocal)
+        #expect(trusted["projection"] as? String == "trusted_local")
+        #expect(trusted["containsPrivateData"] as? Bool == true)
+        #expect(trusted["sourceURL"] as? String == privateSentinels[0])
+        #expect(trusted["sourceFile"] as? String == privateSentinels[1])
+        #expect(trusted["sourceText"] as? String == privateSentinels[2])
+        #expect(trusted["channelID"] as? String == privateSentinels[3])
+        #expect(trusted["threadID"] as? String == privateSentinels[4])
+        #expect(trusted["messageID"] as? String == privateSentinels[5])
+        #expect(trusted["senderID"] as? String == privateSentinels[6])
+        #expect(trusted["senderName"] as? String == privateSentinels[7])
+        #expect((trusted["metadata"] as? [String: String])?[privateSentinels[9]] == privateSentinels[8])
+        let trustedRelation = try #require(trusted["relation"] as? [String: Any])
+        #expect(trustedRelation["source"] as? String == privateSentinels[10])
+        #expect(trustedRelation["actor"] as? String == privateSentinels[11])
     }
 }
 
