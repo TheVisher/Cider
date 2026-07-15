@@ -433,6 +433,22 @@ struct CiderCLI {
                     "cider-cli item journal-intelligence --date YYYY-MM-DD --json",
                 ]
             )
+        case "event-date-facts", "event-date-fact", "date-facts", "date-fact":
+            let usageName = subcommand
+            var payload: [String: Any] = [
+                "ok": true,
+                "status": "ok",
+                "command": "item.\(subcommand).help",
+                "subcommand": subcommand,
+                "usage": "cider-cli item \(usageName) list|inspect|propose|accept|reject|defer ... [--expected-version <state@version>] [--json]",
+                "description": "Source-backed event/date fact inspection and explicit review actions through the shared review coordinator.",
+                "readOnly": true,
+                "changed": false,
+                "truthBoundary": "help_contract_only_not_vault_truth",
+                "safeVerificationCommands": ["cider-cli item \(usageName) --help --json"],
+            ]
+            if subcommand != "event-date-facts" { payload["aliasOf"] = "item.event-date-facts" }
+            return payload
         case "accept-graph-candidate", "graph-candidate-accept",
              "reject-graph-candidate", "graph-candidate-reject",
              "accept-memory-candidate", "memory-candidate-accept",
@@ -2858,8 +2874,15 @@ struct CiderCLI {
             let actor = parseFlag("--actor", from: args) ?? "user"
             do {
                 if isEventDateFactCandidateRef(itemRef) {
-                    let candidate = try service.approveEventDateFact(candidateID: itemRef, actor: actor)
-                    printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.approve")
+                    performEventDateFactCLIAction(
+                        candidateRef: itemRef,
+                        action: .approve,
+                        actor: actor,
+                        reason: parseFlag("--reason", from: args),
+                        expectedVersionSelector: parseFlag("--expected-version", from: args),
+                        presentationCommand: "review.event-date-facts.approve",
+                        presentationAction: "approve"
+                    )
                     return
                 }
                 if isGraphCandidateRef(itemRef) {
@@ -2924,37 +2947,39 @@ struct CiderCLI {
                 return
             }
             let actor = parseFlag("--actor", from: args) ?? "user"
-            let reason = parseFlag("--reason", from: args) ?? "Rejected from review queue."
-            do {
-                if isEventDateFactCandidateRef(candidateRef) {
-                    let candidate = try service.rejectEventDateFact(candidateID: candidateRef, reason: reason, actor: actor)
-                    printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.reject")
-                    return
-                }
-                if isGraphCandidateRef(candidateRef) {
-                    performReviewCandidateCLIAction(
+            if isEventDateFactCandidateRef(candidateRef) {
+                    performEventDateFactCLIAction(
                         candidateRef: candidateRef,
-                        family: .graphCandidate,
                         action: .reject,
                         actor: actor,
-                        args: args
-                    )
-                    return
-                }
-                if isMemoryCandidateRef(candidateRef) {
-                    performReviewCandidateCLIAction(
-                        candidateRef: candidateRef,
-                        family: .memoryCandidate,
-                        action: .reject,
-                        actor: actor,
-                        args: args
-                    )
-                    return
-                }
-                printCLIError("No review candidate found matching '\(candidateRef)'.")
-            } catch {
-                printCLIError(error.localizedDescription)
+                        reason: parseFlag("--reason", from: args),
+                    expectedVersionSelector: parseFlag("--expected-version", from: args),
+                    presentationCommand: "review.event-date-facts.reject",
+                    presentationAction: "reject"
+                )
+                return
             }
+            if isGraphCandidateRef(candidateRef) {
+                performReviewCandidateCLIAction(
+                    candidateRef: candidateRef,
+                    family: .graphCandidate,
+                    action: .reject,
+                    actor: actor,
+                    args: args
+                )
+                return
+            }
+            if isMemoryCandidateRef(candidateRef) {
+                performReviewCandidateCLIAction(
+                    candidateRef: candidateRef,
+                    family: .memoryCandidate,
+                    action: .reject,
+                    actor: actor,
+                    args: args
+                )
+                return
+            }
+            printCLIError("No review candidate found matching '\(candidateRef)'.")
 
         case "correct":
             guard let itemRef = firstPositionalArgument(from: args, valueFlags: ["--folder", "--path", "--reason", "--actor", "--value", "--correction", "--target-option", "--expected-version"]) else {
@@ -3057,12 +3082,15 @@ struct CiderCLI {
             let actor = parseFlag("--actor", from: args) ?? "user"
             do {
                 if isEventDateFactCandidateRef(itemRef) {
-                    let candidate = try service.deferEventDateFact(
-                        candidateID: itemRef,
-                        reason: parseFlag("--reason", from: args) ?? "Deferred from review queue.",
-                        actor: actor
+                    performEventDateFactCLIAction(
+                        candidateRef: itemRef,
+                        action: .defer,
+                        actor: actor,
+                        reason: parseFlag("--reason", from: args),
+                        expectedVersionSelector: parseFlag("--expected-version", from: args),
+                        presentationCommand: "review.event-date-facts.defer",
+                        presentationAction: "defer"
                     )
-                    printReviewEventDateFactActionResult(candidate, command: "review.event-date-facts.defer")
                     return
                 }
                 if isGraphCandidateRef(itemRef) {
@@ -24720,6 +24748,11 @@ struct CiderCLI {
                     "candidate": eventDateFactCandidateToDict(candidate),
                     "candidateID": candidate.id,
                     "candidateRef": candidate.candidateRef,
+                    "candidateUpdatedAt": ISO8601DateFormatter().string(from: candidate.candidate.candidate.updatedAt),
+                    "expectedVersionSelector": CiderReviewCLIActionAdapter.expectedVersionSelector(
+                        reviewState: candidate.reviewState,
+                        updatedAt: candidate.candidate.candidate.updatedAt
+                    ),
                     "truthBoundary": candidate.truthBoundary,
                     "provenance": candidate.provenance,
                     "actionReceipt": candidate.actionReceipt,
@@ -24778,35 +24811,21 @@ struct CiderCLI {
             case "accept", "approve", "reject", "defer":
                 guard positional.count >= 2 else { throw eventDateFactError("Usage: cider-cli item event-date-facts \(action) <candidate-id> --reason <reason> [--json]") }
                 let actor = parseFlag("--actor", from: args) ?? "cider-cli"
-                let reason = parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args) ?? "Event/date fact review action."
+                let reason = parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args)
                 let commandAction = action == "approve" ? "accept" : action
-                let candidate: SecondBrainEventDateFactCandidateView
-                if commandAction == "reject" {
-                    candidate = try service.reject(candidateID: positional[1], actor: actor, reason: reason)
-                } else if commandAction == "defer" {
-                    candidate = try service.deferReview(candidateID: positional[1], actor: actor, reason: reason)
-                } else {
-                    candidate = try service.accept(candidateID: positional[1], actor: actor, decisionNote: reason)
-                }
-                var payload: [String: Any] = [
-                    "ok": true,
-                    "command": "item.event-date-facts.\(commandAction)",
-                    "readOnly": false,
-                    "changed": candidate.actionReceipt["changed"] as? Bool ?? true,
-                    "candidate": eventDateFactCandidateToDict(candidate),
-                    "candidateID": candidate.id,
-                    "candidateRef": candidate.candidateRef,
-                    "truthBoundary": candidate.truthBoundary,
-                    "sourceItemRefs": candidate.sourceItemRefs,
-                    "proposedDate": candidate.proposedDate,
-                    "provenance": candidate.provenance,
-                    "actionReceipt": candidate.actionReceipt,
-                    "safeVerificationCommands": candidate.safeVerificationCommands,
-                    "safeNextCommands": candidate.safeNextCommands,
-                ]
-                if let structuredFactRef = candidate.structuredFactRef { payload["structuredFactRef"] = structuredFactRef }
-                persistActionReceiptIfPresent(payload)
-                if jsonOutput { outputJSON(payload) } else { print("Event/date fact \(commandAction): \(candidate.id)") }
+                let coordinatorAction: CiderReviewAction = commandAction == "reject"
+                    ? .reject
+                    : (commandAction == "defer" ? .defer : .approve)
+                performEventDateFactCLIAction(
+                    candidateRef: positional[1],
+                    action: coordinatorAction,
+                    actor: actor,
+                    reason: reason,
+                    expectedVersionSelector: parseFlag("--expected-version", from: args),
+                    presentationCommand: "item.event-date-facts.\(commandAction)",
+                    presentationAction: commandAction,
+                    includeCandidatePayload: true
+                )
 
             default:
                 throw eventDateFactError("Usage: cider-cli item event-date-facts list|inspect|propose|accept|reject ... [--json]")
@@ -24828,6 +24847,10 @@ struct CiderCLI {
     }
 
     static func eventDateFactCandidateToDict(_ view: SecondBrainEventDateFactCandidateView) -> [String: Any] {
+        let expectedVersionSelector = CiderReviewCLIActionAdapter.expectedVersionSelector(
+            reviewState: view.reviewState,
+            updatedAt: view.candidate.candidate.updatedAt
+        )
         var dict: [String: Any] = [
             "id": view.id,
             "candidateID": view.id,
@@ -24839,6 +24862,8 @@ struct CiderCLI {
             "confidence": view.confidence,
             "reason": view.reason,
             "reviewState": view.reviewState,
+            "candidateUpdatedAt": ISO8601DateFormatter().string(from: view.candidate.candidate.updatedAt),
+            "expectedVersionSelector": expectedVersionSelector,
             "truthBoundary": view.truthBoundary,
             "sourceItemRefs": view.sourceItemRefs,
             "provenance": view.provenance,
@@ -25175,34 +25200,159 @@ struct CiderCLI {
         return [inspect, "cider-cli capture review-queue --kind \(family.rawValue) --include-deferred --json"]
     }
 
-    static func printReviewEventDateFactActionResult(
-        _ candidate: SecondBrainEventDateFactCandidateView,
-        command: String
+    static func performEventDateFactCLIAction(
+        candidateRef: String,
+        action: CiderReviewAction,
+        actor: String,
+        reason: String?,
+        expectedVersionSelector: String?,
+        presentationCommand: String,
+        presentationAction: String,
+        includeCandidatePayload: Bool = true,
+        presentAsFactValidity: Bool = false
     ) {
-        var payload: [String: Any] = [
-            "ok": true,
-            "command": command,
-            "readOnly": false,
-            "changed": candidate.actionReceipt["changed"] as? Bool ?? true,
-            "candidate": eventDateFactCandidateToDict(candidate),
-            "candidateID": candidate.id,
-            "candidateRef": candidate.candidateRef,
-            "truthBoundary": candidate.truthBoundary,
-            "sourceItemRefs": candidate.sourceItemRefs,
-            "proposedDate": candidate.proposedDate,
-            "provenance": candidate.provenance,
-            "actionReceipt": candidate.actionReceipt,
-            "safeVerificationCommands": candidate.safeVerificationCommands,
-            "safeNextCommands": candidate.safeNextCommands,
-        ]
-        if let structuredFactRef = candidate.structuredFactRef {
-            payload["structuredFactRef"] = structuredFactRef
-        }
-        persistActionReceiptIfPresent(payload)
-        if jsonOutput {
-            outputJSON(payload)
-        } else {
-            print("Event/date fact review action: \(candidate.id)")
+        do {
+            let result = try CiderEventDateFactReviewCLIActionAdapter().perform(
+                candidateRef: candidateRef,
+                action: action,
+                reason: reason,
+                actor: actor,
+                expectedVersionSelector: expectedVersionSelector
+            )
+            let outcome = result.outcome
+            var receipt: [String: Any]
+            if let canonical = result.canonicalReceipt {
+                receipt = actionReceiptRecordToDict(canonical)
+                if canonical.command != presentationCommand {
+                    receipt["canonicalCommand"] = canonical.command
+                    receipt["command"] = presentationCommand
+                }
+                if canonical.action != presentationAction {
+                    receipt["canonicalAction"] = canonical.action
+                    receipt["action"] = presentationAction
+                }
+                receipt["truthBoundary"] = outcome.truthBoundary
+            } else {
+                receipt = [
+                    "id": NSNull(),
+                    "command": presentationCommand,
+                    "action": presentationAction,
+                    "actor": actor,
+                    "status": "failed",
+                    "readOnly": false,
+                    "changed": false,
+                    "truthBoundary": outcome.truthBoundary,
+                ]
+                if let error = outcome.error { receipt["errorCode"] = error.classification.rawValue }
+            }
+            var presentedCandidate = result.after
+            presentedCandidate.actionReceipt = receipt
+            var payload: [String: Any] = [
+                "ok": outcome.isSuccessful,
+                "command": presentationCommand,
+                "action": presentationAction,
+                "readOnly": false,
+                "changed": outcome.changed,
+                "candidateID": result.after.id,
+                "candidateRef": result.after.candidateRef,
+                "reviewFamily": CiderReviewCandidateFamily.eventDateFact.rawValue,
+                "reviewState": outcome.resultingReviewState,
+                "truthBoundary": outcome.truthBoundary,
+                "sourceItemRefs": result.after.sourceItemRefs,
+                "proposedDate": result.after.proposedDate,
+                "provenance": result.after.provenance,
+                "actionReceiptID": outcome.actionReceiptID ?? NSNull(),
+                "actionReceipt": receipt,
+                "expectedVersionSelector": result.expectedVersionSelector,
+                "availability": outcome.isSuccessful ? "available" : "unavailable",
+                "evidenceStatus": outcome.evidenceStatus.rawValue,
+                "exactEvidenceRequirement": outcome.exactEvidenceRequirement.rawValue,
+                "mutationAuthority": outcome.mutationAuthority.rawValue,
+                "safeVerificationCommands": result.safeVerificationCommands,
+                "safeNextCommands": result.safeNextCommands,
+            ]
+            if presentAsFactValidity {
+                payload["candidate"] = factValidityCandidateToDict(presentedCandidate.candidate)
+                payload["factValidity"] = try SecondBrainFactValidityService()
+                    .validityState(targetRef: presentedCandidate.targetRef)
+                    .map(factValidityStateToDict) as Any
+            } else if includeCandidatePayload {
+                payload["candidate"] = eventDateFactCandidateToDict(presentedCandidate)
+            }
+            if let structuredFactRef = result.after.structuredFactRef { payload["structuredFactRef"] = structuredFactRef }
+            if let error = outcome.error {
+                processExitCode = 1
+                payload["errorCode"] = error.classification.rawValue
+                payload["errorClassification"] = error.classification.rawValue
+                payload["error"] = error.message
+            }
+            if jsonOutput {
+                outputJSON(payload)
+            } else if outcome.isSuccessful {
+                if presentAsFactValidity {
+                    print("Fact validity \(presentationAction): \(result.after.id)")
+                } else if presentationCommand.hasPrefix("review.event-date-facts.") {
+                    print("Event/date fact review action: \(result.after.id)")
+                } else {
+                    print("Event/date fact \(presentationAction): \(result.after.id)")
+                }
+            } else {
+                print("Error: \(outcome.message)")
+            }
+        } catch let error as CiderReviewCLIActionAdapterError {
+            processExitCode = 1
+            let safeCommands = [
+                "cider-cli item event-date-facts inspect \(candidateRef) --json",
+                "cider-cli review list --kind event_date_fact --json",
+            ]
+            let payload: [String: Any] = [
+                "ok": false,
+                "command": presentationCommand,
+                "action": presentationAction,
+                "readOnly": false,
+                "changed": false,
+                "candidateRef": candidateRef,
+                "reviewFamily": CiderReviewCandidateFamily.eventDateFact.rawValue,
+                "reviewState": "unknown",
+                "truthBoundary": "reviewable_candidate_not_truth",
+                "availability": "unavailable",
+                "evidenceStatus": "not_checked",
+                "mutationAuthority": CiderReviewMutationAuthority.reviewApprovedCandidate.rawValue,
+                "errorCode": error.classification.rawValue,
+                "errorClassification": error.classification.rawValue,
+                "error": error.localizedDescription,
+                "actionReceiptID": NSNull(),
+                "safeVerificationCommands": safeCommands,
+                "safeNextCommands": safeCommands,
+            ]
+            if jsonOutput { outputJSON(payload) } else { print("Error: \(error.localizedDescription)") }
+        } catch {
+            processExitCode = 1
+            let message = "Cider could not safely load this event/date fact. Nothing was changed; refresh and try again."
+            if jsonOutput {
+                outputJSON([
+                    "ok": false,
+                    "command": presentationCommand,
+                    "action": presentationAction,
+                    "readOnly": false,
+                    "changed": false,
+                    "candidateRef": candidateRef,
+                    "reviewFamily": CiderReviewCandidateFamily.eventDateFact.rawValue,
+                    "reviewState": "unknown",
+                    "truthBoundary": "reviewable_candidate_not_truth",
+                    "availability": "unavailable",
+                    "evidenceStatus": "not_checked",
+                    "mutationAuthority": CiderReviewMutationAuthority.reviewApprovedCandidate.rawValue,
+                    "errorCode": CiderReviewActionErrorClassification.databaseFailure.rawValue,
+                    "errorClassification": CiderReviewActionErrorClassification.databaseFailure.rawValue,
+                    "error": message,
+                    "actionReceiptID": NSNull(),
+                    "safeVerificationCommands": ["cider-cli review list --kind event_date_fact --json"],
+                    "safeNextCommands": ["cider-cli review list --kind event_date_fact --json"],
+                ])
+            } else {
+                print("Error: \(message)")
+            }
         }
     }
 
@@ -25357,6 +25507,22 @@ struct CiderCLI {
                 let existing = try service.candidate(id: id)
                 guard let existing else {
                     outputMissingFactValidityMutation(candidateID: id, command: "item.fact-validity.\(action)", action: action, actor: actor)
+                    return
+                }
+                if existing.candidate.metadata["candidate_family"] == "event_date_fact" {
+                    let coordinatorAction: CiderReviewAction = action == "accept"
+                        ? .approve
+                        : (action == "reject" ? .reject : .defer)
+                    performEventDateFactCLIAction(
+                        candidateRef: id,
+                        action: coordinatorAction,
+                        actor: actor,
+                        reason: parseFlag("--reason", from: args) ?? parseFlag("--decision-note", from: args),
+                        expectedVersionSelector: parseFlag("--expected-version", from: args),
+                        presentationCommand: "item.fact-validity.\(action)",
+                        presentationAction: action,
+                        presentAsFactValidity: true
+                    )
                     return
                 }
                 let candidate: SecondBrainFactValidityCandidateView

@@ -1,4 +1,11 @@
+import CryptoKit
 import Foundation
+
+struct SecondBrainEventDateFactReviewMutationResult {
+    var view: SecondBrainEventDateFactCandidateView
+    var receiptID: String
+    var changed: Bool
+}
 
 struct SecondBrainEventDateFactCandidateView: Equatable {
     var id: String
@@ -74,6 +81,10 @@ final class SecondBrainEventDateFactReviewService {
         case candidateNotFound(String)
         case unsupportedCandidate(String)
         case invalidProposedDate(String)
+        case staleCandidate(String)
+        case alreadyReviewed(String, String)
+        case missingSourceEvidence(String)
+        case unsupportedReviewAction(String)
 
         var errorDescription: String? {
             switch self {
@@ -87,6 +98,14 @@ final class SecondBrainEventDateFactReviewService {
                 return "Candidate is not a review-backed event/date fact candidate: \(id)."
             case .invalidProposedDate(let value):
                 return "Invalid proposed event/date fact date: \(value)."
+            case .staleCandidate:
+                return "This event/date fact changed after it loaded. Refresh the review list before acting."
+            case .alreadyReviewed(_, let state):
+                return "This event/date fact is already \(state). Refresh to see its current state."
+            case .missingSourceEvidence:
+                return "Cider could not verify the exact event/date source evidence, so the action was blocked."
+            case .unsupportedReviewAction:
+                return "This action is not supported for event/date fact review. Nothing was changed."
             }
         }
     }
@@ -240,6 +259,102 @@ final class SecondBrainEventDateFactReviewService {
         )
     }
 
+    func performReviewAction(
+        candidateID rawID: String,
+        expectedReviewState: String,
+        expectedUpdatedAt: Date,
+        action: CiderReviewAction,
+        actor: String,
+        reason: String?
+    ) throws -> SecondBrainEventDateFactReviewMutationResult {
+        guard action != .correct else {
+            throw EventDateFactReviewError.unsupportedReviewAction(action.rawValue)
+        }
+        let id = normalizedCandidateID(rawID)
+        let normalizedReason = Self.normalizedReason(reason, action: action)
+        let fingerprint = Self.requestFingerprint(
+            candidateID: id,
+            expectedReviewState: expectedReviewState,
+            expectedUpdatedAt: expectedUpdatedAt,
+            action: action,
+            actor: actor,
+            reason: normalizedReason
+        )
+        let receiptID = Self.actionReceiptID(action: action, fingerprint: fingerprint)
+        if let replay = try replayedMutation(
+            candidateID: id,
+            action: action,
+            actor: actor,
+            requestFingerprint: fingerprint,
+            receiptID: receiptID
+        ) {
+            return replay
+        }
+
+        var result: SecondBrainEventDateFactReviewMutationResult!
+        try database.withTransaction {
+            guard let existing = try factValidity.candidate(id: id) else {
+                throw EventDateFactReviewError.candidateNotFound(id)
+            }
+            _ = try requireEventDateCandidate(existing)
+            guard existing.reviewState == expectedReviewState,
+                  Self.preciseVersion(existing.candidate.updatedAt) == Self.preciseVersion(expectedUpdatedAt) else {
+                if ["accepted", "rejected", "deferred"].contains(existing.reviewState) {
+                    throw EventDateFactReviewError.alreadyReviewed(id, existing.reviewState)
+                }
+                throw EventDateFactReviewError.staleCandidate(id)
+            }
+            if ["accepted", "rejected"].contains(existing.reviewState)
+                || (action == .defer && existing.reviewState == "deferred") {
+                throw EventDateFactReviewError.alreadyReviewed(id, existing.reviewState)
+            }
+            try requireExactSourceEvidence(existing)
+
+            var mutated: SecondBrainEventDateFactCandidateView
+            switch action {
+            case .approve:
+                mutated = try accept(candidateID: id, actor: actor, decisionNote: normalizedReason)
+            case .reject:
+                mutated = try reject(candidateID: id, actor: actor, reason: normalizedReason)
+            case .defer:
+                mutated = try deferReview(candidateID: id, actor: actor, reason: normalizedReason)
+            case .correct:
+                throw EventDateFactReviewError.unsupportedReviewAction(action.rawValue)
+            }
+
+            let canonicalCommand = Self.canonicalCommand(for: action)
+            let canonicalAction = Self.canonicalAction(for: action)
+            var receiptDictionary = mutated.actionReceipt
+            receiptDictionary["id"] = receiptID
+            receiptDictionary["command"] = canonicalCommand
+            receiptDictionary["action"] = canonicalAction
+            receiptDictionary["status"] = action == .defer ? "deferred" : "succeeded"
+            var after = receiptDictionary["after"] as? [String: Any] ?? [:]
+            after["requestFingerprint"] = fingerprint
+            after["resultingCandidateVersion"] = Self.preciseVersion(mutated.candidate.candidate.updatedAt)
+            receiptDictionary["after"] = after
+            mutated.actionReceipt = receiptDictionary
+
+            var record = try SecondBrainActionReceiptRecord(receiptDictionary: receiptDictionary)
+            record.id = receiptID
+            record.command = canonicalCommand
+            record.action = canonicalAction
+            record.status = action == .defer ? "deferred" : "succeeded"
+            record.afterJSON = DatabaseHelpers.encodeJSON([
+                "requestFingerprint": fingerprint,
+                "resultingCandidateVersion": Self.preciseVersion(mutated.candidate.candidate.updatedAt),
+                "reviewState": mutated.reviewState,
+                "truthBoundary": mutated.truthBoundary,
+                "structuredFactRef": mutated.structuredFactRef ?? "",
+            ])
+            record.correlationID = "event-date-review:\(mutated.candidateRef)"
+            record.receiptJSON = Self.jsonString(receiptDictionary)
+            _ = try SecondBrainActionReceiptLedgerService(database: database).record(record)
+            result = SecondBrainEventDateFactReviewMutationResult(view: mutated, receiptID: receiptID, changed: true)
+        }
+        return result
+    }
+
     private func view(
         _ candidate: SecondBrainFactValidityCandidateView,
         command: String,
@@ -263,7 +378,11 @@ final class SecondBrainEventDateFactReviewService {
             "cider-cli item event-date-facts inspect \(candidate.id) --json",
             "cider-cli item fact-validity inspect \(candidate.id) --json",
         ] + structuredVerification
-        let safeNext = safeNextCommands(candidateID: candidate.id, reviewState: candidate.reviewState)
+        let safeNext = safeNextCommands(
+            candidateID: candidate.id,
+            reviewState: candidate.reviewState,
+            updatedAt: candidate.candidate.updatedAt
+        )
         let provenance: [String: Any] = [
             "sourceRef": candidate.candidate.sourceOwner.canonicalRef,
             "sourceItemRefs": sourceItemRefs,
@@ -522,12 +641,16 @@ final class SecondBrainEventDateFactReviewService {
         return receipt
     }
 
-    private func safeNextCommands(candidateID: String, reviewState: String) -> [String] {
+    private func safeNextCommands(candidateID: String, reviewState: String, updatedAt: Date) -> [String] {
         var commands = [
             "cider-cli item event-date-facts inspect \(candidateID) --json",
             "cider-cli item fact-validity inspect \(candidateID) --json",
         ]
         if ["suggested", "needs_review", "deferred"].contains(reviewState) {
+            let selector = "\(reviewState)@\(Self.preciseVersion(updatedAt))"
+            commands.append("cider-cli item event-date-facts accept \(candidateID) --reason <reason> --expected-version \(selector) --json")
+            commands.append("cider-cli item event-date-facts reject \(candidateID) --reason <reason> --expected-version \(selector) --json")
+            commands.append("cider-cli item event-date-facts defer \(candidateID) --reason <reason> --expected-version \(selector) --json")
             commands.append("cider-cli item event-date-facts accept \(candidateID) --reason <reason> --json")
             commands.append("cider-cli item event-date-facts reject \(candidateID) --reason <reason> --json")
             commands.append("cider-cli review approve \(candidateID) --json")
@@ -535,6 +658,121 @@ final class SecondBrainEventDateFactReviewService {
             commands.append("cider-cli review defer \(candidateID) --reason <reason> --json")
         }
         return commands
+    }
+
+    private func requireExactSourceEvidence(_ candidate: SecondBrainFactValidityCandidateView) throws {
+        guard let evidenceID = candidate.candidate.sourceEvidenceID,
+              candidate.candidate.sourceEvidenceRef == "source_evidence:\(evidenceID)",
+              let evidence = candidate.sourceEvidenceRecord,
+              evidence.id == evidenceID,
+              evidence.candidateRef == candidate.candidate.candidateRef,
+              evidence.sourceOwner == candidate.candidate.sourceOwner,
+              evidence.sourceQuote == candidate.candidate.sourceQuote else {
+            throw EventDateFactReviewError.missingSourceEvidence(candidate.id)
+        }
+    }
+
+    private func replayedMutation(
+        candidateID: String,
+        action: CiderReviewAction,
+        actor: String,
+        requestFingerprint: String,
+        receiptID: String
+    ) throws -> SecondBrainEventDateFactReviewMutationResult? {
+        guard let receipt = try SecondBrainActionReceiptLedgerService(database: database).inspect(id: receiptID),
+              let current = try factValidity.candidate(id: candidateID),
+              current.candidate.metadata["candidate_family"] == "event_date_fact",
+              receipt.command == Self.canonicalCommand(for: action),
+              receipt.action == Self.canonicalAction(for: action),
+              receipt.actor == actor,
+              receipt.status == (action == .defer ? "deferred" : "succeeded"),
+              !receipt.readOnly,
+              receipt.changed,
+              receipt.sourceRefs.contains(current.candidate.candidateRef),
+              let durable = DatabaseHelpers.decodeJSON([String: String].self, from: receipt.afterJSON),
+              durable["requestFingerprint"] == requestFingerprint,
+              durable["resultingCandidateVersion"] == Self.preciseVersion(current.candidate.updatedAt),
+              durable["reviewState"] == current.reviewState else {
+            return nil
+        }
+        var view = try self.view(
+            current,
+            command: Self.canonicalCommand(for: action),
+            action: Self.canonicalAction(for: action),
+            actor: actor,
+            changed: false,
+            beforeState: current.reviewState
+        )
+        guard durable["truthBoundary"] == view.truthBoundary,
+              durable["structuredFactRef"] == (view.structuredFactRef ?? "") else {
+            return nil
+        }
+        var projectedReceipt = view.actionReceipt
+        projectedReceipt["id"] = receipt.id
+        projectedReceipt["status"] = action == .defer ? "deferred" : "succeeded"
+        var after = projectedReceipt["after"] as? [String: Any] ?? [:]
+        after["requestFingerprint"] = requestFingerprint
+        after["resultingCandidateVersion"] = Self.preciseVersion(current.candidate.updatedAt)
+        projectedReceipt["after"] = after
+        view.actionReceipt = projectedReceipt
+        return SecondBrainEventDateFactReviewMutationResult(view: view, receiptID: receipt.id, changed: false)
+    }
+
+    private static func requestFingerprint(
+        candidateID: String,
+        expectedReviewState: String,
+        expectedUpdatedAt: Date,
+        action: CiderReviewAction,
+        actor: String,
+        reason: String
+    ) -> String {
+        let fields = [
+            "event-date-review-request-v1",
+            "fact_validity_candidate:\(candidateID)",
+            "event_date_fact",
+            action.rawValue,
+            actor,
+            expectedReviewState,
+            preciseVersion(expectedUpdatedAt),
+            reason,
+        ]
+        let canonical = fields.map { "\($0.utf8.count):\($0)" }.joined(separator: "|")
+        return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func actionReceiptID(action: CiderReviewAction, fingerprint: String) -> String {
+        "event-date-review:\(canonicalAction(for: action)):\(fingerprint)"
+    }
+
+    private static func canonicalCommand(for action: CiderReviewAction) -> String {
+        "item.event-date-facts.\(canonicalAction(for: action))"
+    }
+
+    private static func canonicalAction(for action: CiderReviewAction) -> String {
+        action == .approve ? "accept" : action.rawValue
+    }
+
+    private static func normalizedReason(_ reason: String?, action: CiderReviewAction) -> String {
+        let normalized = reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !normalized.isEmpty { return normalized }
+        switch action {
+        case .approve: return "Approved event/date fact."
+        case .reject: return "Rejected event/date fact."
+        case .defer: return "Deferred event/date fact."
+        case .correct: return "Corrected event/date fact."
+        }
+    }
+
+    private static func preciseVersion(_ date: Date) -> String {
+        String(format: "%016llx", date.timeIntervalSinceReferenceDate.bitPattern)
+    }
+
+    private static func jsonString(_ dictionary: [String: Any]) -> String? {
+        guard JSONSerialization.isValidJSONObject(dictionary),
+              let data = try? JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     private func stableSlug(_ value: String) -> String {

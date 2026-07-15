@@ -1006,6 +1006,7 @@ enum HomeOverviewDataProvider {
         let normalized = kind.lowercased()
         if normalized.contains("graph_candidate") { return "Graph Candidate" }
         if normalized.contains("memory_candidate") { return "Memory Candidate" }
+        if normalized.contains("event_date_fact") { return "Event Date Fact" }
         if normalized.contains("routing") { return "Routing" }
         if normalized.contains("enrichment") { return "Enrichment" }
         if normalized.contains("duplicate") { return "Duplicate" }
@@ -1065,7 +1066,7 @@ enum HomeOverviewDataProvider {
 
         if linkedItem != nil,
            safeActions.contains("correct")
-            || ["memory_candidate", "graph_candidate"].contains(normalizedKind) {
+            || ["memory_candidate", "graph_candidate", "event_date_fact"].contains(normalizedKind) {
             actions.append(.openSource)
         }
 
@@ -1085,6 +1086,12 @@ enum HomeOverviewDataProvider {
             if safeActions.contains("defer") {
                 actions.append(.deferReview)
             }
+
+        case "event_date_fact":
+            guard reviewable, hasCandidateID else { break }
+            if safeActions.contains("accept") { actions.append(.accept) }
+            if safeActions.contains("reject") { actions.append(.reject) }
+            if safeActions.contains("defer") { actions.append(.deferReview) }
 
         default:
             if hasRoutingDecision && safeActions.contains("approve") {

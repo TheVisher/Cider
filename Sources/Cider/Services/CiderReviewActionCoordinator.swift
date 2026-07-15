@@ -165,23 +165,55 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
 }
 
 @MainActor
+struct CiderEventDateFactReviewActionAdapter {
+    private let service: SecondBrainEventDateFactReviewService
+
+    init(database: CiderDatabase) {
+        service = SecondBrainEventDateFactReviewService(database: database)
+    }
+
+    func perform(_ request: CiderReviewActionRequest) throws -> SecondBrainEventDateFactReviewMutationResult {
+        try service.performReviewAction(
+            candidateID: request.identity.candidateRef,
+            expectedReviewState: request.expectedVersion.reviewState,
+            expectedUpdatedAt: request.expectedVersion.updatedAt,
+            action: request.action,
+            actor: request.actor,
+            reason: request.reason
+        )
+    }
+}
+
+@MainActor
 final class CiderReviewActionCoordinator {
     typealias MutationBoundary = @MainActor (
         JournalIntelligenceReviewActionRequest,
         String
     ) throws -> JournalIntelligenceReviewActionOutcome
 
+    typealias EventDateMutationBoundary = @MainActor (
+        CiderReviewActionRequest
+    ) throws -> SecondBrainEventDateFactReviewMutationResult
+
     private let performMutation: MutationBoundary
+    private let performEventDateMutation: EventDateMutationBoundary
 
     init(database: CiderDatabase = .shared) {
         let service = JournalIntelligenceReviewActionService(database: database)
         performMutation = { request, actor in
             try service.perform(request, actor: actor)
         }
+        let eventDateAdapter = CiderEventDateFactReviewActionAdapter(database: database)
+        performEventDateMutation = { request in
+            try eventDateAdapter.perform(request)
+        }
     }
 
     init(_ performMutation: @escaping MutationBoundary) {
         self.performMutation = performMutation
+        performEventDateMutation = { request in
+            throw SecondBrainEventDateFactReviewService.EventDateFactReviewError.unsupportedReviewAction(request.action.rawValue)
+        }
     }
 
     func perform(_ request: CiderReviewActionRequest) -> CiderReviewActionOutcome {
@@ -190,6 +222,26 @@ final class CiderReviewActionCoordinator {
         }
 
         do {
+            if request.identity.family == .eventDateFact {
+                let delegated = try performEventDateMutation(request)
+                return CiderReviewActionOutcome(
+                    identity: request.identity,
+                    action: request.action,
+                    actor: request.actor,
+                    surface: request.surface,
+                    availability: .available,
+                    exactEvidenceRequirement: request.exactEvidenceRequirement,
+                    evidenceStatus: .verifiedExactEvidence,
+                    mutationAuthority: request.mutationAuthority,
+                    changed: delegated.changed,
+                    resultingReviewState: delegated.view.reviewState,
+                    truthBoundary: delegated.view.truthBoundary,
+                    actionReceiptID: delegated.receiptID,
+                    targetOwnerRef: delegated.view.structuredFactRef,
+                    message: eventDateOutcomeMessage(action: request.action),
+                    error: nil
+                )
+            }
             let delegated = try performMutation(
                 JournalIntelligenceReviewActionRequest(
                     candidateRef: request.identity.candidateRef,
@@ -229,20 +281,31 @@ final class CiderReviewActionCoordinator {
         guard request.mutationAuthority == .reviewApprovedCandidate else {
             return failure(.reviewApprovalRequired)
         }
-        guard request.surface == .home || request.surface == .journal || request.surface == .cli else {
-            return failure(.unsupportedSurface)
-        }
-        guard request.identity.family == .memoryCandidate || request.identity.family == .graphCandidate else {
+        guard request.identity.family == .memoryCandidate
+                || request.identity.family == .graphCandidate
+                || request.identity.family == .eventDateFact else {
             return failure(.unsupportedFamily)
         }
-        guard request.identity.candidateRef.hasPrefix("\(request.identity.family.rawValue):"),
-              request.identity.candidateRef.count > request.identity.family.rawValue.count + 1 else {
+        let supportedSurfaces: [CiderReviewInvokingSurface] = request.identity.family == .eventDateFact
+            ? [.home, .journal, .reviewQueue, .cli]
+            : [.home, .journal, .cli]
+        guard supportedSurfaces.contains(request.surface) else {
+            return failure(.unsupportedSurface)
+        }
+        let identityPrefix = request.identity.family == .eventDateFact
+            ? "fact_validity_candidate:"
+            : "\(request.identity.family.rawValue):"
+        guard request.identity.candidateRef.hasPrefix(identityPrefix),
+              request.identity.candidateRef.count > identityPrefix.count else {
             return failure(.invalidCandidateIdentity)
         }
         guard request.exactEvidenceRequirement == .required else {
             return failure(.exactEvidenceRequired)
         }
         if request.surface == .home, request.action == .correct {
+            return failure(.unsupportedActionForSurface)
+        }
+        if request.identity.family == .eventDateFact, request.action == .correct {
             return failure(.unsupportedActionForSurface)
         }
         if request.identity.family == .memoryCandidate,
@@ -315,7 +378,38 @@ final class CiderReviewActionCoordinator {
            case .databaseUnavailable = routingError {
             return failure(.databaseFailure)
         }
+        if let error = error as? SecondBrainEventDateFactReviewService.EventDateFactReviewError {
+            switch error {
+            case .candidateNotFound:
+                return failure(.candidateUnavailable)
+            case .unsupportedCandidate:
+                return failure(.invalidCandidateIdentity)
+            case .staleCandidate:
+                return failure(.staleExpectedVersion)
+            case .alreadyReviewed:
+                return failure(.alreadyReviewed)
+            case .missingSourceEvidence:
+                return failure(.missingExactEvidence)
+            case .unsupportedReviewAction:
+                return failure(.unsupportedActionForSurface)
+            case .invalidProposedDate, .noBoundedEventDateFactFound, .ambiguousEventDateFact:
+                return failure(.writerFailure)
+            }
+        }
         return failure(.writerFailure)
+    }
+
+    private func eventDateOutcomeMessage(action: CiderReviewAction) -> String {
+        switch action {
+        case .approve:
+            return "Approved the exact source-backed event/date fact as structured truth."
+        case .reject:
+            return "Rejected the event/date fact without accepting truth."
+        case .defer:
+            return "Deferred the event/date fact for later review without accepting truth."
+        case .correct:
+            return "Event/date fact correction remains unavailable."
+        }
     }
 
     private static func failure(_ classification: CiderReviewActionErrorClassification) -> CiderReviewActionFailure {

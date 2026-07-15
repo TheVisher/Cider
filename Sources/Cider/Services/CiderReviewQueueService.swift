@@ -1774,28 +1774,78 @@ final class CiderReviewQueueService {
 
     @discardableResult
     func approveEventDateFact(candidateID: String, actor: String = "user") throws -> SecondBrainEventDateFactCandidateView {
-        var view = try SecondBrainEventDateFactReviewService(database: resolvedDatabase ?? .shared)
-            .accept(candidateID: candidateID, actor: actor, decisionNote: "Approved from review queue.")
-        view.actionReceipt["command"] = "review.event-date-facts.approve"
-        view.actionReceipt["action"] = "approve"
-        return view
+        try eventDateFactAction(
+            candidateID: candidateID,
+            action: .approve,
+            reason: "Approved from review queue.",
+            actor: actor,
+            presentationCommand: "review.event-date-facts.approve"
+        )
     }
 
     @discardableResult
     func rejectEventDateFact(candidateID: String, reason: String, actor: String = "user") throws -> SecondBrainEventDateFactCandidateView {
-        var view = try SecondBrainEventDateFactReviewService(database: resolvedDatabase ?? .shared)
-            .reject(candidateID: candidateID, actor: actor, reason: reason)
-        view.actionReceipt["command"] = "review.event-date-facts.reject"
-        view.actionReceipt["action"] = "reject"
-        return view
+        try eventDateFactAction(
+            candidateID: candidateID,
+            action: .reject,
+            reason: reason,
+            actor: actor,
+            presentationCommand: "review.event-date-facts.reject"
+        )
     }
 
     @discardableResult
     func deferEventDateFact(candidateID: String, reason: String, actor: String = "user") throws -> SecondBrainEventDateFactCandidateView {
-        var view = try SecondBrainEventDateFactReviewService(database: resolvedDatabase ?? .shared)
-            .deferReview(candidateID: candidateID, actor: actor, reason: reason)
-        view.actionReceipt["command"] = "review.event-date-facts.defer"
-        view.actionReceipt["action"] = "defer"
+        try eventDateFactAction(
+            candidateID: candidateID,
+            action: .defer,
+            reason: reason,
+            actor: actor,
+            presentationCommand: "review.event-date-facts.defer"
+        )
+    }
+
+    private func eventDateFactAction(
+        candidateID: String,
+        action: CiderReviewAction,
+        reason: String,
+        actor: String,
+        presentationCommand: String
+    ) throws -> SecondBrainEventDateFactCandidateView {
+        let database = resolvedDatabase ?? .shared
+        let service = SecondBrainEventDateFactReviewService(database: database)
+        let before = try service.inspect(candidateID: candidateID)
+        let outcome = CiderReviewActionCoordinator(database: database).perform(CiderReviewActionRequest(
+            identity: .init(candidateRef: before.candidateRef, family: .eventDateFact),
+            expectedVersion: .init(reviewState: before.reviewState, updatedAt: before.candidate.candidate.updatedAt),
+            action: action,
+            reason: reason,
+            actor: actor,
+            surface: .reviewQueue,
+            exactEvidenceRequirement: .required,
+            mutationAuthority: .reviewApprovedCandidate
+        ))
+        guard outcome.isSuccessful else {
+            throw NSError(
+                domain: "CiderReviewQueueService.EventDateFact",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: outcome.message]
+            )
+        }
+        var view = try service.inspect(candidateID: candidateID)
+        view.actionReceipt = [
+            "id": outcome.actionReceiptID as Any,
+            "command": presentationCommand,
+            "canonicalCommand": "item.event-date-facts.\(action == .approve ? "accept" : action.rawValue)",
+            "action": action.rawValue,
+            "actor": actor,
+            "status": action == .defer ? "deferred" : "succeeded",
+            "readOnly": false,
+            "changed": outcome.changed,
+            "after": ["reviewState": outcome.resultingReviewState, "truthBoundary": outcome.truthBoundary],
+            "safeVerificationCommands": view.safeVerificationCommands,
+            "safeNextCommands": view.safeNextCommands,
+        ]
         return view
     }
 
@@ -3357,6 +3407,7 @@ final class CiderReviewQueueService {
                 safeActions: ["accept", "reject", "defer"],
                 candidateID: candidate.id,
                 candidateRef: candidate.candidate.candidateRef,
+                candidateUpdatedAt: candidate.candidate.updatedAt,
                 sourceQuote: candidate.candidate.sourceQuote,
                 proposedDate: proposedDate,
                 eventLabel: eventLabel,
@@ -3399,10 +3450,14 @@ final class CiderReviewQueueService {
         candidate: SecondBrainFactValidityCandidateView,
         sourceItem: CiderRoutingItemSummary
     ) -> [String] {
-        orderedUnique([
+        let expectedVersionSelector = "\(candidate.reviewState)@\(String(format: "%016llx", candidate.candidate.updatedAt.timeIntervalSinceReferenceDate.bitPattern))"
+        return orderedUnique([
             "cider-cli item context \(sourceItem.type) \(sourceItem.id.uuidString) --json",
             "cider-cli item event-date-facts inspect \(candidate.id) --json",
             "cider-cli item fact-validity inspect \(candidate.id) --json",
+            "cider-cli review approve \(candidate.id) --expected-version \(expectedVersionSelector) --json",
+            "cider-cli review reject \(candidate.id) --reason <reason> --expected-version \(expectedVersionSelector) --json",
+            "cider-cli review defer \(candidate.id) --reason <reason> --expected-version \(expectedVersionSelector) --json",
             "cider-cli review approve \(candidate.id) --json",
             "cider-cli review reject \(candidate.id) --reason <reason> --json",
             "cider-cli review defer \(candidate.id) --reason <reason> --json",

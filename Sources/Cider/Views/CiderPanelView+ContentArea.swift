@@ -595,7 +595,7 @@ extension CiderPanelView {
                 openKanbanCardDetail(boardID: boardID, cardID: cardID)
             },
             onPerformReviewAction: { reviewItem, action in
-                performHomeReviewAction(reviewItem, action: action)
+                performHomeReviewAction(reviewItem, action: action, surface: .home)
             },
             onEnrichReviewBatch: {
                 enrichHomeReviewBatch()
@@ -641,7 +641,7 @@ extension CiderPanelView {
             onOpenItem: { item in openDashboardItem(item) },
             onOpenReviewSource: { reviewItem in openDashboardReviewSource(reviewItem) },
             onPerformReviewAction: { reviewItem, action in
-                performHomeReviewAction(reviewItem, action: action)
+                performHomeReviewAction(reviewItem, action: action, surface: .reviewQueue)
             },
             onEnrichReviewBatch: {
                 enrichHomeReviewBatch()
@@ -668,9 +668,10 @@ extension CiderPanelView {
 
     private func performHomeReviewAction(
         _ reviewItem: HomeReviewCockpitItem,
-        action: HomeReviewCockpitAction
+        action: HomeReviewCockpitAction,
+        surface: CiderReviewInvokingSurface
     ) -> HomeReviewActionResult {
-        if let coordinatorRequest = homeCoordinatorRequest(for: reviewItem, action: action) {
+        if let coordinatorRequest = homeCoordinatorRequest(for: reviewItem, action: action, surface: surface) {
             let outcome = CiderReviewActionCoordinator().perform(coordinatorRequest)
             if outcome.isSuccessful {
                 refreshHomeReviewModel()
@@ -701,7 +702,8 @@ extension CiderPanelView {
 
     private func homeCoordinatorRequest(
         for reviewItem: HomeReviewCockpitItem,
-        action: HomeReviewCockpitAction
+        action: HomeReviewCockpitAction,
+        surface: CiderReviewInvokingSurface
     ) -> CiderReviewActionRequest? {
         guard let coordinatorAction = action.coordinatorAction else { return nil }
         let family: CiderReviewCandidateFamily
@@ -710,6 +712,8 @@ extension CiderPanelView {
             family = .memoryCandidate
         case "Graph Candidate":
             family = .graphCandidate
+        case "Event Date Fact":
+            family = .eventDateFact
         default:
             return nil
         }
@@ -721,7 +725,7 @@ extension CiderPanelView {
                 expectedVersion: .init(reviewState: reviewItem.candidateExpectedReviewState ?? "unknown", updatedAt: .distantPast),
                 action: coordinatorAction,
                 actor: "user",
-                surface: .home,
+                surface: surface,
                 exactEvidenceRequirement: .required,
                 mutationAuthority: .reviewApprovedCandidate
             )
@@ -731,7 +735,7 @@ extension CiderPanelView {
             expectedVersion: .init(reviewState: reviewState, updatedAt: updatedAt),
             action: coordinatorAction,
             actor: "user",
-            surface: .home,
+            surface: surface,
             exactEvidenceRequirement: .required,
             mutationAuthority: .reviewApprovedCandidate
         )
