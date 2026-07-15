@@ -8,9 +8,12 @@ import Speech
 final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
     let provider = TranscriptionProviderMetadata(
         id: "apple-speech-on-device",
-        adapterVersion: "1",
+        adapterVersion: "2",
+        modelIdentity: "apple-speech-system-on-device",
         execution: .onDevice,
         supportedInputs: [.liveMicrophone, .storedAudioFile],
+        supportsLivePartialResults: true,
+        supportsSegmentTimestamps: true,
         allowsNetworkFallback: false
     )
 
@@ -303,7 +306,8 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
                 startedAt: startedAt,
                 completedAt: result.isFinal ? now() : nil,
                 audioDuration: Self.audioDuration(result.bestTranscription)
-            )
+            ),
+            segments: Self.segments(result.bestTranscription)
         )
     }
 
@@ -320,7 +324,8 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
                 startedAt: startedAt,
                 completedAt: now(),
                 audioDuration: Self.audioDuration(result.bestTranscription)
-            )
+            ),
+            segments: Self.segments(result.bestTranscription)
         )
     }
 
@@ -392,6 +397,12 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
 
     private static func audioDuration(_ transcription: SFTranscription) -> TimeInterval? {
         transcription.segments.map { $0.timestamp + $0.duration }.max()
+    }
+
+    private static func segments(_ transcription: SFTranscription) -> [TranscriptionSegment] {
+        transcription.segments.map {
+            .init(text: $0.substring, timestamp: $0.timestamp, duration: $0.duration)
+        }
     }
 
     private static func normalizedLevel(_ buffer: AVAudioPCMBuffer) -> Double {

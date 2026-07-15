@@ -31,6 +31,7 @@ struct SharedTranscriptionContractTests {
 
         #expect(liveTranscript.text == "shared  transcript")
         #expect(storedTranscript.text == liveTranscript.text)
+        #expect(storedTranscript.segments == liveTranscript.segments)
         #expect(liveTranscript.provenance.provider == service.provider)
         #expect(storedTranscript.provenance.provider == service.provider)
         #expect(liveTranscript.provenance.locale == storedTranscript.provenance.locale)
@@ -97,9 +98,12 @@ struct SharedTranscriptionContractTests {
         let service = CiderTranscriptionProviderSelection.makeDefault(locale: Locale(identifier: "en_US"))
         #expect(CiderTranscriptionProviderSelection.defaultProviderID == "apple-speech-on-device")
         #expect(service.provider.id == "apple-speech-on-device")
-        #expect(service.provider.adapterVersion == "1")
+        #expect(service.provider.adapterVersion == "2")
+        #expect(service.provider.modelIdentity == "apple-speech-system-on-device")
         #expect(service.provider.execution == .onDevice)
         #expect(service.provider.supportedInputs == [.liveMicrophone, .storedAudioFile])
+        #expect(service.provider.supportsLivePartialResults)
+        #expect(service.provider.supportsSegmentTimestamps)
         #expect(service.provider.allowsNetworkFallback == false)
 
         let repositoryRoot = URL(fileURLWithPath: #filePath)
@@ -189,7 +193,8 @@ private final class DeterministicSharedTranscriptionService: CiderTranscriptionS
         handler?(.final(.init(
             text: text,
             isFinal: true,
-            provenance: provenance(source: liveRequest.source)
+            provenance: provenance(source: liveRequest.source),
+            segments: segments
         )))
         self.liveRequest = nil
     }
@@ -199,7 +204,8 @@ private final class DeterministicSharedTranscriptionService: CiderTranscriptionS
         return .success(.init(
             text: "  shared\u{0007} transcript  ",
             isFinal: true,
-            provenance: provenance(source: request.source)
+            provenance: provenance(source: request.source),
+            segments: segments
         ))
     }
 
@@ -220,6 +226,13 @@ private final class DeterministicSharedTranscriptionService: CiderTranscriptionS
             locale: locale,
             timing: .init(startedAt: timestamp, completedAt: timestamp, audioDuration: 2.5)
         )
+    }
+
+    private var segments: [TranscriptionSegment] {
+        [
+            .init(text: "shared", timestamp: 0, duration: 1),
+            .init(text: "transcript", timestamp: 1, duration: 1.5),
+        ]
     }
 }
 

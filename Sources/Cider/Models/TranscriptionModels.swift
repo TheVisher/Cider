@@ -27,21 +27,30 @@ enum TranscriptionProviderExecution: String, Equatable, Sendable {
 struct TranscriptionProviderMetadata: Equatable, Sendable {
     let id: String
     let adapterVersion: String
+    let modelIdentity: String?
     let execution: TranscriptionProviderExecution
     let supportedInputs: Set<TranscriptionInputKind>
+    let supportsLivePartialResults: Bool
+    let supportsSegmentTimestamps: Bool
     let allowsNetworkFallback: Bool
 
     init(
         id: String,
         adapterVersion: String,
+        modelIdentity: String? = nil,
         execution: TranscriptionProviderExecution,
         supportedInputs: Set<TranscriptionInputKind>,
+        supportsLivePartialResults: Bool = false,
+        supportsSegmentTimestamps: Bool = false,
         allowsNetworkFallback: Bool
     ) {
         self.id = String(id.prefix(64))
         self.adapterVersion = String(adapterVersion.prefix(32))
+        self.modelIdentity = modelIdentity.map { String($0.prefix(160)) }
         self.execution = execution
         self.supportedInputs = supportedInputs
+        self.supportsLivePartialResults = supportsLivePartialResults
+        self.supportsSegmentTimestamps = supportsSegmentTimestamps
         self.allowsNetworkFallback = allowsNetworkFallback
     }
 }
@@ -134,15 +143,34 @@ struct TranscriptionProvenance: Equatable, Sendable {
     var usedNetworkFallback: Bool { networkFallbackProviderID != nil }
 }
 
+struct TranscriptionSegment: Equatable, Sendable {
+    let text: String
+    let timestamp: TimeInterval
+    let duration: TimeInterval
+
+    init(text: String, timestamp: TimeInterval, duration: TimeInterval) {
+        self.text = TranscriptionTranscript.normalize(text)
+        self.timestamp = max(0, timestamp)
+        self.duration = max(0, duration)
+    }
+}
+
 struct TranscriptionTranscript: Equatable, Sendable {
     let text: String
     let isFinal: Bool
     let provenance: TranscriptionProvenance
+    let segments: [TranscriptionSegment]
 
-    init(text: String, isFinal: Bool, provenance: TranscriptionProvenance) {
+    init(
+        text: String,
+        isFinal: Bool,
+        provenance: TranscriptionProvenance,
+        segments: [TranscriptionSegment] = []
+    ) {
         self.text = Self.normalize(text)
         self.isFinal = isFinal
         self.provenance = provenance
+        self.segments = segments
     }
 
     static func normalize(_ text: String) -> String {
@@ -159,7 +187,7 @@ struct TranscriptionTranscript: Equatable, Sendable {
     }
 }
 
-enum TranscriptionFailureCode: String, Equatable, Sendable {
+enum TranscriptionFailureCode: String, Error, Equatable, Sendable {
     case authorizationDenied
     case authorizationRestricted
     case authorizationRequired
@@ -171,6 +199,7 @@ enum TranscriptionFailureCode: String, Equatable, Sendable {
     case sourceNotFound
     case sourceUnreadable
     case recognitionFailed
+    case timedOut
     case cancelled
 }
 
