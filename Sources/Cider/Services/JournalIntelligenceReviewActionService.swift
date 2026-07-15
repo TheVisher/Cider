@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum JournalIntelligenceReviewAction: String, CaseIterable, Equatable {
@@ -254,8 +255,11 @@ final class JournalIntelligenceReviewActionService {
         guard before.kind == request.family else {
             throw JournalIntelligenceReviewActionError.wrongCandidateFamily(expected: request.family, actual: before.kind)
         }
+        if let replayed = try replayedOutcome(for: request, current: before, actor: actor) {
+            return replayed
+        }
         guard before.reviewState == request.expectedReviewState,
-              abs(before.updatedAt.timeIntervalSince(request.expectedUpdatedAt)) < 0.001 else {
+              Self.preciseVersion(before.updatedAt) == Self.preciseVersion(request.expectedUpdatedAt) else {
             if ["accepted", "rejected"].contains(before.reviewState) {
                 throw JournalIntelligenceReviewActionError.alreadyReviewed(request.candidateRef, before.reviewState)
             }
@@ -272,20 +276,23 @@ final class JournalIntelligenceReviewActionService {
         }
 
         let queue = CiderReviewQueueService(database: database)
+        let normalizedTargetOptionRef = Self.normalizedTargetOptionRef(request.targetOptionRef)
         if request.family == "graph_candidate",
            request.action == .approve || request.action == .correct {
-            guard let targetOptionRef = request.targetOptionRef, !targetOptionRef.isEmpty else {
+            guard let normalizedTargetOptionRef, !normalizedTargetOptionRef.isEmpty else {
                 throw JournalIntelligenceReviewActionError.targetRequired(request.candidateRef)
             }
             let currentQueueItem = try queue.list(limit: Int.max, includeDeferred: true)
                 .items
                 .first { $0.candidateRef == request.candidateRef }
-            guard currentQueueItem?.targetOptions.contains(where: { $0.optionRef == targetOptionRef }) == true else {
-                throw JournalIntelligenceReviewActionError.targetUnavailable(targetOptionRef)
+            guard currentQueueItem?.targetOptions.contains(where: { $0.optionRef == normalizedTargetOptionRef }) == true else {
+                throw JournalIntelligenceReviewActionError.targetUnavailable(normalizedTargetOptionRef)
             }
         }
         var actionResult: CiderReviewCandidateQueueActionResult!
+        var postMutation: SecondBrainEnrichmentOutput!
         var receiptID: String?
+        let requestFingerprint = Self.requestFingerprint(for: request, actor: actor)
         try database.withTransaction {
             switch (request.family, request.action) {
             case ("memory_candidate", .approve):
@@ -316,21 +323,21 @@ final class JournalIntelligenceReviewActionService {
                     actor: actor
                 )
             case ("graph_candidate", .approve):
-                guard let targetOptionRef = request.targetOptionRef, !targetOptionRef.isEmpty else {
+                guard let normalizedTargetOptionRef, !normalizedTargetOptionRef.isEmpty else {
                     throw JournalIntelligenceReviewActionError.targetRequired(request.candidateRef)
                 }
                 actionResult = try queue.approveGraphCandidate(
                     candidateID: selector.id,
                     actor: actor,
-                    targetOptionRef: targetOptionRef
+                    targetOptionRef: normalizedTargetOptionRef
                 )
             case ("graph_candidate", .correct):
-                guard let targetOptionRef = request.targetOptionRef, !targetOptionRef.isEmpty else {
+                guard let normalizedTargetOptionRef, !normalizedTargetOptionRef.isEmpty else {
                     throw JournalIntelligenceReviewActionError.targetRequired(request.candidateRef)
                 }
                 actionResult = try queue.correctGraphCandidate(
                     candidateID: selector.id,
-                    targetOptionRef: targetOptionRef,
+                    targetOptionRef: normalizedTargetOptionRef,
                     reason: "Corrected from Journal Review without approval.",
                     actor: actor
                 )
@@ -356,11 +363,23 @@ final class JournalIntelligenceReviewActionService {
             guard actionResult.changed else {
                 throw JournalIntelligenceReviewActionError.alreadyReviewed(request.candidateRef, actionResult.reviewState)
             }
+            guard let canonicalAfter = try outputService.output(id: selector.id) else {
+                throw JournalIntelligenceReviewActionError.missingCandidate(request.candidateRef)
+            }
+            guard canonicalAfter.kind == request.family else {
+                throw JournalIntelligenceReviewActionError.wrongCandidateFamily(
+                    expected: request.family,
+                    actual: canonicalAfter.kind
+                )
+            }
+            postMutation = canonicalAfter
             let record = actionReceipt(
                 result: actionResult,
                 owner: before.owner,
                 evidenceRef: before.metadata["source_evidence_ref"],
-                expectedUpdatedAt: request.expectedUpdatedAt
+                request: request,
+                requestFingerprint: requestFingerprint,
+                postMutation: canonicalAfter
             )
             receiptID = try SecondBrainActionReceiptLedgerService(database: database).record(record)
         }
@@ -368,12 +387,12 @@ final class JournalIntelligenceReviewActionService {
         return JournalIntelligenceReviewActionOutcome(
             candidateRef: request.candidateRef,
             action: request.action,
-            reviewState: actionResult.reviewState,
-            truthBoundary: actionResult.truthBoundary,
+            reviewState: postMutation.reviewState,
+            truthBoundary: Self.truthBoundary(family: postMutation.kind, reviewState: postMutation.reviewState),
             changed: actionResult.changed,
-            message: outcomeMessage(action: request.action, family: request.family, state: actionResult.reviewState),
+            message: outcomeMessage(action: request.action, family: request.family, state: postMutation.reviewState),
             actionReceiptID: receiptID,
-            targetOwnerRef: actionResult.provenance["targetOwnerRef"] as? String
+            targetOwnerRef: acceptedTargetOwnerRef(from: postMutation)
         )
     }
 
@@ -485,11 +504,16 @@ final class JournalIntelligenceReviewActionService {
         result: CiderReviewCandidateQueueActionResult,
         owner: SecondBrainOwnerRef,
         evidenceRef: String?,
-        expectedUpdatedAt: Date
+        request: JournalIntelligenceReviewActionRequest,
+        requestFingerprint: String,
+        postMutation: SecondBrainEnrichmentOutput
     ) -> SecondBrainActionReceiptRecord {
-        let timestamp = Int64((expectedUpdatedAt.timeIntervalSince1970 * 1_000).rounded())
+        let durableTruthBoundary = Self.truthBoundary(
+            family: postMutation.kind,
+            reviewState: postMutation.reviewState
+        )
         return SecondBrainActionReceiptRecord(
-            id: "journal-review:\(result.candidateRef):\(result.action):\(timestamp)",
+            id: Self.actionReceiptID(for: request, actor: result.actor),
             command: result.command,
             action: result.action,
             actor: result.actor,
@@ -500,12 +524,143 @@ final class JournalIntelligenceReviewActionService {
             readOnly: false,
             changed: result.changed,
             beforeJSON: DatabaseHelpers.encodeJSON(["reviewState": result.beforeState ?? ""]),
-            afterJSON: DatabaseHelpers.encodeJSON(["reviewState": result.afterState, "truthBoundary": result.truthBoundary]),
+            afterJSON: DatabaseHelpers.encodeJSON([
+                "requestFingerprint": requestFingerprint,
+                "resultingCandidateVersion": Self.preciseVersion(postMutation.updatedAt),
+                "reviewState": postMutation.reviewState,
+                "truthBoundary": durableTruthBoundary,
+            ]),
             safeVerificationCommands: result.safeVerificationCommands,
             safeNextCommands: result.safeNextCommands,
             correlationID: "journal-review:\(result.candidateRef)",
             receiptJSON: Self.jsonString(result.toDictionary())
         )
+    }
+
+    private func replayedOutcome(
+        for request: JournalIntelligenceReviewActionRequest,
+        current: SecondBrainEnrichmentOutput,
+        actor: String
+    ) throws -> JournalIntelligenceReviewActionOutcome? {
+        let requestFingerprint = Self.requestFingerprint(for: request, actor: actor)
+        let receiptID = Self.actionReceiptID(for: request, actor: actor)
+        let canonicalCandidateRef = "\(current.kind):\(current.id)"
+        let expectedReviewState = Self.resultingReviewState(for: request.action)
+        let expectedTruthBoundary = Self.truthBoundary(
+            family: request.family,
+            reviewState: expectedReviewState
+        )
+        let expectedStatus = request.action == .defer ? "deferred" : "succeeded"
+        guard let receipt = try SecondBrainActionReceiptLedgerService(database: database).inspect(id: receiptID),
+              receipt.action == request.action.rawValue,
+              receipt.actor == actor,
+              receipt.status == expectedStatus,
+              receipt.owner == current.owner,
+              Set(receipt.sourceRefs) == Set([canonicalCandidateRef, current.owner.canonicalRef]),
+              !receipt.readOnly,
+              receipt.changed,
+              let durableOutcome = DatabaseHelpers.decodeJSON([String: String].self, from: receipt.afterJSON),
+              durableOutcome["requestFingerprint"] == requestFingerprint,
+              durableOutcome["resultingCandidateVersion"] == Self.preciseVersion(current.updatedAt),
+              durableOutcome["reviewState"] == expectedReviewState,
+              durableOutcome["truthBoundary"] == expectedTruthBoundary,
+              current.reviewState == expectedReviewState else {
+            return nil
+        }
+        return JournalIntelligenceReviewActionOutcome(
+            candidateRef: request.candidateRef,
+            action: request.action,
+            reviewState: expectedReviewState,
+            truthBoundary: expectedTruthBoundary,
+            changed: false,
+            message: outcomeMessage(action: request.action, family: request.family, state: current.reviewState),
+            actionReceiptID: receipt.id,
+            targetOwnerRef: acceptedTargetOwnerRef(from: current)
+        )
+    }
+
+    private func acceptedTargetOwnerRef(from output: SecondBrainEnrichmentOutput) -> String? {
+        guard let ownerType = output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerType],
+              let ownerID = output.metadata[SecondBrainGraphCandidateContract.MetadataKey.acceptedTargetOwnerID],
+              !ownerType.isEmpty,
+              !ownerID.isEmpty else {
+            return nil
+        }
+        return SecondBrainOwnerRef(ownerType: ownerType, ownerID: ownerID).canonicalRef
+    }
+
+    static func requestFingerprint(
+        for request: JournalIntelligenceReviewActionRequest,
+        actor: String
+    ) -> String {
+        let family = request.family.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let candidateRef: String
+        if let selector = selector(request.candidateRef) {
+            candidateRef = "\(selector.family.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()):\(selector.id)"
+        } else {
+            candidateRef = request.candidateRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let fields = [
+            "journal-review-request-v1",
+            candidateRef,
+            family,
+            request.action.rawValue,
+            actor,
+            request.expectedReviewState,
+            preciseVersion(request.expectedUpdatedAt),
+            normalizedCorrection(request.correctedValue),
+            normalizedTargetOptionRef(request.targetOptionRef) ?? "",
+        ]
+        let canonical = fields.map { field in
+            "\(field.utf8.count):\(field)"
+        }.joined(separator: "|")
+        return SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    static func actionReceiptID(
+        for request: JournalIntelligenceReviewActionRequest,
+        actor: String
+    ) -> String {
+        let family = request.family.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return "journal-review:\(family):\(request.action.rawValue):\(requestFingerprint(for: request, actor: actor))"
+    }
+
+    private static func normalizedCorrection(_ value: String?) -> String {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private static func normalizedTargetOptionRef(_ value: String?) -> String? {
+        guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalized.isEmpty else {
+            return nil
+        }
+        return normalized
+    }
+
+    private static func preciseVersion(_ date: Date) -> String {
+        String(format: "%016llx", date.timeIntervalSinceReferenceDate.bitPattern)
+    }
+
+    private static func resultingReviewState(for action: JournalIntelligenceReviewAction) -> String {
+        switch action {
+        case .approve: "accepted"
+        case .correct: "needs_review"
+        case .reject: "rejected"
+        case .defer: "deferred"
+        }
+    }
+
+    private static func truthBoundary(family: String, reviewState: String) -> String {
+        switch (family, reviewState) {
+        case ("memory_candidate", "accepted"):
+            return "accepted_memory_candidate"
+        case ("graph_candidate", "accepted"):
+            return "accepted_graph_truth"
+        default:
+            return "reviewable_candidate_not_truth"
+        }
     }
 
     private func outcomeMessage(

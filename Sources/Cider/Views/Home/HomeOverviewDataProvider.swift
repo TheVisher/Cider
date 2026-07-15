@@ -555,6 +555,8 @@ enum HomeOverviewDataProvider {
                 reviewActions: reviewActions,
                 candidateID: reviewItem.candidateID,
                 candidateRef: reviewItem.candidateRef,
+                candidateExpectedReviewState: reviewItem.reviewState,
+                candidateUpdatedAt: reviewItem.candidateUpdatedAt,
                 sourceQuote: reviewItem.sourceQuote,
                 sourceProvenanceLabel: reviewSourceProvenanceLabel(linkedItem: linkedItem, reviewItem: reviewItem),
                 memoryKind: reviewItem.memoryKind,

@@ -783,6 +783,7 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
     var safeActions: [String]
     var candidateID: String? = nil
     var candidateRef: String? = nil
+    var candidateUpdatedAt: Date? = nil
     var sourceQuote: String? = nil
     var possibleTypes: [String] = []
     var possibleRelations: [String] = []
@@ -852,6 +853,9 @@ struct CiderReviewQueueItem: Identifiable, Equatable {
         }
         if let candidateRef {
             dictionary["candidateRef"] = candidateRef
+        }
+        if let candidateUpdatedAt {
+            dictionary["candidateUpdatedAt"] = formatter.string(from: candidateUpdatedAt)
         }
         if let sourceQuote {
             dictionary["sourceQuote"] = sourceQuote
@@ -3139,6 +3143,7 @@ final class CiderReviewQueueService {
                     : candidateActions,
                 candidateID: output.id,
                 candidateRef: "graph_candidate:\(output.id)",
+                candidateUpdatedAt: output.updatedAt,
                 sourceQuote: candidate.sourceQuote,
                 possibleTypes: possibleTypes,
                 possibleRelations: possibleRelations,
@@ -3235,6 +3240,7 @@ final class CiderReviewQueueService {
                 safeActions: ["inspect_source", "accept", "reject", "defer", "correct"],
                 candidateID: output.id,
                 candidateRef: "memory_candidate:\(output.id)",
+                candidateUpdatedAt: output.updatedAt,
                 sourceQuote: output.evidence,
                 memoryKind: memoryKind,
                 linkedOwnerRefs: linkedOwnerRefs,

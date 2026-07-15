@@ -469,9 +469,9 @@ struct JournalIntelligenceDailyReceiptTests {
         tablesBeforeAction = tablesAfterAction
 
         let approvedCounts = try mutationCounts(in: fixture.database)
-        #expect(throws: JournalIntelligenceReviewActionError.self) {
-            _ = try actionService.perform(memoryApproveRequest, actor: "journal-review-test")
-        }
+        let approvedMemoryReplay = try actionService.perform(memoryApproveRequest, actor: "journal-review-test")
+        #expect(!approvedMemoryReplay.changed)
+        #expect(approvedMemoryReplay.actionReceiptID == approvedMemory.actionReceiptID)
         #expect(try mutationCounts(in: fixture.database) == approvedCounts)
 
         model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
@@ -509,9 +509,9 @@ struct JournalIntelligenceDailyReceiptTests {
         actionTableChanges["memory_correct"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
         tablesBeforeAction = tablesAfterAction
         let correctedCounts = try mutationCounts(in: fixture.database)
-        #expect(throws: JournalIntelligenceReviewActionError.self) {
-            _ = try actionService.perform(correctionRequest, actor: "journal-review-test")
-        }
+        let correctedReplay = try actionService.perform(correctionRequest, actor: "journal-review-test")
+        #expect(!correctedReplay.changed)
+        #expect(correctedReplay.actionReceiptID == corrected.actionReceiptID)
         #expect(try mutationCounts(in: fixture.database) == correctedCounts)
 
         model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
@@ -535,16 +535,16 @@ struct JournalIntelligenceDailyReceiptTests {
         actionTableChanges["graph_correct"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
         tablesBeforeAction = tablesAfterAction
         let correctedGraphCounts = try mutationCounts(in: fixture.database)
-        #expect(throws: JournalIntelligenceReviewActionError.self) {
-            _ = try actionService.perform(
-                JournalIntelligenceReviewActionRequest(
-                    proposal: graphCorrection,
-                    action: .correct,
-                    targetOptionRef: graphTarget.id
-                ),
-                actor: "journal-review-test"
-            )
-        }
+        let correctedGraphReplay = try actionService.perform(
+            JournalIntelligenceReviewActionRequest(
+                proposal: graphCorrection,
+                action: .correct,
+                targetOptionRef: graphTarget.id
+            ),
+            actor: "journal-review-test"
+        )
+        #expect(!correctedGraphReplay.changed)
+        #expect(correctedGraphReplay.actionReceiptID == correctedGraph.actionReceiptID)
         #expect(try mutationCounts(in: fixture.database) == correctedGraphCounts)
 
         model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
@@ -567,9 +567,9 @@ struct JournalIntelligenceDailyReceiptTests {
         actionTableChanges["graph_approve"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
         tablesBeforeAction = tablesAfterAction
         let approvedGraphCounts = try mutationCounts(in: fixture.database)
-        #expect(throws: JournalIntelligenceReviewActionError.self) {
-            _ = try actionService.perform(graphApproveRequest, actor: "journal-review-test")
-        }
+        let approvedGraphReplay = try actionService.perform(graphApproveRequest, actor: "journal-review-test")
+        #expect(!approvedGraphReplay.changed)
+        #expect(approvedGraphReplay.actionReceiptID == approvedGraph.actionReceiptID)
         #expect(try mutationCounts(in: fixture.database) == approvedGraphCounts)
 
         model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
@@ -581,9 +581,9 @@ struct JournalIntelligenceDailyReceiptTests {
         actionTableChanges["graph_reject"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
         tablesBeforeAction = tablesAfterAction
         let rejectedCounts = try mutationCounts(in: fixture.database)
-        #expect(throws: JournalIntelligenceReviewActionError.self) {
-            _ = try actionService.perform(rejectRequest, actor: "journal-review-test")
-        }
+        let rejectedReplay = try actionService.perform(rejectRequest, actor: "journal-review-test")
+        #expect(!rejectedReplay.changed)
+        #expect(rejectedReplay.actionReceiptID == rejected.actionReceiptID)
         #expect(try mutationCounts(in: fixture.database) == rejectedCounts)
 
         model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
@@ -596,9 +596,9 @@ struct JournalIntelligenceDailyReceiptTests {
         actionTableChanges["memory_defer"] = changedTables(from: tablesBeforeAction, to: tablesAfterAction)
         tablesBeforeAction = tablesAfterAction
         let deferredCounts = try mutationCounts(in: fixture.database)
-        #expect(throws: JournalIntelligenceReviewActionError.self) {
-            _ = try actionService.perform(deferRequest, actor: "journal-review-test")
-        }
+        let deferredReplay = try actionService.perform(deferRequest, actor: "journal-review-test")
+        #expect(!deferredReplay.changed)
+        #expect(deferredReplay.actionReceiptID == deferred.actionReceiptID)
         #expect(try mutationCounts(in: fixture.database) == deferredCounts)
 
         model = try JournalIntelligenceDayReviewService(database: fixture.database).review(for: day)
@@ -830,6 +830,7 @@ struct JournalIntelligenceDailyReceiptTests {
         let graph = try #require(graphGroup.proposals.first { $0.family == "graph_candidate" })
         var openedSource: JournalIntelligenceSourceNavigation?
         let actionService = JournalIntelligenceReviewActionService(database: fixture.database)
+        let actionCoordinator = CiderReviewActionCoordinator(database: fixture.database)
 
         for presentation in [
             JournalReviewHostedPresentation(name: "wide", width: 920),
@@ -841,7 +842,7 @@ struct JournalIntelligenceDailyReceiptTests {
                 onReload: {},
                 onOpenSource: { openedSource = $0 },
                 performReviewAction: { request in
-                    try actionService.perform(request, actor: "journal-review-production-composition-test")
+                    actionCoordinator.perform(request)
                 }
             )
             .frame(width: presentation.width)

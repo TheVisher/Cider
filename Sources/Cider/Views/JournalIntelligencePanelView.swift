@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 
 typealias JournalIntelligenceReviewActionPerformer = @MainActor (
-    JournalIntelligenceReviewActionRequest
-) throws -> JournalIntelligenceReviewActionOutcome
+    CiderReviewActionRequest
+) throws -> CiderReviewActionOutcome
 
 struct JournalIntelligenceDayReviewView: View {
     let state: JournalIntelligenceDayReviewLoadState
@@ -23,7 +23,7 @@ struct JournalIntelligenceDayReviewView: View {
         onReload: @escaping () -> Void,
         onOpenSource: @escaping (JournalIntelligenceSourceNavigation) -> Void,
         performReviewAction: @escaping JournalIntelligenceReviewActionPerformer = { request in
-            try JournalIntelligenceReviewActionService().perform(request, actor: "user")
+            CiderReviewActionCoordinator().perform(request)
         }
     ) {
         self.state = state
@@ -522,21 +522,48 @@ struct JournalIntelligenceDayReviewView: View {
         actionMessages[proposal.candidateRef] = nil
         do {
             let result = try performReviewAction(
-                JournalIntelligenceReviewActionRequest(
-                    proposal: proposal,
-                    action: action,
-                    correctedValue: correctedValue,
-                    targetOptionRef: targetOptionRef
+                CiderReviewActionRequest(
+                    identity: .init(
+                        candidateRef: proposal.candidateRef,
+                        family: .init(rawValue: proposal.family)
+                    ),
+                    expectedVersion: .init(
+                        reviewState: proposal.reviewState,
+                        updatedAt: proposal.candidateUpdatedAt
+                    ),
+                    action: action.coordinatorAction,
+                    correction: correctedValue,
+                    targetOptionRef: targetOptionRef,
+                    actor: "user",
+                    surface: .journal,
+                    exactEvidenceRequirement: .required,
+                    mutationAuthority: .reviewApprovedCandidate
                 )
             )
+            if let failure = result.error {
+                actionErrors[proposal.candidateRef] = failure.message
+                activeActionCandidateRef = nil
+                return
+            }
             actionMessages[proposal.candidateRef] = result.message
             correctionDrafts[proposal.candidateRef] = nil
             selectedTargets[proposal.candidateRef] = nil
             onReload()
         } catch {
-            actionErrors[proposal.candidateRef] = error.localizedDescription
+            actionErrors[proposal.candidateRef] = "Cider could not complete this review action. Nothing was changed; refresh and try again."
         }
         activeActionCandidateRef = nil
+    }
+}
+
+private extension JournalIntelligenceReviewAction {
+    var coordinatorAction: CiderReviewAction {
+        switch self {
+        case .approve: .approve
+        case .correct: .correct
+        case .reject: .reject
+        case .defer: .defer
+        }
     }
 }
 

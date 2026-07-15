@@ -669,23 +669,77 @@ extension CiderPanelView {
     private func performHomeReviewAction(
         _ reviewItem: HomeReviewCockpitItem,
         action: HomeReviewCockpitAction
-    ) -> Bool {
+    ) -> HomeReviewActionResult {
+        if let coordinatorRequest = homeCoordinatorRequest(for: reviewItem, action: action) {
+            let outcome = CiderReviewActionCoordinator().perform(coordinatorRequest)
+            if outcome.isSuccessful {
+                refreshHomeReviewModel()
+                return .succeeded
+            }
+            return .failed(message: outcome.error?.message ?? outcome.message)
+        }
+
         let didChange: Bool
         switch action {
         case .accept:
             didChange = approveHomeReviewItem(reviewItem)
         case .reject:
-            didChange = rejectHomeReviewItem(reviewItem)
+            didChange = false
         case .deferReview:
             didChange = deferHomeReviewItem(reviewItem)
         case .openSource:
             return openDashboardReviewSource(reviewItem)
+                ? .succeeded
+                : .failed(message: "Cider could not open this review source. Refresh the review list and try again.")
         }
         if didChange {
-            homeDashboardReviewLoader.invalidate()
-            Task { await homeDashboardReviewLoader.loadIfNeeded() }
+            refreshHomeReviewModel()
+            return .succeeded
         }
-        return didChange
+        return .failed(message: "Cider could not complete this review action. Nothing was changed; refresh and try again.")
+    }
+
+    private func homeCoordinatorRequest(
+        for reviewItem: HomeReviewCockpitItem,
+        action: HomeReviewCockpitAction
+    ) -> CiderReviewActionRequest? {
+        guard let coordinatorAction = action.coordinatorAction else { return nil }
+        let family: CiderReviewCandidateFamily
+        switch reviewItem.kindLabel {
+        case "Memory Candidate":
+            family = .memoryCandidate
+        case "Graph Candidate":
+            family = .graphCandidate
+        default:
+            return nil
+        }
+        guard let candidateRef = reviewItem.candidateRef,
+              let reviewState = reviewItem.candidateExpectedReviewState,
+              let updatedAt = reviewItem.candidateUpdatedAt else {
+            return CiderReviewActionRequest(
+                identity: .init(candidateRef: reviewItem.candidateRef ?? "missing", family: family),
+                expectedVersion: .init(reviewState: reviewItem.candidateExpectedReviewState ?? "unknown", updatedAt: .distantPast),
+                action: coordinatorAction,
+                actor: "user",
+                surface: .home,
+                exactEvidenceRequirement: .required,
+                mutationAuthority: .reviewApprovedCandidate
+            )
+        }
+        return CiderReviewActionRequest(
+            identity: .init(candidateRef: candidateRef, family: family),
+            expectedVersion: .init(reviewState: reviewState, updatedAt: updatedAt),
+            action: coordinatorAction,
+            actor: "user",
+            surface: .home,
+            exactEvidenceRequirement: .required,
+            mutationAuthority: .reviewApprovedCandidate
+        )
+    }
+
+    private func refreshHomeReviewModel() {
+        homeDashboardReviewLoader.invalidate()
+        Task { await homeDashboardReviewLoader.loadIfNeeded() }
     }
 
     private func approveHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
@@ -695,59 +749,26 @@ extension CiderPanelView {
                     bookmarkID: approval.bookmarkID,
                     suggestionKey: approval.suggestionKey
                 )
-            } else if reviewItem.kindLabel == "Memory Candidate" {
-                _ = try CiderReviewCandidateActionService().acceptMemoryCandidate(reviewItem.candidateID ?? reviewItem.candidateRef)
-            } else if reviewItem.kindLabel == "Graph Candidate" {
-                _ = try CiderReviewCandidateActionService().acceptGraphCandidateIfResolved(reviewItem.candidateID ?? reviewItem.candidateRef)
             } else {
                 _ = try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
             }
             return true
         } catch {
-            print("Failed to approve Home review item: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    private func rejectHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
-        do {
-            if reviewItem.kindLabel == "Memory Candidate" {
-                _ = try CiderReviewCandidateActionService().rejectMemoryCandidate(
-                    reviewItem.candidateID ?? reviewItem.candidateRef,
-                    reason: "Rejected from Home Review Queue."
-                )
-            } else if reviewItem.kindLabel == "Graph Candidate" {
-                _ = try CiderReviewCandidateActionService().rejectGraphCandidate(
-                    reviewItem.candidateID ?? reviewItem.candidateRef,
-                    reason: "Rejected from Home Review Queue."
-                )
-            } else {
-                return false
-            }
-            return true
-        } catch {
-            print("Failed to reject Home review item: \(error.localizedDescription)")
+            print("Home review approval failed; no change was applied.")
             return false
         }
     }
 
     private func deferHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
         do {
-            if reviewItem.kindLabel == "Memory Candidate" {
-                _ = try CiderReviewCandidateActionService().deferMemoryCandidate(
-                    reviewItem.candidateID ?? reviewItem.candidateRef,
-                    reason: "Deferred from Home Review Queue."
-                )
-            } else {
-                _ = try CiderReviewQueueService().deferReview(
-                    itemID: reviewItem.itemID,
-                    reason: "Deferred from Home dashboard.",
-                    actor: "user"
-                )
-            }
+            _ = try CiderReviewQueueService().deferReview(
+                itemID: reviewItem.itemID,
+                reason: "Deferred from Home dashboard.",
+                actor: "user"
+            )
             return true
         } catch {
-            print("Failed to defer Home review item: \(error.localizedDescription)")
+            print("Home review deferral failed; no change was applied.")
             return false
         }
     }

@@ -6,21 +6,21 @@ struct HomeOverviewDashboardView: View {
     let onOpenReviewSource: (HomeReviewCockpitItem) -> Void
     let onOpenTarget: (HomeOverviewActionTarget) -> Void
     let onOpenKanbanCard: (String, String) -> Void
-    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> Bool
+    let onPerformReviewAction: (HomeReviewCockpitItem, HomeReviewCockpitAction) -> HomeReviewActionResult
     let onEnrichReviewBatch: () -> Bool
     let onOpenSettings: () -> Void
     let onSyncNow: () -> Void
     let onCreateNew: () -> Void
 
     private let calendar = Calendar.current
-    @State private var resolvedReviewIDs: Set<String> = []
+    @State private var reviewActionState = HomeReviewActionState()
     @State private var batchEnrichmentIsConfirming = false
     @State private var scheduledBatchEnrichmentCount: Int?
     @ObservedObject private var authService = AuthService.shared
     @ObservedObject private var syncService = SyncService.shared
     private var layoutMetrics: HomeOverviewLayoutMetrics { HomeOverviewLayoutMetrics(snapshot: snapshot) }
     private var visibleReviewItems: [HomeReviewCockpitItem] {
-        snapshot.reviewCockpitItems.filter { !resolvedReviewIDs.contains($0.id) }
+        snapshot.reviewCockpitItems.filter { !reviewActionState.resolvedReviewIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -637,7 +637,8 @@ struct HomeOverviewDashboardView: View {
     }
 
     private func reviewQueueRow(_ reviewItem: HomeReviewCockpitItem) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .top, spacing: Spacing.sm) {
             Button {
                 openReviewSource(reviewItem)
             } label: {
@@ -723,6 +724,13 @@ struct HomeOverviewDashboardView: View {
             }
             .font(CiderFont.captionSemibold)
             .foregroundColor(CiderColors.secondary)
+            }
+            if let error = reviewActionState.errorMessage(for: reviewItem.id) {
+                Text(error)
+                    .font(CiderFont.caption)
+                    .foregroundColor(CiderColors.warning)
+                    .accessibilityLabel("Review action blocked: \(error)")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -748,15 +756,18 @@ struct HomeOverviewDashboardView: View {
             }
         case .accept, .reject, .deferReview:
             Button {
-                if onPerformReviewAction(reviewItem, action) {
-                    resolvedReviewIDs.insert(reviewItem.id)
-                }
+                reviewActionState.begin(rowID: reviewItem.id)
+                reviewActionState.reconcile(
+                    rowID: reviewItem.id,
+                    result: onPerformReviewAction(reviewItem, action)
+                )
             } label: {
                 Label(action.buttonTitle(for: reviewItem), systemImage: action.systemImage)
                     .labelStyle(.titleAndIcon)
                     .font(CiderFont.captionSemibold)
             }
             .buttonStyle(.plain)
+            .disabled(reviewActionState.pendingReviewIDs.contains(reviewItem.id))
             .help(action.helpLabel(for: reviewItem))
             .accessibilityLabel(action.helpLabel(for: reviewItem))
         }

@@ -204,6 +204,56 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
             return item.dateSuggestionApproval == nil ? "Open source item" : "Open bookmark details"
         }
     }
+
+    var coordinatorAction: CiderReviewAction? {
+        switch self {
+        case .accept: .approve
+        case .reject: .reject
+        case .deferReview: .defer
+        case .openSource: nil
+        }
+    }
+}
+
+enum HomeReviewActionResult: Equatable {
+    case succeeded
+    case failed(message: String)
+
+    var succeeded: Bool {
+        if case .succeeded = self { return true }
+        return false
+    }
+
+    var errorMessage: String? {
+        if case .failed(let message) = self { return message }
+        return nil
+    }
+}
+
+struct HomeReviewActionState: Equatable {
+    private(set) var resolvedReviewIDs: Set<String> = []
+    private(set) var pendingReviewIDs: Set<String> = []
+    private(set) var actionErrors: [String: String] = [:]
+
+    mutating func begin(rowID: String) {
+        pendingReviewIDs.insert(rowID)
+        actionErrors[rowID] = nil
+    }
+
+    mutating func reconcile(rowID: String, result: HomeReviewActionResult) {
+        pendingReviewIDs.remove(rowID)
+        if result.succeeded {
+            resolvedReviewIDs.insert(rowID)
+            actionErrors[rowID] = nil
+        } else {
+            resolvedReviewIDs.remove(rowID)
+            actionErrors[rowID] = result.errorMessage
+        }
+    }
+
+    func errorMessage(for rowID: String) -> String? {
+        actionErrors[rowID]
+    }
 }
 
 struct HomeReviewCockpitItem: Equatable, Identifiable {
@@ -228,6 +278,8 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
     let reviewActions: [HomeReviewCockpitAction]
     let candidateID: String?
     let candidateRef: String?
+    let candidateExpectedReviewState: String?
+    let candidateUpdatedAt: Date?
     let sourceQuote: String?
     let sourceProvenanceLabel: String?
     let memoryKind: String?
@@ -266,6 +318,8 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         reviewActions: [HomeReviewCockpitAction] = [],
         candidateID: String? = nil,
         candidateRef: String? = nil,
+        candidateExpectedReviewState: String? = nil,
+        candidateUpdatedAt: Date? = nil,
         sourceQuote: String? = nil,
         sourceProvenanceLabel: String? = nil,
         memoryKind: String? = nil,
@@ -303,6 +357,8 @@ struct HomeReviewCockpitItem: Equatable, Identifiable {
         self.reviewActions = reviewActions
         self.candidateID = candidateID
         self.candidateRef = candidateRef
+        self.candidateExpectedReviewState = candidateExpectedReviewState
+        self.candidateUpdatedAt = candidateUpdatedAt
         self.sourceQuote = sourceQuote
         self.sourceProvenanceLabel = sourceProvenanceLabel
         self.memoryKind = memoryKind
