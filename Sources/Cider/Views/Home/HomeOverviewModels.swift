@@ -148,7 +148,8 @@ struct HomeReviewCockpitDateSuggestionApproval: Equatable {
     let bookmarkID: UUID
     let suggestionIndex: Int
     let suggestionKey: String
-    let destination: LibraryEntityType
+    let expectedUpdatedAt: Date
+    let exactEvidence: CiderBookmarkDateSuggestion
 }
 
 enum HomeReviewCockpitAction: String, Equatable, Identifiable {
@@ -157,6 +158,8 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
     case deferReview = "defer"
     case openSource
     case correctRoute
+    case createDateCard
+    case createTodo
 
     var id: String { rawValue }
 
@@ -167,6 +170,8 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .deferReview: return "clock"
         case .openSource: return "arrow.up.right.square"
         case .correctRoute: return "folder.badge.gearshape"
+        case .createDateCard: return "calendar.badge.plus"
+        case .createTodo: return "checklist"
         }
     }
 
@@ -185,6 +190,10 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
             return "Open source"
         case .correctRoute:
             return "Correct destination"
+        case .createDateCard:
+            return "Create Date Card"
+        case .createTodo:
+            return "Create Todo"
         }
     }
 
@@ -193,9 +202,6 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
         case .accept:
             if item.kindLabel == "Memory Candidate" { return "Accept memory" }
             if item.kindLabel == "Graph Candidate" { return "Accept graph candidate" }
-            if let approval = item.dateSuggestionApproval {
-                return approval.destination == .todo ? "Approve Todo due date" : "Approve Date Card"
-            }
             return "Approve review"
         case .reject:
             return "Reject suggestion"
@@ -208,12 +214,16 @@ enum HomeReviewCockpitAction: String, Equatable, Identifiable {
             return item.dateSuggestionApproval == nil ? "Open source item" : "Open bookmark details"
         case .correctRoute:
             return "Choose an exact existing destination"
+        case .createDateCard:
+            return "Approve to the explicit Date Card destination"
+        case .createTodo:
+            return "Approve to the explicit Todo destination"
         }
     }
 
     var coordinatorAction: CiderReviewAction? {
         switch self {
-        case .accept: .approve
+        case .accept, .createDateCard, .createTodo: .approve
         case .reject: .reject
         case .deferReview: .defer
         case .openSource: nil

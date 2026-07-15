@@ -66,7 +66,7 @@ struct CiderCLI {
                 return LegacyRemovedCommand(command: label, replacement: "cider-cli review enrich <item-id> --json")
             }
             if subcommand == "date-suggestions" || subcommand == "dates" {
-                return LegacyRemovedCommand(command: label, replacement: "cider-cli review list --kind date-suggestion --json")
+                return nil
             }
             return LegacyRemovedCommand(command: label, replacement: "cider-cli item search <query> --json")
         case "note":
@@ -221,6 +221,31 @@ struct CiderCLI {
             return false
         }
 
+        if ["bookmark", "bm"].contains(command),
+           ["date-suggestions", "dates"].contains(subcommand ?? ""),
+           hasHelpArg(args) {
+            let isApproval = args.first == "approve"
+            let usage = isApproval
+                ? "cider-cli bookmark \(subcommand ?? "date-suggestions") approve <bookmark-id> --key <suggestion-key> --destination date|todo --expected-version <state@version> [--actor user|agent] [--json]"
+                : "cider-cli bookmark \(subcommand ?? "date-suggestions") <bookmark-id> [--json]"
+            if args.contains("--json") {
+                outputJSON([
+                    "ok": true,
+                    "command": isApproval ? "bookmark.date-suggestion.approve.help" : "bookmark.date-suggestions.help",
+                    "usage": usage,
+                    "readOnly": true,
+                    "changed": false,
+                    "destinationRequired": isApproval,
+                    "truthBoundary": "help_contract_only_not_vault_truth",
+                    "safeVerificationCommands": ["cider-cli bookmark \(subcommand ?? "date-suggestions") \(isApproval ? "approve " : "")--help --json"],
+                ])
+            } else {
+                print("Usage: \(usage)")
+                if isApproval { print("Date Card or Todo must be selected explicitly; no destination is inferred.") }
+            }
+            return true
+        }
+
         if command == "capture",
            ["provenance-gaps", "provenance-gap-diagnostic"].contains(subcommand),
            hasHelpArg(args) {
@@ -310,7 +335,7 @@ struct CiderCLI {
             let usage: String
             switch subcommand {
             case "approve":
-                usage = "cider-cli review approve <item-id|candidate-id> [--target-option <graph-option-ref>] [--actor user|agent] [--expected-version <state@version>] [--json]"
+                usage = "cider-cli review approve <item-id|candidate-id> [--item-id <bookmark-uuid> --destination date|todo] [--target-option <graph-option-ref>] [--actor user|agent] [--expected-version <state@version>] [--json]"
             case "reject":
                 usage = "cider-cli review reject <candidate-id> [--reason <text>] [--actor user|agent] [--expected-version <state@version>] [--json]"
             case "defer":
@@ -985,11 +1010,21 @@ struct CiderCLI {
         }
 
         let bookmarkService: VaultBookmarkService
-        if ["review", "routing", "route"].contains(command) {
+        let normalizedCommand = command.lowercased()
+        let isBookmarkDateReviewCommand = (["bookmark", "bm"].contains(normalizedCommand)
+                && ["date-suggestions", "dates"].contains(subcommand?.lowercased() ?? ""))
+            || (normalizedCommand == "review"
+                && ((["list", "ls"].contains(subcommand?.lowercased() ?? "")
+                        && ["bookmark_date_suggestion", "date-suggestion"].contains(parseFlag("--kind", from: remaining) ?? ""))
+                    || (subcommand?.lowercased() == "approve"
+                        && remaining.first.map(isBookmarkDateSuggestionCandidateRef) == true)))
+        let usesCanonicalReviewBookmarkService = ["review", "routing", "route"].contains(normalizedCommand)
+            || isBookmarkDateReviewCommand
+        if usesCanonicalReviewBookmarkService {
             let routingBookmarkService = VaultBookmarkService(
                 database: CiderDatabase.shared,
                 schedulesEnrichment: false,
-                writesVaultCaches: true
+                writesVaultCaches: !isBookmarkDateReviewCommand
             )
             routingBookmarkService.loadBookmarksFromDatabase(CiderDatabase.shared)
             bookmarkService = routingBookmarkService
@@ -1143,9 +1178,12 @@ struct CiderCLI {
                 || subcommand == "provenance-gap"
                 || subcommand == "provenance-gap-patterns"
         case "bookmark", "bm":
+            if subcommand == "date-suggestions" || subcommand == "dates" {
+                return args.first == "approve"
+            }
             return isMutationSubcommand(
                 subcommand,
-                in: ["add", "create", "move", "delete", "rm", "update", "set", "tag", "untag", "assign-label", "date-suggestions"]
+                in: ["add", "create", "move", "delete", "rm", "update", "set", "tag", "untag", "assign-label"]
             )
         case "note":
             return isMutationSubcommand(subcommand, in: ["create", "move", "delete", "rm", "update", "rename"])
@@ -2779,6 +2817,17 @@ struct CiderCLI {
             guard validateReviewFilterIfPresent(command: "review.list", name: "state", value: reviewState, supportedValues: supportedReviewStates) else { return }
             let safeAction = parseFlag("--safe-action", from: args)
             guard validateReviewFilterIfPresent(command: "review.list", name: "safe-action", value: safeAction, supportedValues: supportedReviewSafeActions) else { return }
+            if kind == "bookmark_date_suggestion" || kind == "date-suggestion" {
+                do {
+                    try printBookmarkDateSuggestionReviewList(
+                        bookmarks: bookmarkService.bookmarks,
+                        limit: limit ?? 50
+                    )
+                } catch {
+                    printCLIError(error.localizedDescription)
+                }
+                return
+            }
             do {
                 let result = try service.list(
                     limit: limit ?? 50,
@@ -2908,6 +2957,8 @@ struct CiderCLI {
                     "--target-owner-id",
                     "--relation",
                     "--expected-version",
+                    "--item-id",
+                    "--destination",
                 ]
             ) else {
                 printCLIError("Usage: cider-cli review approve <item-id|candidate-id> [--target-option <option-ref>|--corrected-target-owner <type:id>|--corrected-target-owner-type <type> --corrected-target-owner-id <id>|--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--corrected-relation <type>|--relation <type>] [--actor user|agent] [--json]")
@@ -2915,6 +2966,17 @@ struct CiderCLI {
             }
             let actor = parseFlag("--actor", from: args) ?? "user"
             do {
+                if isBookmarkDateSuggestionCandidateRef(itemRef) {
+                    performBookmarkDateSuggestionCLIAction(
+                        candidateRef: itemRef,
+                        bookmarkIDString: parseFlag("--item-id", from: args),
+                        destinationString: parseFlag("--destination", from: args),
+                        expectedVersionSelector: parseFlag("--expected-version", from: args),
+                        actor: actor,
+                        bookmarkService: bookmarkService
+                    )
+                    return
+                }
                 if isEventDateFactCandidateRef(itemRef) {
                     performEventDateFactCLIAction(
                         candidateRef: itemRef,
@@ -3856,46 +3918,24 @@ struct CiderCLI {
             if args.first == "approve" {
                 let approvalArgs = Array(args.dropFirst())
                 let approvalPositionals = approvalArgs.filter { !$0.hasPrefix("--") }
-                guard let idPrefix = approvalPositionals.first else {
-                    printCLIError("ID prefix required. Usage: cider-cli bookmark date-suggestions approve <id> [--index <n>|--key <suggestion-key>] [--json]")
+                guard let exactID = approvalPositionals.first else {
+                    printCLIError("Exact bookmark ID required. Usage: cider-cli bookmark date-suggestions approve <bookmark-id> --key <suggestion-key> --destination date|todo --expected-version <state@version> [--json]")
                     return
                 }
-                let suggestionKey = parseFlag("--key", from: approvalArgs)
+                guard let suggestionKey = parseFlag("--key", from: approvalArgs)
                     ?? parseFlag("--suggestion-key", from: approvalArgs)
-                let suggestionIndex = parseFlag("--index", from: approvalArgs).flatMap(Int.init) ?? 0
-                if suggestionKey == nil {
-                    guard suggestionIndex >= 0 else {
-                        printCLIError("--index must be 0 or greater")
-                        return
-                    }
+                else {
+                    printCLIError("An exact --key is required; positional suggestion indexes are not safe for approval.")
+                    return
                 }
-                guard let bm = findBookmark(idPrefix, in: service) else { return }
-                do {
-                    let approvalService = CiderBookmarkDateSuggestionApprovalService()
-                    let result: CiderBookmarkDateSuggestionApprovalResult
-                    if let suggestionKey {
-                        result = try approvalService.approve(bookmarkID: bm.id, suggestionKey: suggestionKey)
-                    } else {
-                        result = try approvalService.approve(
-                            bookmarkID: bm.id,
-                            suggestionIndex: suggestionIndex
-                        )
-                    }
-                    if jsonOutput {
-                        outputJSON(bookmarkDateSuggestionApprovalResultToDict(result))
-                    } else {
-                        let action = result.created ? "Created" : "Reused"
-                        if let todo = result.todo {
-                            print("\(action) todo: \(todo.title) (\(todo.id.uuidString.prefix(8)))")
-                        } else if let dateCard = result.dateCard {
-                            print("\(action) date card: \(dateCard.title) (\(dateCard.id.uuidString.prefix(8)))")
-                        }
-                        print("  Date suggestion: \(result.suggestion.kind)")
-                        print("  Source bookmark: \(result.bookmarkTitle) (\(result.bookmarkID.uuidString.prefix(8)))")
-                    }
-                } catch {
-                    printCLIError(error.localizedDescription)
-                }
+                performBookmarkDateSuggestionCLIAction(
+                    candidateRef: CiderBookmarkDateSuggestionApprovalService.candidatePrefix + suggestionKey,
+                    bookmarkIDString: exactID,
+                    destinationString: parseFlag("--destination", from: approvalArgs),
+                    expectedVersionSelector: parseFlag("--expected-version", from: approvalArgs),
+                    actor: parseFlag("--actor", from: approvalArgs) ?? "user",
+                    bookmarkService: service
+                )
                 return
             }
 
@@ -18216,6 +18256,8 @@ struct CiderCLI {
         "graph_candidate",
         "memory_candidate",
         "event_date_fact",
+        "bookmark_date_suggestion",
+        "date-suggestion",
         "inbox_backlog",
         "duplicate_candidate",
         "unsupported_attachment",
@@ -24986,6 +25028,202 @@ struct CiderCLI {
             dict["structuredFactRef"] = structuredFactRef
         }
         return dict
+    }
+
+    static func isBookmarkDateSuggestionCandidateRef(_ value: String) -> Bool {
+        value.hasPrefix(CiderBookmarkDateSuggestionApprovalService.candidatePrefix)
+            && value.count > CiderBookmarkDateSuggestionApprovalService.candidatePrefix.count
+    }
+
+    static func printBookmarkDateSuggestionReviewList(bookmarks: [Bookmark], limit: Int) throws {
+        let service = CiderBookmarkDateSuggestionService()
+        let approvalService = CiderBookmarkDateSuggestionApprovalService()
+        var entries: [[String: Any]] = []
+        let entryLimit = max(0, limit)
+        guard entryLimit > 0 else {
+            printBookmarkDateSuggestionReviewListOutput(entries)
+            return
+        }
+        for bookmark in bookmarks {
+            let selector = CiderBookmarkDateSuggestionApprovalService.expectedVersionSelector(
+                reviewState: CiderBookmarkDateSuggestionApprovalService.pendingReviewState,
+                updatedAt: bookmark.updatedAt
+            )
+            for suggestion in service.suggestions(for: bookmark) {
+                let candidateRef = CiderBookmarkDateSuggestionApprovalService.candidatePrefix + suggestion.suggestionKey
+                guard try !approvalService.hasCanonicalAcceptedBinding(
+                    candidateRef: candidateRef,
+                    bookmarkID: bookmark.id
+                ) else {
+                    continue
+                }
+                let commands = CiderBookmarkDateSuggestionDestination.allCases.map { destination in
+                    "cider-cli review approve \(candidateRef) --item-id \(bookmark.id.uuidString) --destination \(destination.rawValue) --expected-version \(selector) --json"
+                }
+                entries.append([
+                    "id": candidateRef,
+                    "candidateID": suggestion.suggestionKey,
+                    "candidateRef": candidateRef,
+                    "reviewFamily": CiderReviewCandidateFamily.bookmarkDateSuggestion.rawValue,
+                    "itemID": bookmark.id.uuidString,
+                    "itemType": "bookmark",
+                    "title": bookmark.title,
+                    "reviewState": CiderBookmarkDateSuggestionApprovalService.pendingReviewState,
+                    "expectedVersionSelector": selector,
+                    "exactEvidence": bookmarkDateSuggestionToDict(suggestion),
+                    "destinationRequired": true,
+                    "availableDestinations": CiderBookmarkDateSuggestionDestination.allCases.map(\.rawValue),
+                    "safeActions": ["approve"],
+                    "safeVerificationCommands": commands,
+                    "safeNextCommands": commands,
+                ])
+                if entries.count == entryLimit { break }
+            }
+            if entries.count == entryLimit { break }
+        }
+        printBookmarkDateSuggestionReviewListOutput(entries)
+    }
+
+    private static func printBookmarkDateSuggestionReviewListOutput(_ entries: [[String: Any]]) {
+        if jsonOutput {
+            outputJSON([
+                "ok": true,
+                "command": "review.list",
+                "readOnly": true,
+                "changed": false,
+                "kind": CiderReviewCandidateFamily.bookmarkDateSuggestion.rawValue,
+                "count": entries.count,
+                "items": entries,
+                "truthBoundary": "reviewable_candidate_not_truth",
+            ])
+        } else {
+            print("Bookmark date suggestions (\(entries.count)):")
+            for entry in entries {
+                print("  \(entry["candidateRef"] as? String ?? "unknown") — \(entry["title"] as? String ?? "Untitled")")
+            }
+        }
+    }
+
+    static func performBookmarkDateSuggestionCLIAction(
+        candidateRef: String,
+        bookmarkIDString: String?,
+        destinationString: String?,
+        expectedVersionSelector: String?,
+        actor: String,
+        bookmarkService: VaultBookmarkService
+    ) {
+        guard let bookmarkIDString,
+              let bookmarkID = UUID(uuidString: bookmarkIDString),
+              bookmarkID.uuidString.caseInsensitiveCompare(bookmarkIDString) == .orderedSame else {
+            printCLIError("An exact --item-id/ bookmark UUID is required for bookmark date approval.")
+            return
+        }
+        guard let bookmark = bookmarkService.bookmarks.first(where: { $0.id == bookmarkID }) else {
+            printCLIError("No bookmark found with exact ID '\(bookmarkIDString)'.")
+            return
+        }
+        let destination: CiderBookmarkDateSuggestionDestination
+        switch destinationString?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "date", "datecard", "date-card": destination = .dateCard
+        case "todo": destination = .todo
+        default:
+            printCLIError("--destination date|todo is required; Cider will not infer a destination.")
+            return
+        }
+        guard let expectedVersionSelector,
+              let expected = CiderBookmarkDateSuggestionApprovalService.parseExpectedVersionSelector(expectedVersionSelector) else {
+            printCLIError("An exact --expected-version needs_review@<bit-precise-version> selector is required.")
+            return
+        }
+        let matches = CiderBookmarkDateSuggestionService().suggestions(for: bookmark).filter {
+            CiderBookmarkDateSuggestionApprovalService.candidatePrefix + $0.suggestionKey == candidateRef
+        }
+        guard matches.count == 1, let exactEvidence = matches.first else {
+            printCLIError(matches.isEmpty
+                ? "No exact bookmark date candidate matches '\(candidateRef)'."
+                : "Bookmark date candidate '\(candidateRef)' is ambiguous; refresh the review list.")
+            return
+        }
+        let outcome = CiderReviewActionCoordinator(bookmarkService: bookmarkService).perform(
+            CiderReviewActionRequest(
+                identity: .init(candidateRef: candidateRef, family: .bookmarkDateSuggestion),
+                expectedVersion: .init(reviewState: expected.reviewState, updatedAt: expected.updatedAt),
+                action: .approve,
+                bookmarkDateItemID: bookmarkID,
+                bookmarkDateDestination: destination,
+                bookmarkDateExactEvidence: exactEvidence,
+                actor: actor,
+                surface: .cli,
+                exactEvidenceRequirement: .required,
+                mutationAuthority: .reviewApprovedCandidate
+            )
+        )
+        guard outcome.isSuccessful,
+              let receiptID = outcome.actionReceiptID,
+              let targetOwnerRef = outcome.targetOwnerRef else {
+            processExitCode = 1
+            let error = outcome.error
+            if jsonOutput {
+                outputJSON([
+                    "ok": false,
+                    "command": CiderBookmarkDateSuggestionApprovalService.canonicalCommand,
+                    "action": "approve",
+                    "changed": false,
+                    "candidateRef": candidateRef,
+                    "itemID": bookmarkID.uuidString,
+                    "destination": destination.rawValue,
+                    "reviewState": outcome.resultingReviewState,
+                    "truthBoundary": outcome.truthBoundary,
+                    "actionReceiptID": NSNull(),
+                    "errorCode": error?.classification.rawValue ?? CiderReviewActionErrorClassification.writerFailure.rawValue,
+                    "error": error?.message ?? outcome.message,
+                    "safeVerificationCommands": ["cider-cli review list --kind bookmark_date_suggestion --json"],
+                ])
+            } else {
+                print("Error: \(error?.message ?? outcome.message)")
+            }
+            return
+        }
+
+        let parts = targetOwnerRef.split(separator: ":", maxSplits: 1).map(String.init)
+        let targetID = parts.count == 2 ? UUID(uuidString: parts[1]) : nil
+        let dateCard = targetID.flatMap { DateCardStorage.shared.dateCard(for: $0) }
+        let todo = targetID.flatMap { id in TodoCardStorage.shared.todoCards.first(where: { $0.id == id }) }
+        let action = outcome.bookmarkDateApprovalAction ?? (destination == .dateCard
+            ? (outcome.changed ? .createdDateCard : .reusedExistingDateCard)
+            : (outcome.changed ? .createdTodo : .reusedExistingTodo))
+        let verificationCommands = [
+            "cider-cli item action-ledger inspect \(receiptID) --json",
+            "cider-cli item context bookmark \(bookmarkID.uuidString) --max-history 10 --json",
+        ]
+        let result = CiderBookmarkDateSuggestionApprovalResult(
+            command: CiderBookmarkDateSuggestionApprovalService.canonicalCommand,
+            bookmarkID: bookmarkID,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            suggestion: exactEvidence,
+            action: action,
+            dateCard: dateCard,
+            todo: todo,
+            changed: outcome.changed,
+            actionReceiptID: receiptID,
+            truthBoundary: outcome.truthBoundary,
+            expectedVersionSelector: expectedVersionSelector,
+            safeVerificationCommands: verificationCommands,
+            safeNextCommands: ["cider-cli review list --kind bookmark_date_suggestion --json"]
+        )
+        if jsonOutput {
+            var payload = bookmarkDateSuggestionApprovalResultToDict(result)
+            payload["ok"] = true
+            payload["candidateRef"] = candidateRef
+            payload["reviewFamily"] = CiderReviewCandidateFamily.bookmarkDateSuggestion.rawValue
+            payload["reviewState"] = outcome.resultingReviewState
+            outputJSON(payload)
+        } else {
+            let verb = outcome.changed ? "Approved" : "Reused approval for"
+            print("\(verb) \(destination == .todo ? "todo" : "date card"): \(bookmark.title)")
+            print("  Receipt: \(receiptID)")
+        }
     }
 
     static func isEventDateFactCandidateRef(_ value: String) -> Bool {
@@ -32154,7 +32392,7 @@ struct CiderCLI {
           cider-cli review enrichment-reconcile-plan [--sample-limit <n>] [--json]
           cider-cli review enrichment-reconcile-samples [--group <group-id>] [--limit <n>] [--json]
           cider-cli review enrichment-reconcile-apply [--group <group-id>] [--limit <n>] [--approve <token>] [--actor user|agent] [--execute] [--json]
-          cider-cli review approve <item-id|candidate-id> [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]
+              cider-cli review approve <item-id|candidate-id> [--item-id <exact-bookmark-uuid> --destination date|todo --expected-version <state@version>] [--target-owner <type:id>|--target-owner-type <type> --target-owner-id <id>] [--relation <type>] [--actor user|agent] [--json]
           cider-cli review correct <item-id> (--folder <name|path>|--path <target-folder-path>|--inbox) [--reason <text>] [--actor user|agent] [--json]
           cider-cli review defer <item-id> [--reason <text>] [--actor user|agent] [--json]
           cider-cli review enrich <item-id> [--actor user|agent] [--timeout <seconds>|--no-wait] [--json]

@@ -1230,25 +1230,29 @@ final class HomeOverviewDataProviderTests: XCTestCase {
 
         XCTAssertEqual(snapshot.reviewCockpitItems.map(\.title), ["Grant application", "Album preorder"])
         XCTAssertEqual(snapshot.reviewCockpitItems.map(\.kindLabel), ["Date Suggestion", "Date Suggestion"])
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].suggestedAction, "Approve Todo")
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Todo due date")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].suggestedAction, "Choose Date Card or Todo")
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].targetLabel, "Explicit destination required")
         XCTAssertEqual(snapshot.reviewCockpitItems[0].confidenceLabel, "84% confidence")
         XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionIndex, 0)
         XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.suggestionKey, deadlineSuggestion.suggestionKey)
-        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.destination, .todo)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.expectedUpdatedAt, deadlineBookmark.updatedAt)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].dateSuggestionApproval?.exactEvidence, deadlineSuggestion)
+        XCTAssertEqual(snapshot.reviewCockpitItems[0].reviewActions, [.openSource, .createDateCard, .createTodo])
         XCTAssertTrue(snapshot.reviewCockpitItems[0].canApprove)
-        XCTAssertTrue(snapshot.reviewCockpitItems[0].canCorrect)
+        XCTAssertFalse(snapshot.reviewCockpitItems[0].canCorrect)
         XCTAssertFalse(snapshot.reviewCockpitItems[0].safeActions.contains("correct"))
         XCTAssertTrue(snapshot.reviewCockpitItems[0].safeActions.contains("open"))
         XCTAssertFalse(snapshot.reviewCockpitItems[0].canDefer)
 
-        XCTAssertEqual(snapshot.reviewCockpitItems[1].suggestedAction, "Approve Date Card")
-        XCTAssertEqual(snapshot.reviewCockpitItems[1].targetLabel, "Date card")
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].suggestedAction, "Choose Date Card or Todo")
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].targetLabel, "Explicit destination required")
         XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.suggestionIndex, 0)
         XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.suggestionKey, releaseSuggestion.suggestionKey)
-        XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.destination, .dateCard)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.expectedUpdatedAt, releaseBookmark.updatedAt)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].dateSuggestionApproval?.exactEvidence, releaseSuggestion)
+        XCTAssertEqual(snapshot.reviewCockpitItems[1].reviewActions, [.openSource, .createDateCard, .createTodo])
         XCTAssertTrue(snapshot.reviewCockpitItems[1].canApprove)
-        XCTAssertTrue(snapshot.reviewCockpitItems[1].canCorrect)
+        XCTAssertFalse(snapshot.reviewCockpitItems[1].canCorrect)
         XCTAssertFalse(snapshot.reviewCockpitItems[1].safeActions.contains("correct"))
         XCTAssertTrue(snapshot.reviewCockpitItems[1].safeActions.contains("open"))
         XCTAssertFalse(snapshot.reviewCockpitItems[1].canDefer)
@@ -1433,7 +1437,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.reviewCockpitItems.last?.title, "Grant application")
     }
 
-    func testReviewCockpitSkipsDateSuggestionsAlreadyApprovedIntoLinkedItems() {
+    func testReviewCockpitSkipsNewFormatDateSuggestionsAlreadyApprovedIntoLinkedItems() {
         let now = Date(timeIntervalSince1970: 1_745_084_400)
         let deadlineDate = now.addingTimeInterval(60 * 60 * 24 * 10)
         let bookmark = Bookmark(
@@ -1457,7 +1461,7 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         )
         let linkedTodo = TodoCard(
             title: "Grant application",
-            details: "Date suggestion kind: deadline\nEvidence: Apply by May 30, 2026",
+            details: "Candidate ref: \(CiderBookmarkDateSuggestionApprovalService.candidatePrefix)\(suggestion.suggestionKey)\nDate suggestion kind: deadline\nEvidence: Apply by May 30, 2026",
             dueDate: deadlineDate,
             linkedEntities: [LibraryEntityRef(type: .bookmark, entityID: bookmark.id)],
             createdAt: now,
@@ -1482,6 +1486,120 @@ final class HomeOverviewDataProviderTests: XCTestCase {
         )
 
         XCTAssertTrue(snapshot.reviewCockpitItems.isEmpty)
+    }
+
+    func testReviewCockpitSkipsExactLegacyDateSuggestionApproval() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let suggestionDate = now.addingTimeInterval(60 * 60 * 24 * 10)
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Album preorder",
+            urlString: "https://example.com/album",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let suggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmark.id,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            kind: "release",
+            confidence: 0.92,
+            date: suggestionDate,
+            sourceField: "title",
+            sourceSnippet: "Album releases May 30, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+        let linkedDateCard = DateCard(
+            title: bookmark.title,
+            details: """
+                Date suggestion kind: release
+                Confidence: 0.92
+                Source field: title
+                Evidence: Album releases May 30, 2026
+                Source bookmark: https://example.com/album
+                """,
+            startAt: suggestionDate,
+            linkedEntities: [LibraryEntityRef(type: .bookmark, entityID: bookmark.id)],
+            createdAt: now,
+            updatedAt: now
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark), .dateCard(linkedDateCard)],
+            recentItems: [],
+            folders: [],
+            bookmarkDateSuggestionResults: [
+                CiderBookmarkDateSuggestionResult(
+                    command: "bookmark.date-suggestions",
+                    bookmarkID: bookmark.id,
+                    bookmarkTitle: bookmark.title,
+                    sourceURL: bookmark.urlString,
+                    suggestions: [suggestion]
+                )
+            ],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertTrue(snapshot.reviewCockpitItems.isEmpty)
+    }
+
+    func testReviewCockpitDoesNotSuppressNearbyLegacyDateSuggestion() {
+        let now = Date(timeIntervalSince1970: 1_745_084_400)
+        let suggestionDate = now.addingTimeInterval(60 * 60 * 24 * 10)
+        let bookmark = Bookmark(
+            id: UUID(),
+            title: "Album preorder",
+            urlString: "https://example.com/album",
+            createdAt: now,
+            updatedAt: now,
+            folderID: nil
+        )
+        let suggestion = CiderBookmarkDateSuggestion(
+            bookmarkID: bookmark.id,
+            bookmarkTitle: bookmark.title,
+            sourceURL: bookmark.urlString,
+            kind: "release",
+            confidence: 0.92,
+            date: suggestionDate,
+            sourceField: "title",
+            sourceSnippet: "Album releases May 30, 2026",
+            nextSafeAction: "review_date_suggestion"
+        )
+        let nearbyNonmatch = DateCard(
+            title: bookmark.title,
+            details: """
+                Date suggestion kind: release
+                Source field: title
+                Evidence: Album releases May 31, 2026
+                Source bookmark: https://example.com/album
+                """,
+            startAt: suggestionDate,
+            linkedEntities: [LibraryEntityRef(type: .bookmark, entityID: bookmark.id)],
+            createdAt: now,
+            updatedAt: now
+        )
+
+        let snapshot = HomeOverviewDataProvider.makeSnapshot(
+            items: [.bookmark(bookmark), .dateCard(nearbyNonmatch)],
+            recentItems: [],
+            folders: [],
+            bookmarkDateSuggestionResults: [
+                CiderBookmarkDateSuggestionResult(
+                    command: "bookmark.date-suggestions",
+                    bookmarkID: bookmark.id,
+                    bookmarkTitle: bookmark.title,
+                    sourceURL: bookmark.urlString,
+                    suggestions: [suggestion]
+                )
+            ],
+            surfacingDays: 7,
+            now: now
+        )
+
+        XCTAssertEqual(snapshot.reviewCockpitItems.count, 1)
+        XCTAssertEqual(snapshot.reviewCockpitItems.first?.candidateRef, CiderBookmarkDateSuggestionApprovalService.candidatePrefix + suggestion.suggestionKey)
     }
 
     func testReviewCandidateDetailPresentationLabelsCorrectionPaths() {

@@ -911,8 +911,7 @@ enum HomeOverviewDataProvider {
         suggestionIndex: Int,
         linkedItem: LibraryItemV2?
     ) -> HomeReviewCockpitItem? {
-        guard linkedItem != nil else { return nil }
-        let destination = dateSuggestionDestination(for: suggestion)
+        guard case .bookmark(let bookmark)? = linkedItem else { return nil }
 
         return HomeReviewCockpitItem(
             id: "review-cockpit-date-suggestion-\(result.bookmarkID.uuidString)-\(suggestion.suggestionKey)",
@@ -923,32 +922,30 @@ enum HomeOverviewDataProvider {
             title: result.bookmarkTitle,
             kindLabel: "Date Suggestion",
             reason: dateSuggestionReason(for: suggestion),
-            suggestedAction: destination == .todo ? "Approve Todo" : "Approve Date Card",
+            suggestedAction: "Choose Date Card or Todo",
             reviewStateLabel: "Needs Review",
             confidenceLabel: confidenceLabel(suggestion.confidence),
-            targetLabel: destination == .todo ? "Todo due date" : "Date card",
+            targetLabel: "Explicit destination required",
             sourceLabel: "Bookmark",
             canApprove: true,
-            canCorrect: true,
+            canCorrect: false,
             canDefer: false,
             safeActions: ["approve", "open"],
             dateSuggestionApproval: HomeReviewCockpitDateSuggestionApproval(
                 bookmarkID: result.bookmarkID,
                 suggestionIndex: suggestionIndex,
                 suggestionKey: suggestion.suggestionKey,
-                destination: destination
+                expectedUpdatedAt: bookmark.updatedAt,
+                exactEvidence: suggestion
             ),
-            reviewActions: [.openSource, .accept]
+            reviewActions: [.openSource, .createDateCard, .createTodo],
+            candidateID: suggestion.suggestionKey,
+            candidateRef: CiderBookmarkDateSuggestionApprovalService.candidatePrefix + suggestion.suggestionKey,
+            candidateExpectedReviewState: CiderBookmarkDateSuggestionApprovalService.pendingReviewState,
+            candidateUpdatedAt: bookmark.updatedAt,
+            sourceQuote: suggestion.sourceSnippet,
+            sourceProvenanceLabel: "\(suggestion.sourceField) · exact bookmark version"
         )
-    }
-
-    private static func dateSuggestionDestination(for suggestion: CiderBookmarkDateSuggestion) -> LibraryEntityType {
-        switch suggestion.kind {
-        case "deadline", "sale_end":
-            return .todo
-        default:
-            return .dateCard
-        }
     }
 
     private static func dateSuggestionReason(for suggestion: CiderBookmarkDateSuggestion) -> String {
@@ -966,18 +963,27 @@ enum HomeOverviewDataProvider {
         calendar: Calendar = .current
     ) -> Bool {
         let bookmarkRef = LibraryEntityRef(type: .bookmark, entityID: bookmarkID)
-        let destination = dateSuggestionDestination(for: suggestion)
-
+        let candidateLine = "Candidate ref: \(CiderBookmarkDateSuggestionApprovalService.candidatePrefix)\(suggestion.suggestionKey)"
+        let legacyLines = [
+            "Date suggestion kind: \(suggestion.kind)",
+            "Source field: \(suggestion.sourceField)",
+            "Evidence: \(suggestion.sourceSnippet)",
+            "Source bookmark: \(suggestion.sourceURL)",
+        ]
+        func detailsMatch(_ details: String) -> Bool {
+            let lines = Set(details.split(whereSeparator: \.isNewline).map(String.init))
+            return lines.contains(candidateLine) || legacyLines.allSatisfy(lines.contains)
+        }
         return libraryItems.contains { item in
-            switch (destination, item) {
-            case (.todo, .todo(let todo)):
+            switch item {
+            case .todo(let todo):
                 return todo.linkedEntities.contains(bookmarkRef)
                     && todo.dueDate.map { calendar.isDate($0, inSameDayAs: suggestion.date) } == true
-                    && todo.details.localizedCaseInsensitiveContains("Date suggestion kind: \(suggestion.kind)")
-            case (.dateCard, .dateCard(let dateCard)):
+                    && detailsMatch(todo.details)
+            case .dateCard(let dateCard):
                 return dateCard.linkedEntities.contains(bookmarkRef)
                     && calendar.isDate(dateCard.startAt, inSameDayAs: suggestion.date)
-                    && dateCard.details.localizedCaseInsensitiveContains("Date suggestion kind: \(suggestion.kind)")
+                    && detailsMatch(dateCard.details)
             default:
                 return false
             }

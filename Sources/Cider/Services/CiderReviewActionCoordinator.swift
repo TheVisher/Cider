@@ -106,6 +106,9 @@ struct CiderReviewActionRequest: Equatable, Sendable {
     var reason: String?
     var routingItemID: UUID?
     var routingDestination: CiderRoutingDecisionTarget?
+    var bookmarkDateItemID: UUID?
+    var bookmarkDateDestination: CiderBookmarkDateSuggestionDestination?
+    var bookmarkDateExactEvidence: CiderBookmarkDateSuggestion?
     var actor: String
     var surface: CiderReviewInvokingSurface
     var exactEvidenceRequirement: CiderReviewExactEvidenceRequirement
@@ -120,6 +123,9 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         reason: String? = nil,
         routingItemID: UUID? = nil,
         routingDestination: CiderRoutingDecisionTarget? = nil,
+        bookmarkDateItemID: UUID? = nil,
+        bookmarkDateDestination: CiderBookmarkDateSuggestionDestination? = nil,
+        bookmarkDateExactEvidence: CiderBookmarkDateSuggestion? = nil,
         actor: String,
         surface: CiderReviewInvokingSurface,
         exactEvidenceRequirement: CiderReviewExactEvidenceRequirement,
@@ -133,6 +139,9 @@ struct CiderReviewActionRequest: Equatable, Sendable {
         self.reason = reason
         self.routingItemID = routingItemID
         self.routingDestination = routingDestination
+        self.bookmarkDateItemID = bookmarkDateItemID
+        self.bookmarkDateDestination = bookmarkDateDestination
+        self.bookmarkDateExactEvidence = bookmarkDateExactEvidence
         self.actor = actor
         self.surface = surface
         self.exactEvidenceRequirement = exactEvidenceRequirement
@@ -157,6 +166,8 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
     var routingItemID: UUID?
     var routingDecisionID: UUID?
     var routingDestination: CiderRoutingDecisionTarget?
+    var bookmarkDateDestination: CiderBookmarkDateSuggestionDestination?
+    var bookmarkDateApprovalAction: CiderBookmarkDateSuggestionApprovalAction?
     var message: String
     var error: CiderReviewActionFailure?
 
@@ -178,6 +189,8 @@ struct CiderReviewActionOutcome: Equatable, Sendable {
             && routingItemID == other.routingItemID
             && routingDecisionID == other.routingDecisionID
             && routingDestination == other.routingDestination
+            && bookmarkDateDestination == other.bookmarkDateDestination
+            && bookmarkDateApprovalAction == other.bookmarkDateApprovalAction
             && error == other.error
     }
 }
@@ -238,6 +251,59 @@ struct CiderRoutingDecisionReviewActionAdapter {
 }
 
 @MainActor
+struct CiderBookmarkDateSuggestionReviewActionAdapter {
+    private let service: CiderBookmarkDateSuggestionApprovalService
+
+    init(
+        database: CiderDatabase,
+        bookmarkService: VaultBookmarkService,
+        dateCardStorage: DateCardStorage,
+        todoStorage: TodoCardStorage,
+        failureInjector: (@MainActor (CiderBookmarkDateSuggestionMutationCheckpoint) throws -> Void)? = nil
+    ) {
+        service = CiderBookmarkDateSuggestionApprovalService(
+            database: database,
+            bookmarkService: bookmarkService,
+            dateCardStorage: dateCardStorage,
+            todoStorage: todoStorage,
+            failureInjector: failureInjector
+        )
+    }
+
+    init(service: CiderBookmarkDateSuggestionApprovalService) {
+        self.service = service
+    }
+
+    func perform(
+        _ request: CiderReviewActionRequest
+    ) throws -> CiderBookmarkDateSuggestionApprovalMutationResult {
+        guard request.action == .approve else {
+            throw CiderBookmarkDateSuggestionApprovalError.unsupportedAction
+        }
+        guard let bookmarkID = request.bookmarkDateItemID else {
+            throw CiderBookmarkDateSuggestionApprovalError.invalidCandidateIdentity
+        }
+        guard let destination = request.bookmarkDateDestination else {
+            throw CiderBookmarkDateSuggestionApprovalError.destinationRequired
+        }
+        guard let exactEvidence = request.bookmarkDateExactEvidence else {
+            throw CiderBookmarkDateSuggestionApprovalError.missingExactEvidence
+        }
+        return try service.perform(
+            CiderBookmarkDateSuggestionApprovalRequest(
+                candidateRef: request.identity.candidateRef,
+                bookmarkID: bookmarkID,
+                expectedReviewState: request.expectedVersion.reviewState,
+                expectedUpdatedAt: request.expectedVersion.updatedAt,
+                exactEvidence: exactEvidence,
+                destination: destination,
+                actor: request.actor
+            )
+        )
+    }
+}
+
+@MainActor
 final class CiderReviewActionCoordinator {
     typealias MutationBoundary = @MainActor (
         JournalIntelligenceReviewActionRequest,
@@ -252,14 +318,22 @@ final class CiderReviewActionCoordinator {
         CiderReviewActionRequest
     ) throws -> CiderRoutingReviewMutationResult
 
+    typealias BookmarkDateMutationBoundary = @MainActor (
+        CiderReviewActionRequest
+    ) throws -> CiderBookmarkDateSuggestionApprovalMutationResult
+
     private let performMutation: MutationBoundary
     private let performEventDateMutation: EventDateMutationBoundary
     private let performRoutingMutation: RoutingMutationBoundary
+    private let performBookmarkDateMutation: BookmarkDateMutationBoundary
 
     init(
         database: CiderDatabase = .shared,
         bookmarkService: VaultBookmarkService = .shared,
-        routingFailureInjector: (@MainActor (CiderRoutingReviewMutationCheckpoint) throws -> Void)? = nil
+        dateCardStorage: DateCardStorage = .shared,
+        todoStorage: TodoCardStorage = .shared,
+        routingFailureInjector: (@MainActor (CiderRoutingReviewMutationCheckpoint) throws -> Void)? = nil,
+        bookmarkDateFailureInjector: (@MainActor (CiderBookmarkDateSuggestionMutationCheckpoint) throws -> Void)? = nil
     ) {
         let service = JournalIntelligenceReviewActionService(database: database)
         performMutation = { request, actor in
@@ -277,6 +351,16 @@ final class CiderReviewActionCoordinator {
         performRoutingMutation = { request in
             try routingAdapter.perform(request)
         }
+        let bookmarkDateAdapter = CiderBookmarkDateSuggestionReviewActionAdapter(
+            database: database,
+            bookmarkService: bookmarkService,
+            dateCardStorage: dateCardStorage,
+            todoStorage: todoStorage,
+            failureInjector: bookmarkDateFailureInjector
+        )
+        performBookmarkDateMutation = { request in
+            try bookmarkDateAdapter.perform(request)
+        }
     }
 
     init(_ performMutation: @escaping MutationBoundary) {
@@ -286,6 +370,25 @@ final class CiderReviewActionCoordinator {
         }
         performRoutingMutation = { _ in
             throw CiderRoutingReviewActionError.unsupportedAction
+        }
+        performBookmarkDateMutation = { _ in
+            throw CiderBookmarkDateSuggestionApprovalError.unsupportedAction
+        }
+    }
+
+    init(bookmarkDateService: CiderBookmarkDateSuggestionApprovalService) {
+        performMutation = { request, actor in
+            throw JournalIntelligenceReviewActionError.unsupportedFamily(request.family)
+        }
+        performEventDateMutation = { request in
+            throw SecondBrainEventDateFactReviewService.EventDateFactReviewError.unsupportedReviewAction(request.action.rawValue)
+        }
+        performRoutingMutation = { _ in
+            throw CiderRoutingReviewActionError.unsupportedAction
+        }
+        let adapter = CiderBookmarkDateSuggestionReviewActionAdapter(service: bookmarkDateService)
+        performBookmarkDateMutation = { request in
+            try adapter.perform(request)
         }
     }
 
@@ -314,7 +417,34 @@ final class CiderReviewActionCoordinator {
                     routingItemID: delegated.item.id,
                     routingDecisionID: delegated.decision.id,
                     routingDestination: delegated.decision.target,
+                    bookmarkDateDestination: nil,
+                    bookmarkDateApprovalAction: nil,
                     message: routingOutcomeMessage(action: request.action),
+                    error: nil
+                )
+            }
+            if request.identity.family == .bookmarkDateSuggestion {
+                let delegated = try performBookmarkDateMutation(request)
+                return CiderReviewActionOutcome(
+                    identity: request.identity,
+                    action: request.action,
+                    actor: request.actor,
+                    surface: request.surface,
+                    availability: .available,
+                    exactEvidenceRequirement: request.exactEvidenceRequirement,
+                    evidenceStatus: .verifiedExactEvidence,
+                    mutationAuthority: request.mutationAuthority,
+                    changed: delegated.changed,
+                    resultingReviewState: "accepted",
+                    truthBoundary: delegated.truthBoundary,
+                    actionReceiptID: delegated.receiptID,
+                    targetOwnerRef: delegated.approval.targetOwnerRef,
+                    routingItemID: nil,
+                    routingDecisionID: nil,
+                    routingDestination: nil,
+                    bookmarkDateDestination: delegated.approval.destination,
+                    bookmarkDateApprovalAction: delegated.approval.action,
+                    message: bookmarkDateOutcomeMessage(destination: delegated.approval.destination),
                     error: nil
                 )
             }
@@ -337,6 +467,8 @@ final class CiderReviewActionCoordinator {
                     routingItemID: nil,
                     routingDecisionID: nil,
                     routingDestination: nil,
+                    bookmarkDateDestination: nil,
+                    bookmarkDateApprovalAction: nil,
                     message: eventDateOutcomeMessage(action: request.action),
                     error: nil
                 )
@@ -371,6 +503,8 @@ final class CiderReviewActionCoordinator {
                 routingItemID: nil,
                 routingDecisionID: nil,
                 routingDestination: nil,
+                bookmarkDateDestination: nil,
+                bookmarkDateApprovalAction: nil,
                 message: delegated.message,
                 error: nil
             )
@@ -386,12 +520,13 @@ final class CiderReviewActionCoordinator {
         guard request.identity.family == .memoryCandidate
                 || request.identity.family == .graphCandidate
                 || request.identity.family == .eventDateFact
-                || request.identity.family == .routingDecision else {
+                || request.identity.family == .routingDecision
+                || request.identity.family == .bookmarkDateSuggestion else {
             return failure(.unsupportedFamily)
         }
         let supportedSurfaces: [CiderReviewInvokingSurface] = request.identity.family == .eventDateFact
             ? [.home, .journal, .reviewQueue, .cli]
-            : request.identity.family == .routingDecision
+            : request.identity.family == .routingDecision || request.identity.family == .bookmarkDateSuggestion
                 ? [.home, .reviewQueue, .cli]
                 : [.home, .journal, .cli]
         guard supportedSurfaces.contains(request.surface) else {
@@ -416,6 +551,22 @@ final class CiderReviewActionCoordinator {
             }
             guard request.routingDestination != nil else {
                 return failure(.destinationRequired)
+            }
+        } else if request.identity.family == .bookmarkDateSuggestion {
+            guard request.exactEvidenceRequirement == .required else {
+                return failure(.exactEvidenceRequired)
+            }
+            guard request.action == .approve else {
+                return failure(.unsupportedActionForSurface)
+            }
+            guard request.bookmarkDateItemID != nil else {
+                return failure(.invalidCandidateIdentity)
+            }
+            guard request.bookmarkDateDestination != nil else {
+                return failure(.destinationRequired)
+            }
+            guard request.bookmarkDateExactEvidence != nil else {
+                return failure(.missingExactEvidence)
             }
         } else if request.exactEvidenceRequirement != .required {
             return failure(.exactEvidenceRequired)
@@ -462,6 +613,8 @@ final class CiderReviewActionCoordinator {
             routingItemID: request.routingItemID,
             routingDecisionID: nil,
             routingDestination: request.routingDestination,
+            bookmarkDateDestination: request.bookmarkDateDestination,
+            bookmarkDateApprovalAction: nil,
             message: failure.message,
             error: failure
         )
@@ -547,6 +700,35 @@ final class CiderReviewActionCoordinator {
                 return failure(.writerFailure)
             }
         }
+        if let error = error as? CiderBookmarkDateSuggestionApprovalError {
+            switch error {
+            case .databaseUnavailable:
+                return failure(.databaseFailure)
+            case .bookmarkNotFound, .candidateUnavailable:
+                return failure(.candidateUnavailable)
+            case .invalidCandidateIdentity:
+                return failure(.invalidCandidateIdentity)
+            case .ambiguousCandidate:
+                return failure(.destinationAmbiguous)
+            case .staleExpectedVersion:
+                return failure(.staleExpectedVersion)
+            case .alreadyReviewed:
+                return failure(.alreadyReviewed)
+            case .missingExactEvidence:
+                return failure(.missingExactEvidence)
+            case .destinationRequired:
+                return failure(.destinationRequired)
+            case .unsupportedAction:
+                return failure(.unsupportedActionForSurface)
+            case .createFailed, .linkFailed:
+                return failure(.writerFailure)
+            case .compensationFailed:
+                return CiderReviewActionFailure(
+                    classification: .writerFailure,
+                    message: error.localizedDescription
+                )
+            }
+        }
         return failure(.writerFailure)
     }
 
@@ -569,6 +751,17 @@ final class CiderReviewActionCoordinator {
             return "Deferred the event/date fact for later review without accepting truth."
         case .correct:
             return "Event/date fact correction remains unavailable."
+        }
+    }
+
+    private func bookmarkDateOutcomeMessage(
+        destination: CiderBookmarkDateSuggestionDestination
+    ) -> String {
+        switch destination {
+        case .dateCard:
+            return "Approved the exact bookmark date evidence to the explicitly selected Date Card destination."
+        case .todo:
+            return "Approved the exact bookmark date evidence to the explicitly selected Todo destination."
         }
     }
 

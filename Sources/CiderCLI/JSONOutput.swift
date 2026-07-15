@@ -971,13 +971,23 @@ func storageAuditMismatchToDict(_ mismatch: CiderStorageAuditMismatch) -> [Strin
 }
 
 func bookmarkDateSuggestionResultToDict(_ result: CiderBookmarkDateSuggestionResult) -> [String: Any] {
-    [
+    let expectedVersion = CiderBookmarkDateSuggestionApprovalService.expectedVersionSelector(
+        reviewState: CiderBookmarkDateSuggestionApprovalService.pendingReviewState,
+        updatedAt: result.expectedUpdatedAt
+    )
+    return [
         "command": result.command,
         "bookmarkID": result.bookmarkID.uuidString,
         "bookmarkTitle": result.bookmarkTitle,
         "sourceURL": result.sourceURL,
         "count": result.suggestions.count,
+        "expectedVersion": expectedVersion,
         "suggestions": result.suggestions.map(bookmarkDateSuggestionToDict),
+        "safeNextCommands": result.suggestions.flatMap { suggestion in
+            [CiderBookmarkDateSuggestionDestination.dateCard, .todo].map { destination in
+                "cider-cli bookmark date-suggestions approve \(result.bookmarkID.uuidString) --key \(suggestion.suggestionKey) --destination \(destination.rawValue) --expected-version \(expectedVersion) --json"
+            }
+        },
     ]
 }
 
@@ -987,12 +997,15 @@ func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> 
         "bookmarkTitle": suggestion.bookmarkTitle,
         "sourceURL": suggestion.sourceURL,
         "suggestionKey": suggestion.suggestionKey,
+        "candidateRef": CiderBookmarkDateSuggestionApprovalService.candidatePrefix + suggestion.suggestionKey,
         "kind": suggestion.kind,
         "confidence": suggestion.confidence,
         "date": ISO8601DateFormatter().string(from: suggestion.date),
         "sourceField": suggestion.sourceField,
         "sourceSnippet": suggestion.sourceSnippet,
         "nextSafeAction": suggestion.nextSafeAction,
+        "destinationRequired": true,
+        "availableDestinations": CiderBookmarkDateSuggestionDestination.allCases.map(\.rawValue),
     ]
 }
 
@@ -1023,10 +1036,21 @@ func bookmarkDateSuggestionToDict(_ suggestion: CiderBookmarkDateSuggestion) -> 
         "action": result.action.rawValue,
         "created": result.created,
         "reused": result.reused,
+        "changed": result.changed,
         "createdItemType": result.createdItemType.rawValue,
+        "destination": result.destination.rawValue,
+        "truthBoundary": result.truthBoundary,
         "createdItem": createdItem,
         "links": links.map(libraryEntityRefToDict),
+        "safeVerificationCommands": result.safeVerificationCommands,
+        "safeNextCommands": result.safeNextCommands,
     ]
+    if let actionReceiptID = result.actionReceiptID {
+        dictionary["actionReceiptID"] = actionReceiptID
+    }
+    if let expectedVersionSelector = result.expectedVersionSelector {
+        dictionary["expectedVersion"] = expectedVersionSelector
+    }
     if let todo = result.todo {
         dictionary["todo"] = createdItem
         dictionary["todoID"] = todo.id.uuidString

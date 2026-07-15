@@ -201,6 +201,92 @@ final class DateCardStorage: ObservableObject {
 
     // MARK: - CRUD
 
+    enum CompensatableCreationError: Error, LocalizedError {
+        case databaseMismatch
+        case fileWriteFailed
+        case compensationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .databaseMismatch:
+                return "The Date Card storage database did not match the approval transaction."
+            case .fileWriteFailed:
+                return "The Date Card source file could not be written."
+            case .compensationFailed:
+                return "Date Card persistence failed and its source file could not be removed; reconciliation is required."
+            }
+        }
+    }
+
+    struct CompensatableDateSuggestionCreation {
+        fileprivate let dateCard: DateCard
+        fileprivate let fileURL: URL
+    }
+
+    /// Bookmark-date-review-only creation boundary. The caller owns the open SQLite
+    /// transaction. The canonical .ics file and in-memory state are created before
+    /// the row mirror so a later transaction failure can remove all three together.
+    /// No cache, audit, lifecycle, receipt, or indexing projection is written here.
+    func beginCompensatableDateSuggestionCreation(
+        _ dateCard: DateCard,
+        database db: CiderDatabase
+    ) throws -> CompensatableDateSuggestionCreation {
+        guard resolvedDatabase === db else {
+            throw CompensatableCreationError.databaseMismatch
+        }
+        let filename = uniqueFilename(for: dateCard.title, in: inboxDirectoryURL)
+        let fileURL = inboxDirectoryURL.appendingPathComponent(filename)
+        guard writeICSFile(for: dateCard, to: fileURL) else {
+            throw CompensatableCreationError.fileWriteFailed
+        }
+
+        index[dateCard.id] = IndexEntry(
+            filename: filename,
+            folderID: nil,
+            labelIDs: dateCard.labelIDs.isEmpty ? nil : dateCard.labelIDs,
+            createdAt: dateCard.createdAt,
+            isCompleted: dateCard.isCompleted,
+            startAt: dateCard.startAt
+        )
+        dateCards.append(dateCard)
+        do {
+            try persistEventToDatabaseInner(db, dateCard: dateCard)
+            return CompensatableDateSuggestionCreation(dateCard: dateCard, fileURL: fileURL)
+        } catch let persistenceError {
+            dateCards.removeAll { $0.id == dateCard.id }
+            index.removeValue(forKey: dateCard.id)
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+            } catch let cleanupError as NSError
+                where cleanupError.domain == NSCocoaErrorDomain
+                    && cleanupError.code == NSFileNoSuchFileError {
+                // An external remover already restored the file state.
+            } catch {
+                throw CompensatableCreationError.compensationFailed
+            }
+            throw persistenceError
+        }
+    }
+
+    func compensateDateSuggestionCreation(_ creation: CompensatableDateSuggestionCreation) throws {
+        dateCards.removeAll { $0.id == creation.dateCard.id }
+        index.removeValue(forKey: creation.dateCard.id)
+        if FileManager.default.fileExists(atPath: creation.fileURL.path) {
+            try FileManager.default.removeItem(at: creation.fileURL)
+        }
+    }
+
+    /// Called only after the surrounding review transaction commits. All work here
+    /// is an in-memory ordering/projection of already-canonical file + SQLite state.
+    func finalizeDateSuggestionCreation(_ creation: CompensatableDateSuggestionCreation) {
+        guard dateCards.contains(where: { $0.id == creation.dateCard.id }) else { return }
+        sortCards()
+    }
+
+    func _dateSuggestionIndexEntryCountForTesting() -> Int {
+        index.count
+    }
+
     @discardableResult
     func createDateCard(
         title: String,

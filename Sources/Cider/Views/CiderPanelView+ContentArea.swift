@@ -690,6 +690,8 @@ extension CiderPanelView {
         switch action {
         case .accept:
             didChange = approveHomeReviewItem(reviewItem)
+        case .createDateCard, .createTodo:
+            didChange = false
         case .reject:
             didChange = false
         case .deferReview:
@@ -725,9 +727,17 @@ extension CiderPanelView {
             family = .eventDateFact
         case "Routing":
             family = .routingDecision
+        case "Date Suggestion":
+            family = .bookmarkDateSuggestion
         default:
             return nil
         }
+        let bookmarkDateDestination: CiderBookmarkDateSuggestionDestination? = switch action {
+        case .createDateCard: .dateCard
+        case .createTodo: .todo
+        default: nil
+        }
+        let dateApproval = reviewItem.dateSuggestionApproval
         guard let candidateRef = reviewItem.candidateRef,
               let reviewState = reviewItem.candidateExpectedReviewState,
               let updatedAt = reviewItem.candidateUpdatedAt else {
@@ -739,6 +749,9 @@ extension CiderPanelView {
                 routingDestination: family == .routingDecision
                     ? (routingDestination ?? reviewItem.routingDestination)
                     : nil,
+                bookmarkDateItemID: family == .bookmarkDateSuggestion ? dateApproval?.bookmarkID : nil,
+                bookmarkDateDestination: bookmarkDateDestination,
+                bookmarkDateExactEvidence: family == .bookmarkDateSuggestion ? dateApproval?.exactEvidence : nil,
                 actor: "user",
                 surface: surface,
                 exactEvidenceRequirement: family == .routingDecision ? .notRequired : .required,
@@ -756,6 +769,9 @@ extension CiderPanelView {
             routingDestination: family == .routingDecision
                 ? (routingDestination ?? reviewItem.routingDestination)
                 : nil,
+            bookmarkDateItemID: family == .bookmarkDateSuggestion ? dateApproval?.bookmarkID : nil,
+            bookmarkDateDestination: bookmarkDateDestination,
+            bookmarkDateExactEvidence: family == .bookmarkDateSuggestion ? dateApproval?.exactEvidence : nil,
             actor: "user",
             surface: surface,
             exactEvidenceRequirement: family == .routingDecision ? .notRequired : .required,
@@ -770,14 +786,7 @@ extension CiderPanelView {
 
     private func approveHomeReviewItem(_ reviewItem: HomeReviewCockpitItem) -> Bool {
         do {
-            if let approval = reviewItem.dateSuggestionApproval {
-                _ = try CiderBookmarkDateSuggestionApprovalService().approve(
-                    bookmarkID: approval.bookmarkID,
-                    suggestionKey: approval.suggestionKey
-                )
-            } else {
-                _ = try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
-            }
+            _ = try CiderReviewQueueService().approve(itemID: reviewItem.itemID, actor: "user")
             return true
         } catch {
             print("Home review approval failed; no change was applied.")

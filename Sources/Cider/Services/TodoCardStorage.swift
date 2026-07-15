@@ -207,6 +207,93 @@ final class TodoCardStorage: ObservableObject {
 
     // MARK: - CRUD
 
+    enum CompensatableCreationError: Error, LocalizedError {
+        case databaseMismatch
+        case fileWriteFailed
+        case compensationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .databaseMismatch:
+                return "The Todo storage database did not match the approval transaction."
+            case .fileWriteFailed:
+                return "The Todo source file could not be written."
+            case .compensationFailed:
+                return "Todo persistence failed and its source file could not be removed; reconciliation is required."
+            }
+        }
+    }
+
+    struct CompensatableDateSuggestionCreation {
+        fileprivate let todo: TodoCard
+        fileprivate let fileURL: URL
+    }
+
+    /// Bookmark-date-review-only creation boundary. The caller owns the open SQLite
+    /// transaction. The canonical .ics file and in-memory state are created before
+    /// the row mirror so a later transaction failure can remove all three together.
+    /// No cache, audit, lifecycle, receipt, or indexing projection is written here.
+    func beginCompensatableDateSuggestionCreation(
+        _ todo: TodoCard,
+        database db: CiderDatabase
+    ) throws -> CompensatableDateSuggestionCreation {
+        guard resolvedDatabase === db else {
+            throw CompensatableCreationError.databaseMismatch
+        }
+        let filename = uniqueFilename(for: todo.title, in: inboxDirectoryURL)
+        let fileURL = inboxDirectoryURL.appendingPathComponent(filename)
+        guard writeICSFile(for: todo, to: fileURL) else {
+            throw CompensatableCreationError.fileWriteFailed
+        }
+
+        index[todo.id] = IndexEntry(
+            filename: filename,
+            folderID: nil,
+            labelIDs: todo.labelIDs.isEmpty ? nil : todo.labelIDs,
+            createdAt: todo.createdAt,
+            isCompleted: todo.isCompleted,
+            dueDate: todo.dueDate,
+            priority: todo.priority
+        )
+        todoCards.append(todo)
+        do {
+            try persistTodoToDatabaseInner(db, todo: todo)
+            return CompensatableDateSuggestionCreation(todo: todo, fileURL: fileURL)
+        } catch let persistenceError {
+            todoCards.removeAll { $0.id == todo.id }
+            index.removeValue(forKey: todo.id)
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+            } catch let cleanupError as NSError
+                where cleanupError.domain == NSCocoaErrorDomain
+                    && cleanupError.code == NSFileNoSuchFileError {
+                // An external remover already restored the file state.
+            } catch {
+                throw CompensatableCreationError.compensationFailed
+            }
+            throw persistenceError
+        }
+    }
+
+    func compensateDateSuggestionCreation(_ creation: CompensatableDateSuggestionCreation) throws {
+        todoCards.removeAll { $0.id == creation.todo.id }
+        index.removeValue(forKey: creation.todo.id)
+        if FileManager.default.fileExists(atPath: creation.fileURL.path) {
+            try FileManager.default.removeItem(at: creation.fileURL)
+        }
+    }
+
+    /// Called only after the surrounding review transaction commits. All work here
+    /// is an in-memory ordering/projection of already-canonical file + SQLite state.
+    func finalizeDateSuggestionCreation(_ creation: CompensatableDateSuggestionCreation) {
+        guard todoCards.contains(where: { $0.id == creation.todo.id }) else { return }
+        sortCards()
+    }
+
+    func _dateSuggestionIndexEntryCountForTesting() -> Int {
+        index.count
+    }
+
     @discardableResult
     func createTodoCard(title: String, dueDate: Date? = nil, priority: TodoPriority? = nil) -> TodoCard {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)

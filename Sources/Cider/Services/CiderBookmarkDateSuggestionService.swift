@@ -1,6 +1,6 @@
 import Foundation
 
-struct CiderBookmarkDateSuggestion: Codable, Equatable {
+struct CiderBookmarkDateSuggestion: Codable, Equatable, Sendable {
     var bookmarkID: UUID
     var bookmarkTitle: String
     var sourceURL: String
@@ -58,6 +58,7 @@ struct CiderBookmarkDateSuggestionResult: Equatable {
     var bookmarkTitle: String
     var sourceURL: String
     var suggestions: [CiderBookmarkDateSuggestion]
+    var expectedUpdatedAt: Date = .distantPast
 }
 
 final class CiderBookmarkDateSuggestionService {
@@ -141,7 +142,8 @@ final class CiderBookmarkDateSuggestionService {
             bookmarkID: bookmark.id,
             bookmarkTitle: bookmark.title,
             sourceURL: bookmark.urlString,
-            suggestions: suggestions(for: bookmark)
+            suggestions: suggestions(for: bookmark),
+            expectedUpdatedAt: bookmark.updatedAt
         )
     }
 

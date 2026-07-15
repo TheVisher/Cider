@@ -792,7 +792,7 @@ struct HomeOverviewDashboardView: View {
             .disabled(reviewActionState.pendingReviewIDs.contains(reviewItem.id))
             .help(action.helpLabel(for: reviewItem))
             .accessibilityLabel(action.helpLabel(for: reviewItem))
-        case .accept, .reject, .deferReview:
+        case .accept, .reject, .deferReview, .createDateCard, .createTodo:
             Button {
                 performReviewAction(action, for: reviewItem, destination: nil)
             } label: {
@@ -825,7 +825,7 @@ struct HomeOverviewDashboardView: View {
         case "Enrichment": return "sparkles"
         case "Duplicate": return "doc.on.doc"
         case "Inbox": return "tray"
-        case "Date Suggestion": return item.dateSuggestionApproval?.destination == .todo ? "checklist" : "calendar.badge.plus"
+        case "Date Suggestion": return "calendar.badge.clock"
         default: return "exclamationmark.bubble"
         }
     }

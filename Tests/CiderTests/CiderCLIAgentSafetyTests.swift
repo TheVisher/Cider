@@ -4504,8 +4504,8 @@ struct CiderCLIAgentSafetyTests {
 
         let dict = try parseJSONObject(result.stdout)
         #expect(dict["ok"] as? Bool == false)
-        #expect(dict["legacyRemoved"] as? Bool == true)
-        #expect(dict["replacement"] as? String == "cider-cli review list --kind date-suggestion --json")
+        #expect(dict["legacyRemoved"] == nil)
+        #expect((dict["error"] as? String)?.contains("ID prefix required") == true)
     }
 
     @Test("bookmark date suggestion approval validation errors honor json output")
@@ -4514,8 +4514,8 @@ struct CiderCLIAgentSafetyTests {
 
         let dict = try parseJSONObject(result.stdout)
         #expect(dict["ok"] as? Bool == false)
-        #expect(dict["legacyRemoved"] as? Bool == true)
-        #expect(dict["replacement"] as? String == "cider-cli review list --kind date-suggestion --json")
+        #expect(dict["legacyRemoved"] == nil)
+        #expect((dict["error"] as? String)?.contains("Exact bookmark ID required") == true)
     }
 
     @Test("review batch enrichment requires explicit confirmation")

@@ -422,7 +422,7 @@ struct ReviewQueueDashboardView: View {
             .disabled(reviewActionState.pendingReviewIDs.contains(reviewItem.id))
             .help(action.helpLabel(for: reviewItem))
             .accessibilityLabel(action.helpLabel(for: reviewItem))
-        case .accept, .reject, .deferReview:
+        case .accept, .reject, .deferReview, .createDateCard, .createTodo:
             Button {
                 performReviewAction(action, for: reviewItem, destination: nil)
             } label: {
