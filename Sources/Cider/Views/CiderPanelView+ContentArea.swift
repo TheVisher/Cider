@@ -96,6 +96,7 @@ extension CiderPanelView {
                 FolderDetailView(
                     bookmarksViewModel: bookmarksViewModel,
                     notesViewModel: notesViewModel,
+                    libraryViewModel: libraryViewModel,
                     folderID: folderID,
                     navigationDomain: selectedNavigationDomain,
                     contentScope: $folderContentScope,

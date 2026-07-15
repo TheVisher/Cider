@@ -123,13 +123,61 @@ extension CiderPanelView {
 
     /// Ordered IDs of items in the current content area
     var navigableItemIDs: [String] {
-        WorkspaceVisibleItemScopePolicy.visibleItemIDs(
-            for: WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).visibleItemScope,
-            items: libraryViewModel.items,
-            folderID: selectedFolderID,
-            tagIDs: selectedTagIDs,
-            searchText: currentRouteSearchText
-        )
+        currentVisibleLibraryItems.map(\.id)
+    }
+
+    var currentVisibleLibraryItems: [LibraryItemV2] {
+        let visibleScope = WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).visibleItemScope
+        let query = currentRouteSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return WorkspaceVisibleItemScopePolicy.visibleItems(
+                for: visibleScope,
+                items: libraryViewModel.items,
+                folderID: selectedFolderID,
+                tagIDs: selectedTagIDs,
+                searchText: currentRouteSearchText
+            )
+        }
+
+        switch visibleScope {
+        case .search:
+            return libraryViewModel.filteredItems(
+                using: LibraryFilterSpec(entityTypes: homeEntityFilter, textQuery: query),
+                sort: LibrarySortSpec(mode: homeSort)
+            )
+        case .libraryFeed(let entityTypes, let onlyUnassigned):
+            return libraryViewModel.filteredItems(
+                using: LibraryFilterSpec(
+                    entityTypes: entityTypes,
+                    textQuery: query,
+                    onlyUnassigned: onlyUnassigned
+                ),
+                sort: LibrarySortSpec(mode: homeSort)
+            )
+        case .folder:
+            guard let selectedFolderID else { return [] }
+            return libraryViewModel.filteredItems(
+                using: LibraryFilterSpec(
+                    entityTypes: folderContentScope.entityTypes(for: selectedNavigationDomain),
+                    textQuery: query
+                ),
+                sort: LibrarySortSpec(mode: .createdDescending),
+                canonicalFolderScopeIDs: Set(
+                    [selectedFolderID]
+                        + bookmarksViewModel.folders
+                            .filter { $0.parentID == selectedFolderID }
+                            .map(\.id)
+                )
+            ).filter { $0.folderID == selectedFolderID }
+        case .tag, .none, .projectBoard:
+            return WorkspaceVisibleItemScopePolicy.visibleItems(
+                for: visibleScope,
+                items: libraryViewModel.items,
+                folderID: selectedFolderID,
+                tagIDs: selectedTagIDs,
+                searchText: currentRouteSearchText
+            )
+        }
     }
 
     var currentRouteSearchText: String {

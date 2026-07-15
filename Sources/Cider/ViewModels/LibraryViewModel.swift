@@ -26,16 +26,26 @@ final class LibraryViewModel: ObservableObject {
     @Published private(set) var items: [LibraryItemV2] = []
     /// Top 8 most recently updated items — pre-sorted during rebuildItems().
     @Published private(set) var recentItems: [LibraryItemV2] = []
+    @Published private(set) var itemRevision = 0
+    @Published private(set) var canonicalSearchRevision = 0
 
     /// Cache for filteredItems — avoids re-filtering+sorting on unrelated body evaluations.
     private var filteredItemsCache: (filter: LibraryFilterSpec, sort: LibrarySortSpec, result: [LibraryItemV2])?
+    private var canonicalSearchCache: (
+        request: LibraryCanonicalSearchRequest,
+        response: LibraryCanonicalSearchResponse
+    )?
+    private var activeCanonicalSearchRequestID: UUID?
+    private var journalProjectionAliases: [UUID: LibraryItemV2] = [:]
+    private let canonicalSearchAdapter: LibraryCanonicalSearchAdapter
 
     private var cancellables = Set<AnyCancellable>()
     private lazy var rebuildCoalescer = LibraryRebuildCoalescer { [weak self] in
         self?.rebuildItems()
     }
 
-    init() {
+    init(canonicalSearchAdapter: LibraryCanonicalSearchAdapter = LibraryCanonicalSearchAdapter()) {
+        self.canonicalSearchAdapter = canonicalSearchAdapter
         bindStorages()
         rebuildItems()
     }
@@ -45,6 +55,13 @@ final class LibraryViewModel: ObservableObject {
         let journalItems: [LibraryItemV2] = journalProjection.entries.isEmpty
             ? []
             : [.journal(journalProjection.container)]
+        if let journalItem = journalItems.first {
+            journalProjectionAliases = Dictionary(
+                uniqueKeysWithValues: journalProjection.entries.map { ($0.note.id, journalItem) }
+            )
+        } else {
+            journalProjectionAliases = [:]
+        }
         let bookmarkItems = VaultBookmarkService.shared.bookmarks.map { LibraryItemV2.bookmark($0) }
         let noteItems = NotesStorage.shared.notes
             .filter { !$0.isProjectArtifact }
@@ -61,67 +78,50 @@ final class LibraryViewModel: ObservableObject {
         items = all
         recentItems = Array(all.sorted { $0.updatedDate > $1.updatedDate }.prefix(8))
         filteredItemsCache = nil
+        canonicalSearchCache = nil
+        activeCanonicalSearchRequestID = nil
+        itemRevision &+= 1
     }
 
     func filteredItems(
         using filterSpec: LibraryFilterSpec,
-        sort sortSpec: LibrarySortSpec
+        sort sortSpec: LibrarySortSpec,
+        canonicalFolderScopeIDs: Set<UUID>? = nil
     ) -> [LibraryItemV2] {
+        let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            let request = canonicalSearchRequest(
+                using: filterSpec,
+                sort: sortSpec,
+                folderScopeIDs: canonicalFolderScopeIDs
+            )
+            return canonicalSearchCache?.request == request
+                ? canonicalSearchCache?.response.items ?? []
+                : []
+        }
+
         if let cache = filteredItemsCache, cache.filter == filterSpec, cache.sort == sortSpec {
             return cache.result
         }
 
-        let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Parse scope modifiers from the search query
-        let scope = query.isEmpty ? nil : SearchService.parseScope(from: query)
-        let cleanQuery = scope?.cleanQuery ?? query
-
         let filtered = items.filter { item in
-            // Apply scope entity type filter (narrower than filterSpec)
-            if let scopeTypes = scope?.entityTypes {
-                let entityMatch: Bool
-                switch item {
-                case .journal:      entityMatch = scopeTypes.contains(.note)
-                case .bookmark:     entityMatch = scopeTypes.contains(.bookmark)
-                case .note:         entityMatch = scopeTypes.contains(.note)
-                case .dateCard:     entityMatch = scopeTypes.contains(.dateCard)
-                case .contact:      entityMatch = scopeTypes.contains(.contact)
-                case .todo:         entityMatch = scopeTypes.contains(.todo)
-                case .vaultFile:    entityMatch = scopeTypes.contains(.vaultFile)
-                }
-                guard entityMatch else { return false }
-            } else {
-                guard filterSpec.entityTypes.contains(item.entityType) else { return false }
-            }
+            guard filterSpec.entityTypes.contains(item.entityType) else { return false }
 
-            // Apply scope folder filter
-            if let s = scope, !s.folderIDs.isEmpty {
-                guard let fID = item.folderID, s.folderIDs.contains(fID) else { return false }
-            } else if let s = scope, s.showAllFolders {
-                guard item.folderID != nil else { return false }
-            } else if let folderID = filterSpec.folderID, item.folderID != folderID {
+            if let folderID = filterSpec.folderID, item.folderID != folderID {
                 return false
             }
 
-            // Apply scope tag filter
-            if let scopeLabelID = scope?.labelID {
-                guard item.labelIDs.contains(scopeLabelID) else { return false }
-            } else if !filterSpec.labelIDs.isEmpty, item.labelIDs.isDisjoint(with: filterSpec.labelIDs) {
+            if !filterSpec.labelIDs.isEmpty, item.labelIDs.isDisjoint(with: filterSpec.labelIDs) {
                 return false
             }
 
             // Inbox/Unassigned views should show real Inbox captures and pathless unfiled cards,
             // not every legacy path-backed item whose folder row is missing.
-            if scope?.hasFolderScope != true, filterSpec.onlyUnassigned, !item.isInboxItem {
+            if filterSpec.onlyUnassigned, !item.isInboxItem {
                 return false
             }
 
             if !filterSpec.includeCompleted, item.isCompleted {
-                return false
-            }
-
-            if !cleanQuery.isEmpty, !Self.matchesTextQuery(cleanQuery, in: item) {
                 return false
             }
 
@@ -131,6 +131,100 @@ final class LibraryViewModel: ObservableObject {
         let result = sortItems(filtered, using: sortSpec.mode)
         filteredItemsCache = (filterSpec, sortSpec, result)
         return result
+    }
+
+    func canonicalSearchRequest(
+        using filterSpec: LibraryFilterSpec,
+        sort sortSpec: LibrarySortSpec,
+        folderScopeIDs: Set<UUID>? = nil
+    ) -> LibraryCanonicalSearchRequest {
+        LibraryCanonicalSearchRequest(
+            filter: filterSpec,
+            sort: sortSpec,
+            itemRevision: itemRevision,
+            scopeIdentity: (
+                VaultFolderService.shared.legacyFolders.map { "folder:\($0.id.uuidString):\($0.name)" }
+                    + CardLabelStorage.shared.labels.map { "tag:\($0.id.uuidString):\($0.name)" }
+            ).sorted(),
+            folderScopeIDs: folderScopeIDs
+        )
+    }
+
+    func refreshCanonicalSearch(
+        using filterSpec: LibraryFilterSpec,
+        sort sortSpec: LibrarySortSpec,
+        folderScopeIDs: Set<UUID>? = nil
+    ) async {
+        let query = filterSpec.textQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            let hadCachedSearch = canonicalSearchCache != nil
+            canonicalSearchCache = nil
+            activeCanonicalSearchRequestID = nil
+            if hadCachedSearch { canonicalSearchRevision &+= 1 }
+            return
+        }
+
+        let request = canonicalSearchRequest(
+            using: filterSpec,
+            sort: sortSpec,
+            folderScopeIDs: folderScopeIDs
+        )
+        if canonicalSearchCache?.request == request { return }
+
+        let requestID = UUID()
+        activeCanonicalSearchRequestID = requestID
+        let response = await canonicalSearchAdapter.search(
+            items: items,
+            filter: filterSpec,
+            sort: sortSpec,
+            folders: VaultFolderService.shared.legacyFolders,
+            labels: CardLabelStorage.shared.labels,
+            projectionAliases: journalProjectionAliases,
+            folderScopeIDs: folderScopeIDs
+        )
+        guard LibrarySearchPublishPolicy.canPublish(
+            requestID: requestID,
+            activeRequestID: activeCanonicalSearchRequestID,
+            isCancelled: Task.isCancelled
+        ), request == canonicalSearchRequest(
+            using: filterSpec,
+            sort: sortSpec,
+            folderScopeIDs: folderScopeIDs
+        ) else {
+            return
+        }
+        canonicalSearchCache = (request, response)
+        canonicalSearchRevision &+= 1
+    }
+
+    func canonicalSearchStatusMessage(
+        using filterSpec: LibraryFilterSpec,
+        sort sortSpec: LibrarySortSpec,
+        folderScopeIDs: Set<UUID>? = nil
+    ) -> String? {
+        let request = canonicalSearchRequest(
+            using: filterSpec,
+            sort: sortSpec,
+            folderScopeIDs: folderScopeIDs
+        )
+        guard canonicalSearchCache?.request == request else { return nil }
+        return canonicalSearchCache?.response.statusMessage
+    }
+
+    func canonicalSearchEmptyStateMessage(
+        using filterSpec: LibraryFilterSpec,
+        sort sortSpec: LibrarySortSpec,
+        folderScopeIDs: Set<UUID>? = nil
+    ) -> String? {
+        let request = canonicalSearchRequest(
+            using: filterSpec,
+            sort: sortSpec,
+            folderScopeIDs: folderScopeIDs
+        )
+        guard canonicalSearchCache?.request == request else {
+            return "Searching indexed Library items…"
+        }
+        return canonicalSearchCache?.response.emptyStateMessage
     }
 
     func calendarBuckets(for month: Date, using filterSpec: LibraryFilterSpec) -> [Date: [LibraryItemV2]] {
@@ -190,49 +284,6 @@ final class LibraryViewModel: ObservableObject {
             .sink { [weak self] _ in self?.rebuildCoalescer.requestRebuild() }
             .store(in: &cancellables)
 
-    }
-
-    /// Token-based search: splits query into words, each must match in at least one field.
-    /// Uses `localizedStandardContains` for diacritic- and case-insensitive matching.
-    static func matchesTextQuery(_ query: String, in item: LibraryItemV2) -> Bool {
-        let tokens = query.split(separator: " ").map(String.init)
-        guard !tokens.isEmpty else { return true }
-
-        let fields: [String]
-        switch item {
-        case .journal:
-            let journalNotes = NotesStorage.shared.notes.filter(\.isDailyJournalNote)
-            fields = ["Journal", "Daily Journal"] + journalNotes.flatMap { note in
-                [note.title, NotesStorage.shared.loadContent(for: note)]
-            }
-        case .bookmark(let bookmark):
-            var bFields = [bookmark.title, bookmark.urlString, bookmark.notes] + bookmark.tags
-            if let ocr = bookmark.ocrText { bFields.append(ocr) }
-            fields = bFields
-        case .note(let note):
-            let content = NotesStorage.shared.loadContent(for: note)
-            fields = [note.title, content]
-        case .dateCard(let dateCard):
-            fields = [dateCard.title, dateCard.details, dateCard.location]
-        case .contact(let contact):
-            fields = [contact.displayName, contact.relationshipLabel, contact.notes]
-        case .todo(let todo):
-            var tFields = [todo.title, todo.details]
-            tFields.append(contentsOf: todo.checklist.map(\.title))
-            fields = tFields
-        case .vaultFile(let file):
-            var vFields = [file.filename, file.displayTitle, file.notes]
-            if let ocr = file.ocrText { vFields.append(ocr) }
-            fields = vFields
-        }
-
-        // Also match against label names for the item
-        let labelNames = item.labelIDs.compactMap { CardLabelStorage.shared.label(for: $0)?.name }
-
-        return tokens.allSatisfy { token in
-            fields.contains { $0.localizedStandardContains(token) }
-            || labelNames.contains { $0.localizedStandardContains(token) }
-        }
     }
 
     private func sortItems(_ source: [LibraryItemV2], using mode: LibrarySortMode) -> [LibraryItemV2] {

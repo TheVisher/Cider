@@ -5,14 +5,7 @@ extension CiderPanelView {
     // MARK: - Select All
 
     func selectAllVisibleItems() {
-        let scope = WorkspaceRoutePresentation.presentation(for: workspaceRouter.currentRoute).visibleItemScope
-        let ids = WorkspaceVisibleItemScopePolicy.visibleItemIDs(
-            for: scope,
-            items: libraryViewModel.items,
-            folderID: selectedFolderID,
-            tagIDs: selectedTagIDs,
-            searchText: currentRouteSearchText
-        )
+        let ids = currentVisibleLibraryItems.map(\.id)
         selectedItemIDs.formUnion(ids)
     }
 

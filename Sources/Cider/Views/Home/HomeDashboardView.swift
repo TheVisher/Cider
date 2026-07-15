@@ -57,6 +57,15 @@ struct HomeDashboardView: View {
         LibrarySortSpec(mode: sortMode)
     }
 
+    private var canonicalSearchRequest: LibraryCanonicalSearchRequest {
+        libraryViewModel.canonicalSearchRequest(using: filterSpec, sort: sortSpec)
+    }
+
+    private var canonicalSearchStatusMessage: String? {
+        guard isSearching else { return nil }
+        return libraryViewModel.canonicalSearchStatusMessage(using: filterSpec, sort: sortSpec)
+    }
+
     /// Continue section always shows global recents regardless of folder/filter selection
     private var continueItems: [LibraryItemV2] {
         libraryViewModel.recentItems
@@ -103,6 +112,9 @@ struct HomeDashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !libraryItems.isEmpty, let canonicalSearchStatusMessage {
+                indexedSearchNotice(canonicalSearchStatusMessage)
+            }
             if libraryItems.isEmpty {
                 // No scrollable content — show recents normally above empty state
                 if config.showContinueSection && !isSearching && !continueItems.isEmpty && !continueSectionCollapsed {
@@ -181,6 +193,9 @@ struct HomeDashboardView: View {
                     .padding(.bottom, Spacing.md)
                 }
             }
+        }
+        .task(id: canonicalSearchRequest) {
+            await libraryViewModel.refreshCanonicalSearch(using: filterSpec, sort: sortSpec)
         }
     }
 
@@ -503,23 +518,48 @@ struct HomeDashboardView: View {
         VStack(spacing: Spacing.md) {
             Spacer(minLength: 0)
 
-            Image(systemName: selectedFolderID != nil ? "folder" : "tray.2")
+            Image(systemName: isSearching ? "magnifyingglass" : (selectedFolderID != nil ? "folder" : "tray.2"))
                 .font(CiderFont.heroDisplay(scale: 1.0))
                 .foregroundColor(CiderColors.tertiary)
 
-            Text(selectedFolderID != nil ? "No items in this folder" : "Your library is empty")
+            Text(isSearching ? "No search results" : (selectedFolderID != nil ? "No items in this folder" : "Your library is empty"))
                 .font(CiderFont.subheadingMedium)
                 .foregroundColor(CiderColors.secondary)
 
-            Text(selectedFolderID != nil
-                ? "Drag bookmarks or notes into this folder to organize them"
-                : "Capture a bookmark or create a note to get started")
+            Text(emptyStateSubtitle)
                 .font(CiderFont.body)
                 .foregroundColor(CiderColors.tertiary)
+                .multilineTextAlignment(.center)
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyStateSubtitle: String {
+        if isSearching {
+            return libraryViewModel.canonicalSearchEmptyStateMessage(using: filterSpec, sort: sortSpec)
+                ?? "Try a different query or Library facet."
+        }
+        return selectedFolderID != nil
+            ? "Drag bookmarks or notes into this folder to organize them"
+            : "Capture a bookmark or create a note to get started"
+    }
+
+    private func indexedSearchNotice(_ message: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+            Image(systemName: "info.circle")
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.tertiary)
+            Text(message)
+                .font(CiderFont.caption)
+                .foregroundColor(CiderColors.secondary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xs)
+        .background(CiderColors.surfaceSubtle)
     }
 
     // MARK: - Selection Helpers

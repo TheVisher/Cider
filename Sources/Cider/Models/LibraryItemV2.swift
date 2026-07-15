@@ -28,6 +28,27 @@ enum LibraryItemV2: Identifiable, Hashable {
         }
     }
 
+    /// Canonical indexed item identity. The Journal container is a synthetic
+    /// Library row and can represent more than one canonical daily note.
+    var canonicalEntityID: UUID? {
+        switch self {
+        case .journal:
+            nil
+        case .bookmark(let bookmark):
+            bookmark.id
+        case .note(let note):
+            note.id
+        case .dateCard(let dateCard):
+            dateCard.id
+        case .contact(let contact):
+            contact.id
+        case .todo(let todo):
+            todo.id
+        case .vaultFile(let file):
+            file.id
+        }
+    }
+
     var entityType: LibraryEntityType {
         switch self {
         case .journal:

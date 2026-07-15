@@ -4,6 +4,7 @@ import SwiftUI
 struct FolderDetailView: View {
     @ObservedObject var bookmarksViewModel: BookmarksViewModel
     @ObservedObject var notesViewModel: NotesViewModel
+    @ObservedObject var libraryViewModel: LibraryViewModel
     let folderID: UUID
     var navigationDomain: WorkspaceNavigationDomain? = nil
     @Binding var contentScope: WorkspaceDomainContentScope
@@ -69,34 +70,41 @@ struct FolderDetailView: View {
     }
 
     private var allScopedItems: [LibraryItemV2] {
-        var all = allFolderContentItems
-            .sorted { $0.createdDate > $1.createdDate }
-
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
-            let scope = SearchService.parseScope(from: query)
-            if let scopeTypes = scope.entityTypes {
-                all = all.filter { item in
-                    switch item {
-                    case .journal:      return scopeTypes.contains(.note)
-                    case .bookmark:     return scopeTypes.contains(.bookmark)
-                    case .note:         return scopeTypes.contains(.note)
-                    case .dateCard:     return scopeTypes.contains(.dateCard)
-                    case .contact:      return scopeTypes.contains(.contact)
-                    case .todo:         return scopeTypes.contains(.todo)
-                    case .vaultFile:    return false
-                    }
-                }
-            }
-            if let labelID = scope.labelID {
-                all = all.filter { $0.labelIDs.contains(labelID) }
-            }
-            if !scope.cleanQuery.isEmpty {
-                all = all.filter { LibraryViewModel.matchesTextQuery(scope.cleanQuery, in: $0) }
-            }
+            return libraryViewModel.filteredItems(
+                using: searchFilterSpec,
+                sort: searchSortSpec,
+                canonicalFolderScopeIDs: searchFolderScopeIDs
+            )
         }
 
+        let all = allFolderContentItems
+            .sorted { $0.createdDate > $1.createdDate }
         return all
+    }
+
+    private var searchFilterSpec: LibraryFilterSpec {
+        LibraryFilterSpec(
+            entityTypes: contentScope.entityTypes(for: navigationDomain),
+            textQuery: searchText
+        )
+    }
+
+    private var searchSortSpec: LibrarySortSpec {
+        LibrarySortSpec(mode: .createdDescending)
+    }
+
+    private var canonicalSearchRequest: LibraryCanonicalSearchRequest {
+        libraryViewModel.canonicalSearchRequest(
+            using: searchFilterSpec,
+            sort: searchSortSpec,
+            folderScopeIDs: searchFolderScopeIDs
+        )
+    }
+
+    private var searchFolderScopeIDs: Set<UUID> {
+        Set([folderID] + childFolders.map(\.id))
     }
 
     private var domainScopedItems: [LibraryItemV2] {
@@ -200,9 +208,11 @@ struct FolderDetailView: View {
                                         .padding(.vertical, noPadding ? 0 : Spacing.md)
                                 } else if childOverviewSections.isEmpty {
                                     EmptyStateView(
-                                        icon: "tray",
-                                        title: "No items yet",
-                                        subtitle: "Drag bookmarks or notes here, or add them from the sidebar"
+                                        icon: searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "tray" : "magnifyingglass",
+                                        title: searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                            ? "No items yet"
+                                            : "No search results in this folder",
+                                        subtitle: folderEmptyStateSubtitle
                                     )
                                     .frame(minHeight: BookmarksDesign.detailsSheetNotesHeight)
                                 } else {
@@ -234,6 +244,13 @@ struct FolderDetailView: View {
             await loadCoverImage()
             coverOffsetY = folder?.coverImageOffsetY ?? 0.5
         }
+        .task(id: canonicalSearchRequest) {
+            await libraryViewModel.refreshCanonicalSearch(
+                using: searchFilterSpec,
+                sort: searchSortSpec,
+                folderScopeIDs: searchFolderScopeIDs
+            )
+        }
     }
 
     // MARK: - Folder Header Section
@@ -241,6 +258,27 @@ struct FolderDetailView: View {
     private var folderHeaderSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             folderHeader
+
+            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !folderItems.isEmpty,
+               let message = libraryViewModel.canonicalSearchStatusMessage(
+                   using: searchFilterSpec,
+                   sort: searchSortSpec,
+                   folderScopeIDs: searchFolderScopeIDs
+               ) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Image(systemName: "info.circle")
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.tertiary)
+                    Text(message)
+                        .font(CiderFont.caption)
+                        .foregroundColor(CiderColors.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Spacing.md + Spacing.xxs)
+                .padding(.bottom, Spacing.xs)
+            }
 
             if !childFolders.isEmpty && !subFoldersCollapsed {
                 subFolderCards
@@ -1073,10 +1111,23 @@ struct FolderDetailView: View {
 
     private var emptyState: some View {
         EmptyStateView(
-            icon: "folder",
-            title: "This folder is empty",
-            subtitle: "Drag bookmarks or notes into this folder to organize them"
+            icon: searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "folder" : "magnifyingglass",
+            title: searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "This folder is empty"
+                : "No search results in this folder",
+            subtitle: folderEmptyStateSubtitle
         )
+    }
+
+    private var folderEmptyStateSubtitle: String {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return libraryViewModel.canonicalSearchEmptyStateMessage(
+                using: searchFilterSpec,
+                sort: searchSortSpec,
+                folderScopeIDs: searchFolderScopeIDs
+            ) ?? "Try a different query or folder facet."
+        }
+        return "Drag bookmarks or notes into this folder to organize them"
     }
 
     // MARK: - Selection Helpers
