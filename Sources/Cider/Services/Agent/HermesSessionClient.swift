@@ -63,6 +63,27 @@ struct HermesTranscriptMessage: Equatable, Sendable {
     let timestamp: Date
 }
 
+enum HermesProcessFailure: Equatable, Sendable {
+    case launchFailed
+    case exited(status: Int32)
+    case timedOut(seconds: TimeInterval)
+    case cancelled
+}
+
+enum HermesSessionClientErrorClassification: String, Equatable, Sendable {
+    case stateDatabaseUnavailable = "state_database_unavailable"
+    case sqlitePrepareFailed = "sqlite_prepare_failed"
+    case sqliteStepFailed = "sqlite_step_failed"
+    case sessionNotFound = "session_not_found"
+    case executableUnavailable = "executable_unavailable"
+    case commandFailed = "command_failed"
+    case commandLaunchFailed = "command_launch_failed"
+    case commandExited = "command_exited"
+    case commandTimedOut = "command_timed_out"
+    case commandCancelled = "command_cancelled"
+    case invalidTranscript = "invalid_transcript"
+}
+
 enum HermesSessionClientError: Error, LocalizedError {
     case stateDatabaseUnavailable(String)
     case sqlitePrepare(String)
@@ -70,25 +91,78 @@ enum HermesSessionClientError: Error, LocalizedError {
     case sessionNotFound(String)
     case hermesExecutableUnavailable(String)
     case hermesCommandFailed(String)
+    case hermesProcessFailed(HermesProcessFailure)
     case invalidTranscript
+
+    var classification: HermesSessionClientErrorClassification {
+        switch self {
+        case .stateDatabaseUnavailable:
+            return .stateDatabaseUnavailable
+        case .sqlitePrepare:
+            return .sqlitePrepareFailed
+        case .sqliteStep:
+            return .sqliteStepFailed
+        case .sessionNotFound:
+            return .sessionNotFound
+        case .hermesExecutableUnavailable:
+            return .executableUnavailable
+        case .hermesCommandFailed:
+            return .commandFailed
+        case .hermesProcessFailed(.launchFailed):
+            return .commandLaunchFailed
+        case .hermesProcessFailed(.exited):
+            return .commandExited
+        case .hermesProcessFailed(.timedOut):
+            return .commandTimedOut
+        case .hermesProcessFailed(.cancelled):
+            return .commandCancelled
+        case .invalidTranscript:
+            return .invalidTranscript
+        }
+    }
+
+    var exitStatus: Int32? {
+        guard case .hermesProcessFailed(.exited(let status)) = self else { return nil }
+        return status
+    }
+
+    var timeoutSeconds: TimeInterval? {
+        guard case .hermesProcessFailed(.timedOut(let seconds)) = self else { return nil }
+        return seconds
+    }
 
     var errorDescription: String? {
         switch self {
         case .stateDatabaseUnavailable(let path):
-            return "Hermes state database is unavailable at \(path)"
+            return "Hermes state database is unavailable \(privateDiagnostic(.localPath, path))"
         case .sqlitePrepare(let detail):
-            return "Hermes SQLite prepare failed: \(detail)"
+            return "Hermes SQLite prepare failed \(privateDiagnostic(.diagnosticDetail, detail))"
         case .sqliteStep(let detail):
-            return "Hermes SQLite step failed: \(detail)"
-        case .sessionNotFound(let id):
-            return "Hermes session not found: \(id)"
+            return "Hermes SQLite step failed \(privateDiagnostic(.diagnosticDetail, detail))"
+        case .sessionNotFound:
+            return "Hermes session was not found"
         case .hermesExecutableUnavailable(let path):
-            return "Hermes executable is unavailable at \(path)"
+            return "Hermes executable is unavailable \(privateDiagnostic(.localPath, path))"
         case .hermesCommandFailed(let detail):
-            return "Hermes command failed: \(detail)"
+            return "Hermes command failed \(privateDiagnostic(.diagnosticDetail, detail))"
+        case .hermesProcessFailed(.launchFailed):
+            return "Hermes command could not be launched"
+        case .hermesProcessFailed(.exited(let status)):
+            return "Hermes command exited with status \(status)"
+        case .hermesProcessFailed(.timedOut(let seconds)):
+            return "Hermes command timed out after \(seconds.formatted()) seconds"
+        case .hermesProcessFailed(.cancelled):
+            return "Hermes command was cancelled"
         case .invalidTranscript:
             return "Hermes transcript export could not be decoded"
         }
+    }
+
+    private func privateDiagnostic(_ kind: CiderPrivateValue.Kind, _ rawValue: String) -> String {
+        CiderPrivacyProjectionPolicy.project(
+            CiderPrivateValue(kind: kind, rawValue: rawValue),
+            for: .userFacingDiagnostic
+        )
     }
 }
 
@@ -927,10 +1001,35 @@ extension HermesCommandRunning {
     }
 }
 
+enum HermesProcessEnvironmentBuilder {
+    static let inheritedKeys = ["HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TMPDIR", "USER"]
+
+    static func minimal(from ambient: [String: String]) -> [String: String] {
+        let defaults: [String: String] = [
+            "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "SHELL": "/bin/zsh",
+            "TMPDIR": FileManager.default.temporaryDirectory.path,
+            "USER": NSUserName()
+        ]
+
+        return Dictionary(uniqueKeysWithValues: inheritedKeys.compactMap { key in
+            let inherited = ambient[key]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let inherited, !inherited.isEmpty {
+                return (key, inherited)
+            }
+            guard let fallback = defaults[key] else { return nil }
+            return (key, fallback)
+        })
+    }
+}
+
 struct HermesProcessRunner: HermesCommandRunning {
     let executablePath: String
     let workingDirectoryURL: URL
-    let environment: [String: String]?
+    let environment: [String: String]
     let cliExecutionAllowed: Bool
 
     init(
@@ -938,7 +1037,8 @@ struct HermesProcessRunner: HermesCommandRunning {
         workingDirectoryURL: URL? = nil,
         environment: [String: String]? = nil,
         cliExecutionAllowed: Bool? = nil,
-        isolationConfiguration: IsolationConfiguration? = nil
+        isolationConfiguration: IsolationConfiguration? = nil,
+        ambientEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         IsolationRuntime.recordPathAccess("HermesProcessRunner.init")
         let isolation = isolationConfiguration ?? IsolationRuntime.configuration
@@ -950,7 +1050,7 @@ struct HermesProcessRunner: HermesCommandRunning {
         } else {
             self.executablePath = executablePath ?? HermesPaths.resolveHermesExecutablePath()
             self.workingDirectoryURL = workingDirectoryURL ?? StoragePaths.cachedVaultDirectoryURL
-            self.environment = environment
+            self.environment = environment ?? HermesProcessEnvironmentBuilder.minimal(from: ambientEnvironment)
             self.cliExecutionAllowed = cliExecutionAllowed ?? true
         }
     }
@@ -963,58 +1063,75 @@ struct HermesProcessRunner: HermesCommandRunning {
             throw HermesSessionClientError.hermesExecutableUnavailable(executablePath)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let stdout = Pipe()
-            let stderr = Pipe()
+        let cancellation = HermesProcessCancellationBox()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let process = Process()
+                let stdout = Pipe()
 
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = arguments
-            process.currentDirectoryURL = workingDirectoryURL
-            if let environment {
+                process.executableURL = URL(fileURLWithPath: executablePath)
+                process.arguments = arguments
+                process.currentDirectoryURL = workingDirectoryURL
                 process.environment = environment
-            }
-            process.standardOutput = stdout
-            process.standardError = stderr
+                process.standardInput = FileHandle.nullDevice
+                process.standardOutput = stdout
+                process.standardError = FileHandle.nullDevice
 
-            let completion = HermesProcessCompletionBox(continuation: continuation)
-            let stdoutBuffer = HermesPipeBuffer()
-            let stderrBuffer = HermesPipeBuffer()
+                let completion = HermesProcessCompletionBox(continuation: continuation)
+                let stdoutBuffer = HermesPipeBuffer()
 
-            stdout.fileHandleForReading.readabilityHandler = { handle in
-                stdoutBuffer.append(handle.availableData)
-            }
-            stderr.fileHandleForReading.readabilityHandler = { handle in
-                stderrBuffer.append(handle.availableData)
-            }
-
-            process.terminationHandler = { proc in
-                stdout.fileHandleForReading.readabilityHandler = nil
-                stderr.fileHandleForReading.readabilityHandler = nil
-                stdoutBuffer.append(stdout.fileHandleForReading.readDataToEndOfFile())
-                stderrBuffer.append(stderr.fileHandleForReading.readDataToEndOfFile())
-                if proc.terminationStatus == 0 {
-                    completion.finish(.success(stdoutBuffer.data()))
-                } else {
-                    let detail = String(data: stderrBuffer.data(), encoding: .utf8) ?? "exit \(proc.terminationStatus)"
-                    completion.finish(.failure(HermesSessionClientError.hermesCommandFailed(detail)))
+                stdout.fileHandleForReading.readabilityHandler = { handle in
+                    stdoutBuffer.append(handle.availableData)
                 }
-            }
 
-            do {
-                try process.run()
-            } catch {
-                completion.finish(.failure(error))
-                return
-            }
-
-            Task {
-                try? await Task.sleep(for: .seconds(timeout))
-                if process.isRunning {
-                    process.terminate()
-                    completion.finish(.failure(HermesSessionClientError.hermesCommandFailed("Timed out after \(Int(timeout)) seconds")))
+                process.terminationHandler = { proc in
+                    stdout.fileHandleForReading.readabilityHandler = nil
+                    stdoutBuffer.append(stdout.fileHandleForReading.readDataToEndOfFile())
+                    if proc.terminationStatus == 0 {
+                        completion.finish(.success(stdoutBuffer.data()))
+                    } else {
+                        completion.finish(.failure(
+                            HermesSessionClientError.hermesProcessFailed(.exited(status: proc.terminationStatus))
+                        ))
+                    }
+                    cancellation.processDidFinish(proc)
                 }
+
+                if cancellation.install(process: process, completion: completion) {
+                    completion.finish(.failure(HermesSessionClientError.hermesProcessFailed(.cancelled)))
+                    return
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    completion.finish(.failure(HermesSessionClientError.hermesProcessFailed(.launchFailed)))
+                    return
+                }
+
+                if cancellation.processDidStart(process) {
+                    completion.finish(.failure(HermesSessionClientError.hermesProcessFailed(.cancelled)))
+                    if process.isRunning { process.terminate() }
+                    return
+                }
+
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(for: .seconds(timeout))
+                    } catch {
+                        return
+                    }
+                    if process.isRunning {
+                        completion.finish(.failure(
+                            HermesSessionClientError.hermesProcessFailed(.timedOut(seconds: timeout))
+                        ))
+                        process.terminate()
+                    }
+                }
+                completion.installTimeoutTask(timeoutTask)
             }
+        } onCancel: {
+            cancellation.cancel()
         }
     }
 }
@@ -1041,6 +1158,7 @@ private final class HermesProcessCompletionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var completed = false
     private let continuation: CheckedContinuation<Data, Error>
+    private var timeoutTask: Task<Void, Never>?
 
     init(continuation: CheckedContinuation<Data, Error>) {
         self.continuation = continuation
@@ -1053,8 +1171,72 @@ private final class HermesProcessCompletionBox: @unchecked Sendable {
             return
         }
         completed = true
+        let timeoutTask = timeoutTask
+        self.timeoutTask = nil
         lock.unlock()
+        timeoutTask?.cancel()
         continuation.resume(with: result)
+    }
+
+    func installTimeoutTask(_ task: Task<Void, Never>) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            task.cancel()
+        } else {
+            timeoutTask = task
+            lock.unlock()
+        }
+    }
+}
+
+private final class HermesProcessCancellationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancellationRequested = false
+    private var processStarted = false
+    private weak var process: Process?
+    private weak var completion: HermesProcessCompletionBox?
+
+    func install(process: Process, completion: HermesProcessCompletionBox) -> Bool {
+        lock.lock()
+        self.process = process
+        self.completion = completion
+        let requested = cancellationRequested
+        lock.unlock()
+        return requested
+    }
+
+    func processDidStart(_ process: Process) -> Bool {
+        lock.lock()
+        guard self.process === process else {
+            lock.unlock()
+            return cancellationRequested
+        }
+        processStarted = true
+        let requested = cancellationRequested
+        lock.unlock()
+        return requested
+    }
+
+    func processDidFinish(_ process: Process) {
+        lock.lock()
+        if self.process === process {
+            self.process = nil
+            completion = nil
+            processStarted = false
+        }
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let process = processStarted ? process : nil
+        let completion = processStarted ? completion : nil
+        lock.unlock()
+
+        completion?.finish(.failure(HermesSessionClientError.hermesProcessFailed(.cancelled)))
+        if process?.isRunning == true { process?.terminate() }
     }
 }
 

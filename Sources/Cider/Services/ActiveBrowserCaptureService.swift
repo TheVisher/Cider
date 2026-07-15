@@ -97,7 +97,7 @@ enum ActiveBrowserCaptureService {
         for candidate in candidates {
             captureLog.info("Trying capture from: \(candidate.appName, privacy: .public) (\(candidate.bundleID, privacy: .public))")
             if let capture = capture(from: candidate) {
-                captureLog.info("Captured: \(capture.urlString, privacy: .public)")
+                captureLog.info("\(captureSucceededLogMessage(for: capture), privacy: .public)")
                 return capture
             }
         }
@@ -107,6 +107,10 @@ enum ActiveBrowserCaptureService {
             captureFailureHint = "Could not capture active browser tab"
         }
         return nil
+    }
+
+    static func captureSucceededLogMessage(for _: ActiveBrowserCaptureResult) -> String {
+        return CiderPrivacyProjectionPolicy.systemLogMessage(for: .browserCaptureSucceeded)
     }
 
     private static func activeBrowserTargets() -> [BrowserTarget] {
@@ -272,7 +276,8 @@ enum ActiveBrowserCaptureService {
                 timeout: 0.95 + Double(attempt) * 0.2
             )
             let copiedValue = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            captureLog.debug("  Attempt \(attempt): clipboardChanged=\(clipboardChanged) copiedValue=\(copiedValue ?? "nil", privacy: .public) isURL=\(copiedValue.map { isValidWebURL($0) } ?? false)")
+            let copiedValueIsURL = copiedValue.map { isValidWebURL($0) } ?? false
+            captureLog.debug("  Attempt \(attempt): clipboardChanged=\(clipboardChanged) valuePresent=\(copiedValue != nil) isURL=\(copiedValueIsURL)")
 
             if clipboardChanged,
                let copiedValue,
