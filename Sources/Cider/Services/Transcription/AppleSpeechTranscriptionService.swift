@@ -2,6 +2,58 @@ import AVFoundation
 import Foundation
 import Speech
 
+struct AppleSpeechAuthorizationClient: Sendable {
+    typealias Completion = @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void
+
+    let currentStatus: @Sendable () -> SFSpeechRecognizerAuthorizationStatus
+    let requestAuthorization: @Sendable (@escaping Completion) -> Void
+
+    static let system = AppleSpeechAuthorizationClient(
+        currentStatus: SFSpeechRecognizer.authorizationStatus,
+        requestAuthorization: { completion in
+            SFSpeechRecognizer.requestAuthorization { status in
+                completion(status)
+            }
+        }
+    )
+}
+
+@MainActor
+private final class AppleSpeechAuthorizationContinuation {
+    private enum State {
+        case waiting
+        case installed(CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>)
+        case pending(SFSpeechRecognizerAuthorizationStatus)
+        case resolved
+    }
+
+    private var state: State = .waiting
+
+    func install(_ continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) {
+        switch state {
+        case .waiting:
+            state = .installed(continuation)
+        case .pending(let status):
+            state = .resolved
+            continuation.resume(returning: status)
+        case .installed, .resolved:
+            break
+        }
+    }
+
+    func resolve(_ status: SFSpeechRecognizerAuthorizationStatus) {
+        switch state {
+        case .waiting:
+            state = .pending(status)
+        case .installed(let continuation):
+            state = .resolved
+            continuation.resume(returning: status)
+        case .pending, .resolved:
+            break
+        }
+    }
+}
+
 /// Native adapter for Cider's shared transcription capability. Both live microphone
 /// and stored-file recognition are forced on-device and never fall back to a network provider.
 @MainActor
@@ -20,6 +72,7 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
     private let recognizer: SFSpeechRecognizer?
     private let locale: TranscriptionLocaleMetadata
     private let audioEngine = AVAudioEngine()
+    private let speechAuthorization: AppleSpeechAuthorizationClient
     private let microphoneAuthorization: any CiderMicrophoneAuthorizationServicing
     private let now: @MainActor () -> Date
 
@@ -35,17 +88,19 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
 
     init(
         locale: Locale = .current,
+        speechAuthorization: AppleSpeechAuthorizationClient = .system,
         microphoneAuthorization: any CiderMicrophoneAuthorizationServicing = SystemCiderMicrophoneAuthorizationService(),
         now: @escaping @MainActor () -> Date = Date.init
     ) {
         recognizer = SFSpeechRecognizer(locale: locale)
         self.locale = TranscriptionLocaleMetadata(identifier: locale.identifier)
+        self.speechAuthorization = speechAuthorization
         self.microphoneAuthorization = microphoneAuthorization
         self.now = now
     }
 
     func authorization(for input: TranscriptionInputKind) -> TranscriptionAuthorization {
-        let speech = Self.map(SFSpeechRecognizer.authorizationStatus())
+        let speech = Self.map(speechAuthorization.currentStatus())
         guard input == .liveMicrophone else { return speech }
 
         let microphone = microphoneAuthorization.authorization()
@@ -72,14 +127,10 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
     }
 
     func requestAuthorization(for input: TranscriptionInputKind) async -> TranscriptionAuthorization {
-        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
-            _ = await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { status in
-                    continuation.resume(returning: status)
-                }
-            }
+        if speechAuthorization.currentStatus() == .notDetermined {
+            _ = await requestSpeechAuthorization()
         }
-        guard Self.map(SFSpeechRecognizer.authorizationStatus()) == .authorized,
+        guard Self.map(speechAuthorization.currentStatus()) == .authorized,
               input == .liveMicrophone
         else {
             return authorization(for: input)
@@ -88,6 +139,36 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
             _ = await microphoneAuthorization.requestAuthorization()
         }
         return authorization(for: input)
+    }
+
+    private func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        let client = speechAuthorization
+        let continuationGate = AppleSpeechAuthorizationContinuation()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                continuationGate.install(continuation)
+                guard !Task.isCancelled else {
+                    continuationGate.resolve(client.currentStatus())
+                    return
+                }
+                Self.beginSpeechAuthorization(client: client, continuationGate: continuationGate)
+            }
+        } onCancel: {
+            Task { @MainActor in
+                continuationGate.resolve(client.currentStatus())
+            }
+        }
+    }
+
+    private nonisolated static func beginSpeechAuthorization(
+        client: AppleSpeechAuthorizationClient,
+        continuationGate: AppleSpeechAuthorizationContinuation
+    ) {
+        client.requestAuthorization { status in
+            Task { @MainActor in
+                continuationGate.resolve(status)
+            }
+        }
     }
 
     func startLive(
