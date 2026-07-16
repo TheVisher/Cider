@@ -718,6 +718,7 @@ struct CiderCLI {
       cider-cli item sync-project <project-id-or-name> [--json]
       cider-cli item link <source-type> <source-ref> <target-type> <target-ref>
       cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
+      cider-cli item update vaultFile <id-or-ref> --expected-title <exact-current-title> --title <new-display-title> --reason <text> --actor <name> --source <source> [--json]
       cider-cli item move <type> <id-or-ref> (--folder <name|path>|--path <target-folder-path>) [--actor <name>] [--source <source>] [--json]
         Do not pass artifact filenames such as Example.webloc to item move --path.
       cider-cli item unfile <type> <id-or-ref> [--actor <name>] [--source <source>] [--json]
@@ -736,6 +737,12 @@ struct CiderCLI {
     static func printItemSubcommandEarlyHelp(subcommand: String?, args: [String]) {
         let positional = leadingPositionalArgs(from: args)
         switch subcommand {
+        case "update", "edit":
+            print("""
+            Usage: cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]
+                   cider-cli item update vaultFile <id-or-ref> --expected-title <exact-current-title> --title <new-display-title> --reason <text> --actor <name> --source <source> [--json]
+            vaultFile title updates are metadata-only, require optimistic concurrency, and return a durable action-ledger receipt plus verification command.
+            """)
         case "recall-context", "context-bundle", "recall-bundle":
             print("""
             Usage: cider-cli item recall-context (--item <type> <id-or-ref>|--query <topic>) [--query <topic>] [--limit <n>] [--history-command <command>] [--history-status <status>] [--history-source-ref <ref>] [--history-evidence-ref <ref>] [--history-since <iso|yyyy-mm-dd>] [--history-before <iso|yyyy-mm-dd>] [--history-limit <n>] [--include-private-provenance] [--json]
@@ -2852,14 +2859,14 @@ struct CiderCLI {
     }
 
     static func printCaptureUsage() {
-        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--media <local-path> --media-title <friendly-title> --media-id <source-id> --media-kind photo|audio|media ...] [--idempotency-key <key>] [--transcription-provider apple-speech-on-device|local-faster-whisper|shared-default] [--transcription-locale <locale>] [--transcription-executable <path> --transcription-model-path <path> --transcription-model-id <identity>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--media <local-path> --media-title <friendly-title> --media-id <source-id> --media-kind photo|audio|media ...] [--media-title-base <friendly-base>] [--idempotency-key <key>] [--transcription-provider apple-speech-on-device|local-faster-whisper|shared-default] [--transcription-locale <locale>] [--transcription-executable <path> --transcription-model-path <path> --transcription-model-id <identity>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill")
         print("       cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]  # read-only resumable evidence drilldown")
         print("       cider-cli capture provenance-gap-patterns [--limit <1-100>] [--sample-limit <0-10>] [--json]  # read-only content-free aggregate")
         print("       cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
         print("       Journal capture: use `cider-cli capture add --kind journal --date today --stdin --json` so readable Markdown, metadata, provenance, indexing, and reviewable candidates stay connected.")
-        print("       Atomic Journal media: repeat --media once per local source; repeat --media-title/--media-id/--media-kind once per source when supplied.")
+        print("       Atomic Journal media: repeat --media once per local source; repeat --media-title/--media-id/--media-kind once per source when supplied. --media-title-base generates '<Base> — Photo 1', etc. for untitled media; explicit --media-title values win. With a base, pass an empty --media-title value as an untitled positional placeholder in a mixed bundle.")
         print("       Stored Journal voice: supply exactly one audio --media, explicit --media-id, --idempotency-key, and --transcription-provider. Do not also supply transcript text; Cider commits only the provider's final transcript.")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
@@ -4591,7 +4598,8 @@ struct CiderCLI {
             capturedAt: capturedAt,
             idempotencyKey: requestIdentity,
             sourceContext: sourceContext,
-            media: media
+            media: media,
+            mediaTitleBase: parseFlag("--media-title-base", from: args)
         ))
         let graphCandidates = recordJournalGraphCandidates(
             captureEventID: receipt.receiptID,
@@ -4680,6 +4688,12 @@ struct CiderCLI {
             where !values.isEmpty && values.count != mediaPaths.count {
             throw CaptureAddArgumentError.message("\(flag) must be supplied once per --media source, or omitted.")
         }
+        let hasTitleBase = parseFlag("--media-title-base", from: args) != nil
+        if !mediaTitles.isEmpty,
+           mediaTitles.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+           !hasTitleBase {
+            throw CaptureAddArgumentError.message("Blank --media-title placeholders require --media-title-base.")
+        }
         if requireExplicitIDs, mediaIDs.count != mediaPaths.count {
             throw CaptureAddArgumentError.message("Stored Journal voice capture requires one explicit --media-id for its audio source.")
         }
@@ -4700,7 +4714,9 @@ struct CiderCLI {
                 sourceURL: url,
                 sourceID: mediaIDs.isEmpty ? "cli-local-sha256-\(stablePathDigest)" : mediaIDs[index],
                 kind: kind,
-                displayTitle: mediaTitles.isEmpty ? nil : mediaTitles[index],
+                displayTitle: mediaTitles.isEmpty || mediaTitles[index].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil
+                    : mediaTitles[index],
                 mimeType: nil
             )
         }
@@ -9177,11 +9193,16 @@ struct CiderCLI {
     static func handleItemUpdate(args: [String], contextService: CiderItemContextService) {
         let positional = leadingPositionalArgs(from: args)
         guard positional.count >= 2 else {
-            printCLIError("Usage: cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]")
+            printCLIError("Usage: cider-cli item update note|vaultFile <id-or-ref> ...")
             return
         }
-        guard positional[0].trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase == "note" else {
-            printCLIError("item update currently supports note items. Usage: cider-cli item update note <id-or-ref> [--title <title>] [--content <text>|--stdin|--text-file <path>] [--append] [--json]")
+        let rawType = positional[0].trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        if ["vaultfile", "vault-file", "file", "files"].contains(rawType) {
+            handleVaultFileDisplayTitleUpdate(ref: positional[1], args: args)
+            return
+        }
+        guard rawType == "note" || rawType == "notes" else {
+            printCLIError("item update supports note and vaultFile items. Use `cider-cli item update --help` for contracts.")
             return
         }
         guard let note = findNote(positional[1], in: NotesStorage.shared) else { return }
@@ -9291,6 +9312,93 @@ struct CiderCLI {
             }
         } catch {
             printCLIError(error.localizedDescription)
+        }
+    }
+
+    static func handleVaultFileDisplayTitleUpdate(ref rawRef: String, args: [String]) {
+        guard let expectedTitle = parseFlag("--expected-title", from: args),
+              let newTitle = parseFlag("--title", from: args),
+              let reason = parseFlag("--reason", from: args),
+              let actor = parseFlag("--actor", from: args),
+              let source = parseFlag("--source", from: args) else {
+            printCLIError("vaultFile display-title update requires --expected-title, --title, --reason, --actor, and --source.", details: [
+                "command": "item.update",
+                "readOnly": false,
+                "changed": false,
+                "errorCode": "missing_required_argument",
+                "safeVerificationCommands": ["cider-cli item update --help"],
+            ])
+            return
+        }
+        do {
+            let resolved = try ItemLinkService.shared.resolve(type: .vaultFile, ref: rawRef)
+            let receipt = try CiderItemMutationService(database: .shared).updateVaultFileDisplayTitle(
+                ref: resolved,
+                expectedCurrentTitle: expectedTitle,
+                newTitle: newTitle,
+                reason: reason,
+                actor: actor,
+                source: source
+            )
+            let receiptPayload = receipt.toDictionary()
+            var payload: [String: Any] = [
+                "ok": true,
+                "command": "item.update",
+                "action": "update_vault_file_display_title",
+                "readOnly": false,
+                "changed": receipt.changed,
+                "wasReused": receipt.wasReused,
+                "item": ["type": "vaultFile", "id": receipt.item.entityID.uuidString],
+                "before": ["title": receipt.beforeTitle],
+                "after": ["title": receipt.afterTitle],
+                "receipt": receiptPayload,
+                "actionReceipt": receiptPayload,
+                "verificationCommand": receipt.verificationCommand,
+                "safeVerificationCommands": receipt.safeVerificationCommands,
+                "safeNextCommands": receipt.safeVerificationCommands,
+                "partialFailures": [],
+                "reasonRecorded": true,
+            ]
+            if let ledgerRecord = try SecondBrainActionReceiptLedgerService(database: .shared).inspect(id: receipt.receiptID) {
+                payload["actionReceipt"] = actionReceiptRecordToDict(ledgerRecord)
+            }
+            if jsonOutput {
+                outputJSON(payload)
+            } else {
+                print(receipt.changed ? "Updated vaultFile display title: \(receipt.afterTitle)" : "VaultFile display title already matched: \(receipt.afterTitle)")
+                print("  ID: \(receipt.item.entityID.uuidString)")
+                print("  Verify: \(receipt.verificationCommand)")
+            }
+        } catch let error as CiderVaultFileDisplayTitleUpdateError {
+            printCLIError(error.localizedDescription, details: [
+                "command": "item.update",
+                "readOnly": false,
+                "changed": false,
+                "errorCode": error.code.rawValue,
+                "safeVerificationCommands": ["cider-cli item update --help"],
+            ])
+        } catch let error as ItemLinkService.LinkError {
+            let errorCode: String
+            switch error {
+            case .itemNotFound: errorCode = "targetMissing"
+            case .ambiguousItem: errorCode = "targetAmbiguous"
+            case .unsupportedType: errorCode = "unsupportedTargetType"
+            }
+            printCLIError(error.localizedDescription, details: [
+                "command": "item.update",
+                "readOnly": false,
+                "changed": false,
+                "errorCode": errorCode,
+                "safeVerificationCommands": ["cider-cli item update --help"],
+            ])
+        } catch {
+            printCLIError("The vaultFile display-title update failed; nothing was committed.", details: [
+                "command": "item.update",
+                "readOnly": false,
+                "changed": false,
+                "errorCode": "notCommitted",
+                "safeVerificationCommands": ["cider-cli item update --help"],
+            ])
         }
     }
 
@@ -14651,7 +14759,7 @@ struct CiderCLI {
             "--sender-id", "--sender-name", "--timeout", "--wait-timeout", "--capture-timeout",
             "--source-meta", "--date", "--time", "--location", "--details", "--name",
             "--relationship", "--email", "--phone", "--test-run", "--test-marker",
-            "--media", "--media-title", "--media-id", "--media-kind", "--idempotency-key",
+            "--media", "--media-title", "--media-title-base", "--media-id", "--media-kind", "--idempotency-key",
             "--transcription-provider", "--transcription-locale", "--transcription-executable",
             "--transcription-model-path", "--transcription-model-id", "--transcription-timeout",
         ]

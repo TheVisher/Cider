@@ -1,8 +1,9 @@
 import Foundation
 
 /// Projects durable Journal capture attachments into the existing Journal read
-/// model. Capture attachments remain provenance/source-card truth; VaultFile is
-/// only the immutable original and native preview target.
+/// model. Capture attachments remain immutable provenance/source identity;
+/// the linked VaultFile supplies the current canonical display title and the
+/// immutable original/native preview target.
 @MainActor
 final class JournalMediaSourceCardReadService {
     private let database: CiderDatabase
@@ -23,7 +24,7 @@ final class JournalMediaSourceCardReadService {
         guard database.isOpen, !noteIDs.isEmpty else { return [] }
         let statement = try database.prepare("""
             SELECT a.id, a.source_attachment_id, a.filename, a.metadata, a.created_at,
-                   i.id, i.relative_path
+                   i.id, i.relative_path, i.title
             FROM capture_attachments a
             JOIN items i ON i.id = json_extract(a.metadata, '$.vault_file_id')
                         AND i.type = 'vaultFile'
@@ -52,7 +53,8 @@ final class JournalMediaSourceCardReadService {
                 timestamp24Hour: metadata["journal_time"] ?? "",
                 capturedAt: DatabaseHelpers.decodeDate(statement.double(at: 4)),
                 kind: kind,
-                displayTitle: metadata["display_title"]
+                displayTitle: statement.optionalString(at: 7)
+                    ?? metadata["display_title"]
                     ?? statement.optionalString(at: 2).map { ($0 as NSString).deletingPathExtension }
                     ?? "Journal media",
                 rawFilename: metadata["raw_filename"] ?? statement.optionalString(at: 2) ?? "",

@@ -109,6 +109,82 @@ struct JournalAtomicCaptureCLITests {
         #expect(readback.string(at: 0).contains(text))
     }
 
+    @Test("CLI media title base generates numbered photos and mixed explicit override wins")
+    func mediaTitleBaseCLIContract() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-journal-cli-title-base-\(UUID().uuidString)", isDirectory: true)
+        let vault = root.appendingPathComponent("vault", isDirectory: true)
+        let sources = root.appendingPathComponent("sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let files = try (1...3).map { index -> URL in
+            let url = sources.appendingPathComponent("IMG_874\(index).jpeg")
+            try Self.jpegData.write(to: url)
+            return url
+        }
+        var args = [
+            "capture", "add", "--kind", "journal", "--date", "2026-07-15", "--time", "11:42",
+            "--idempotency-key", "cli-title-base-1", "--media-title-base", "Reflection Lake", "--stdin", "--json",
+        ]
+        let overrides = ["", "Reflection Lake favorite", ""]
+        for index in files.indices {
+            args += [
+                "--media", files[index].path,
+                "--media-title", overrides[index],
+                "--media-id", "cli-title-base-photo-\(index + 1)",
+                "--media-kind", "photo",
+            ]
+        }
+        let first = try runCLI(args: args, vault: vault, stdin: "Reflection Lake was glassy.")
+        #expect(first.status == 0, "stderr: \(first.stderr) stdout: \(first.stdout)")
+        let payload = try parseJSONObject(first.stdout)
+        let receipt = try #require(payload["receipt"] as? [String: Any])
+        let media = try #require(receipt["mediaSources"] as? [[String: Any]])
+        #expect(media.compactMap { $0["displayTitle"] as? String } == [
+            "Reflection Lake — Photo 1", "Reflection Lake favorite", "Reflection Lake — Photo 3",
+        ])
+        #expect(media.compactMap { $0["rawFilename"] as? String } == ["IMG_8741.jpeg", "IMG_8742.jpeg", "IMG_8743.jpeg"])
+
+        let retry = try runCLI(args: args, vault: vault, stdin: "Reflection Lake was glassy.")
+        #expect(retry.status == 0)
+        let retryPayload = try parseJSONObject(retry.stdout)
+        #expect((retryPayload["receipt"] as? [String: Any])?["wasReused"] as? Bool == true)
+
+        let beforeDatabase = try databaseFingerprint(at: vault.appendingPathComponent(".cider/cider.db"))
+        let beforeFiles = try vaultFileFingerprint(vault)
+        var changedArgs = args
+        let baseIndex = try #require(changedArgs.firstIndex(of: "Reflection Lake"))
+        changedArgs[baseIndex] = "Narada Falls"
+        let conflict = try runCLI(args: changedArgs, vault: vault, stdin: "Reflection Lake was glassy.")
+        #expect(conflict.status != 0)
+        #expect((try parseAnyJSONObject(conflict.stdout))["ok"] as? Bool == false)
+        #expect(try databaseFingerprint(at: vault.appendingPathComponent(".cider/cider.db")) == beforeDatabase)
+        #expect(try vaultFileFingerprint(vault) == beforeFiles)
+
+        let invalidRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-journal-cli-invalid-title-base-\(UUID().uuidString)", isDirectory: true)
+        let invalidVault = invalidRoot.appendingPathComponent("vault", isDirectory: true)
+        let invalidSources = invalidRoot.appendingPathComponent("sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: invalidVault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: invalidSources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: invalidRoot) }
+        let invalidFile = invalidSources.appendingPathComponent("IMG_9999.jpeg")
+        try Self.jpegData.write(to: invalidFile)
+        let invalid = try runCLI(args: [
+            "capture", "add", "--kind", "journal", "--date", "2026-07-15", "--time", "12:00",
+            "--idempotency-key", "invalid-base", "--media-title-base", "   ", "--stdin", "--json",
+            "--media", invalidFile.path, "--media-id", "invalid-photo", "--media-kind", "photo",
+        ], vault: invalidVault, stdin: "Invalid base should not mutate.")
+        #expect(invalid.status != 0)
+        let invalidDB = CiderDatabase()
+        try invalidDB.open(at: invalidVault.appendingPathComponent(".cider/cider.db"))
+        defer { invalidDB.close() }
+        #expect(try count("items", database: invalidDB) == 0)
+        #expect(try count("capture_events", database: invalidDB) == 0)
+    }
+
     @Test("changed JPEG bytes conflict across disposable CLI process reopen without mutation")
     func changedMediaContentConflictsAcrossProcessReopen() throws {
         let root = FileManager.default.temporaryDirectory
@@ -209,6 +285,130 @@ struct JournalAtomicCaptureCLITests {
         #expect(try count("capture_events", database: database) == 0)
         #expect(try count("capture_attachments", database: database) == 0)
         #expect(FileManager.default.fileExists(atPath: audio.path))
+    }
+
+    @Test("vaultFile title update CLI is optimistic, durable, privacy-safe, and verifiable")
+    func vaultFileTitleUpdateCLIContract() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-vaultfile-retitle-cli-\(UUID().uuidString)", isDirectory: true)
+        let vault = root.appendingPathComponent("vault", isDirectory: true)
+        let sources = root.appendingPathComponent("sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = sources.appendingPathComponent("IMG_8741.jpeg")
+        try Self.jpegData.write(to: source)
+        let capture = try runCLI(args: [
+            "capture", "add", "--kind", "journal", "--date", "2026-07-15", "--time", "13:00",
+            "--idempotency-key", "cli-retitle-capture-1", "--media-title-base", "Reflection Lake", "--stdin", "--json",
+            "--media", source.path, "--media-id", "cli-retitle-photo-1", "--media-kind", "photo",
+        ], vault: vault, stdin: "Reflection Lake source-backed text.")
+        #expect(capture.status == 0, "stderr: \(capture.stderr) stdout: \(capture.stdout)")
+        let capturePayload = try parseJSONObject(capture.stdout)
+        let journalID = try #require((capturePayload["item"] as? [String: Any])?["id"] as? String)
+        let mediaSources = try #require((capturePayload["receipt"] as? [String: Any])?["mediaSources"] as? [[String: Any]])
+        let mediaItem = try #require(mediaSources[0]["mediaItem"] as? [String: Any])
+        let fileID = try #require(mediaItem["id"] as? String)
+
+        let help = try runCLI(args: ["item", "update", "--help"], vault: vault)
+        #expect(help.status == 0)
+        #expect(help.stdout.contains("--expected-title"))
+        #expect(help.stdout.contains("metadata-only"))
+
+        let updateArgs = [
+            "item", "update", "vaultFile", fileID,
+            "--expected-title", "Reflection Lake — Photo 1",
+            "--title", "Narada Falls",
+            "--reason", "Repair filename-like Journal media title.",
+            "--actor", "cid759-cli-test",
+            "--source", "test.cid759.cli",
+            "--json",
+        ]
+        let updated = try runCLI(args: updateArgs, vault: vault)
+        #expect(updated.status == 0, "stderr: \(updated.stderr) stdout: \(updated.stdout)")
+        let payload = parseJSONObjectCandidate(String(updated.stdout[updated.stdout.firstIndex(of: "{")!...]), expectedCommand: "item.update")!
+        #expect(payload["changed"] as? Bool == true)
+        #expect(payload["wasReused"] as? Bool == false)
+        #expect((payload["after"] as? [String: Any])?["title"] as? String == "Narada Falls")
+        let receipt = try #require(payload["receipt"] as? [String: Any])
+        let receiptID = try #require(receipt["id"] as? String)
+        let verificationCommand = try #require(payload["verificationCommand"] as? String)
+        #expect(!updated.stdout.contains(source.path))
+        #expect(!updated.stdout.localizedCaseInsensitiveContains("sha256"))
+        #expect(!updated.stdout.contains("IMG_8741.jpeg"))
+
+        let verificationArgs = verificationCommand.split(separator: " ").dropFirst().map(String.init)
+        let verified = try runCLI(args: verificationArgs, vault: vault)
+        #expect(verified.status == 0, "stderr: \(verified.stderr) stdout: \(verified.stdout)")
+        #expect(verified.stdout.contains("Narada Falls"))
+
+        let repeated = try runCLI(args: updateArgs, vault: vault)
+        #expect(repeated.status == 0)
+        let repeatedPayload = try #require(parseJSONObjectCandidate(
+            String(repeated.stdout[repeated.stdout.firstIndex(of: "{")!...]), expectedCommand: "item.update"
+        ))
+        #expect(repeatedPayload["changed"] as? Bool == true)
+        #expect(repeatedPayload["wasReused"] as? Bool == true)
+        #expect((repeatedPayload["receipt"] as? [String: Any])?["id"] as? String == receiptID)
+
+        let ledger = try runCLI(args: ["item", "action-ledger", "inspect", receiptID, "--json"], vault: vault)
+        #expect(ledger.status == 0)
+        #expect(ledger.stdout.contains("update_vault_file_display_title"))
+
+        let rebuild = try runCLI(args: ["item", "rebuild-chunks", "vaultFile", fileID, "--json"], vault: vault)
+        #expect(rebuild.status == 0, "stderr: \(rebuild.stderr) stdout: \(rebuild.stdout)")
+        let search = try runCLI(args: ["item", "search", "Narada Falls", "--scope", "files", "--json"], vault: vault)
+        #expect(search.status == 0)
+        #expect(search.stdout.contains(fileID))
+
+        let beforeFailure = try databaseFingerprint(at: vault.appendingPathComponent(".cider/cider.db"))
+        let stale = try runCLI(args: [
+            "item", "update", "vaultFile", fileID,
+            "--expected-title", "Reflection Lake — Photo 1", "--title", "Narada Falls view",
+            "--reason", "Stale attempt.", "--actor", "cid759-cli-test", "--source", "test.cid759.cli", "--json",
+        ], vault: vault)
+        #expect(stale.status != 0)
+        #expect((try parseAnyJSONObject(stale.stdout))["errorCode"] as? String == "staleExpectedTitle")
+
+        let invalid = try runCLI(args: [
+            "item", "update", "vaultFile", fileID,
+            "--expected-title", "Narada Falls", "--title", "   ",
+            "--reason", "Invalid attempt.", "--actor", "cid759-cli-test", "--source", "test.cid759.cli", "--json",
+        ], vault: vault)
+        #expect(invalid.status != 0)
+        #expect((try parseAnyJSONObject(invalid.stdout))["errorCode"] as? String == "invalidInput")
+
+        let wrongType = try runCLI(args: [
+            "item", "update", "vaultFile", journalID,
+            "--expected-title", "Journal 07-15-2026", "--title", "Wrong type",
+            "--reason", "Wrong type attempt.", "--actor", "cid759-cli-test", "--source", "test.cid759.cli", "--json",
+        ], vault: vault)
+        #expect(wrongType.status != 0)
+
+        let missing = try runCLI(args: [
+            "item", "update", "vaultFile", UUID().uuidString,
+            "--expected-title", "Missing", "--title", "Still missing",
+            "--reason", "Missing attempt.", "--actor", "cid759-cli-test", "--source", "test.cid759.cli", "--json",
+        ], vault: vault)
+        #expect(missing.status != 0)
+        #expect(try databaseFingerprint(at: vault.appendingPathComponent(".cider/cider.db")) == beforeFailure)
+
+        let second = sources.appendingPathComponent("IMG_8742.jpeg")
+        try Self.jpegData.write(to: second)
+        let duplicate = try runCLI(args: [
+            "capture", "add", "--kind", "journal", "--date", "2026-07-15", "--time", "13:01",
+            "--idempotency-key", "cli-retitle-capture-2", "--stdin", "--json",
+            "--media", second.path, "--media-title", "Narada Falls", "--media-id", "cli-retitle-photo-2", "--media-kind", "photo",
+        ], vault: vault, stdin: "A second canonical file may share a display title.")
+        #expect(duplicate.status == 0)
+        let ambiguous = try runCLI(args: [
+            "item", "update", "vaultFile", "Narada Falls",
+            "--expected-title", "Narada Falls", "--title", "Ambiguous target",
+            "--reason", "Must resolve uniquely.", "--actor", "cid759-cli-test", "--source", "test.cid759.cli", "--json",
+        ], vault: vault)
+        #expect(ambiguous.status != 0)
+        #expect((try parseAnyJSONObject(ambiguous.stdout))["errorCode"] as? String == "targetAmbiguous")
     }
 
     private func runCLI(

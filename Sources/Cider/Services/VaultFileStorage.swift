@@ -256,6 +256,15 @@ final class VaultFileStorage: ObservableObject {
         metadata[fileID]
     }
 
+    /// Publishes a title already committed by the canonical item mutation
+    /// transaction. This updates only the in-memory overlay; it intentionally
+    /// performs no persistence of its own.
+    func publishCommittedDisplayTitle(fileID: UUID, title: String) {
+        ensureEntry(fileID)
+        metadata[fileID]?.title = title
+        metadata[fileID]?.titleManuallySet = true
+    }
+
     /// Restores metadata from a trashed VaultFile (re-registers after restore from trash).
     func restoreMetadata(from file: VaultFile) {
         var meta = VaultFileMetadata()

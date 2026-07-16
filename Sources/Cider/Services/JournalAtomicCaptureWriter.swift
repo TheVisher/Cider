@@ -37,6 +37,7 @@ struct JournalAtomicCaptureRequest: Equatable {
     let idempotencyKey: String
     let sourceContext: CaptureSourceContext?
     let media: [JournalAtomicMediaSource]
+    let mediaTitleBase: String?
     let captureMetadata: [String: String]
 
     init(
@@ -48,6 +49,7 @@ struct JournalAtomicCaptureRequest: Equatable {
         idempotencyKey: String,
         sourceContext: CaptureSourceContext?,
         media: [JournalAtomicMediaSource],
+        mediaTitleBase: String? = nil,
         captureMetadata: [String: String] = [:]
     ) {
         self.journalDate = journalDate
@@ -58,6 +60,7 @@ struct JournalAtomicCaptureRequest: Equatable {
         self.idempotencyKey = idempotencyKey
         self.sourceContext = sourceContext
         self.media = media
+        self.mediaTitleBase = mediaTitleBase
         self.captureMetadata = captureMetadata
     }
 }
@@ -166,13 +169,14 @@ final class JournalAtomicCaptureWriter {
             )
         }
 
-        let mediaRequests = request.media.map {
+        let resolvedMediaTitles = try Self.resolvedMediaTitles(for: request)
+        let mediaRequests = zip(request.media, resolvedMediaTitles).map { media, resolvedTitle in
             JournalMediaIntakeRequest(
-                sourceURL: $0.sourceURL,
-                sourceID: $0.sourceID,
-                kind: $0.kind,
+                sourceURL: media.sourceURL,
+                sourceID: media.sourceID,
+                kind: media.kind,
                 capturedAt: request.capturedAt,
-                displayName: Self.friendlyTitle($0.displayTitle, rawFilename: $0.sourceURL.lastPathComponent)
+                displayName: resolvedTitle
             )
         }
         let validatedMedia: JournalValidatedMediaBatch
@@ -192,7 +196,11 @@ final class JournalAtomicCaptureWriter {
                 reason: "Journal media changed after source validation; nothing was committed."
             )
         }
-        let requestDigest = Self.requestDigest(request, mediaContentHashes: validatedMedia.contentHashes)
+        let requestDigest = Self.requestDigest(
+            request,
+            resolvedMediaTitles: resolvedMediaTitles,
+            mediaContentHashes: validatedMedia.contentHashes
+        )
         let eventID = Self.stableUUID(seed: "journal-capture|\(request.idempotencyKey)")
         if let existing = try loadReceipt(eventID: eventID, requestDigest: requestDigest) {
             return existing
@@ -219,7 +227,8 @@ final class JournalAtomicCaptureWriter {
                     requestDigest: requestDigest,
                     eventID: eventID,
                     note: prepared.note,
-                    originals: originals
+                    originals: originals,
+                    resolvedMediaTitles: resolvedMediaTitles
                 )
                 try self.hooks.atStage(.afterSourceCards)
                 try self.hooks.atStage(.beforeSearchProjection)
@@ -302,6 +311,21 @@ final class JournalAtomicCaptureWriter {
                 reason: "Journal date, time, text, idempotency key, and media source identities must be valid and distinct."
             )
         }
+        do {
+            if let base = request.mediaTitleBase {
+                _ = try CiderDisplayTitlePolicy.normalizedTitleBase(base)
+            }
+            for media in request.media {
+                if let title = media.displayTitle {
+                    _ = try CiderDisplayTitlePolicy.normalizedTitle(title, field: "Media title")
+                }
+            }
+        } catch {
+            throw JournalAtomicCaptureError(
+                code: .validationFailed,
+                reason: error.localizedDescription
+            )
+        }
     }
 
     private func prepareNote(for request: JournalAtomicCaptureRequest) throws -> (note: Note, created: Bool) {
@@ -349,7 +373,8 @@ final class JournalAtomicCaptureWriter {
         requestDigest: String,
         eventID: UUID,
         note: Note,
-        originals: [JournalStoredOriginal]
+        originals: [JournalStoredOriginal],
+        resolvedMediaTitles: [String]
     ) throws -> JournalAtomicCaptureReceipt {
         let context = request.sourceContext
         var eventMetadata = context?.metadata ?? [:]
@@ -403,9 +428,8 @@ final class JournalAtomicCaptureWriter {
         ))
 
         var sourceRefs: [JournalAtomicCaptureReceipt.SourceRef] = []
-        for (index, pair) in zip(originals.indices, zip(originals, request.media)) {
-            let (original, media) = pair
-            let displayTitle = Self.friendlyTitle(media.displayTitle, rawFilename: media.sourceURL.lastPathComponent)
+        for (index, pair) in zip(originals.indices, zip(zip(originals, request.media), resolvedMediaTitles)) {
+            let ((original, media), displayTitle) = pair
             var metadata = media.transcription?.storageMetadata() ?? [:]
             let sourceMetadata: [String: String] = [
                 "journal_note_id": note.id.uuidString,
@@ -525,7 +549,8 @@ final class JournalAtomicCaptureWriter {
             capturedAt: DatabaseHelpers.decodeDate(event.double(at: 2)),
             idempotencyKey: eventID.uuidString,
             sourceContext: nil,
-            media: []
+            media: [],
+            mediaTitleBase: nil
         )
         return Self.receipt(eventID: eventID, request: request, note: note, mediaSources: attachments, wasReused: true)
     }
@@ -739,11 +764,14 @@ final class JournalAtomicCaptureWriter {
 
     private static func requestDigest(
         _ request: JournalAtomicCaptureRequest,
+        resolvedMediaTitles: [String],
         mediaContentHashes: [String]
     ) -> String {
         precondition(request.media.count == mediaContentHashes.count)
-        let media = zip(request.media, mediaContentHashes).map { source, contentHash in
-            let base = "\(source.sourceID)|\(source.kind.rawValue)|\(source.displayTitle ?? "")|\(source.sourceURL.lastPathComponent)|\(contentHash)"
+        precondition(request.media.count == resolvedMediaTitles.count)
+        let media = zip(zip(request.media, resolvedMediaTitles), mediaContentHashes).map { pair, contentHash in
+            let (source, resolvedTitle) = pair
+            let base = "\(source.sourceID)|\(source.kind.rawValue)|\(resolvedTitle)|\(source.sourceURL.lastPathComponent)|\(contentHash)"
             let transcription = source.transcription?.storageMetadata()
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key)=\($0.value)" }
@@ -757,7 +785,10 @@ final class JournalAtomicCaptureWriter {
             .sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: "\u{1f}")
-        let base = "\(request.journalDate)|\(request.time)|\(request.text)|\(request.source)|\(source)|\(media)"
+        let normalizedTitleBase = request.mediaTitleBase.flatMap {
+            try? CiderDisplayTitlePolicy.normalizedTitleBase($0)
+        } ?? ""
+        let base = "\(request.journalDate)|\(request.time)|\(request.text)|\(request.source)|\(source)|\(normalizedTitleBase)|\(media)"
         return LocalFileIntakeValidator.sha256(Data(
             (captureMetadata.isEmpty ? base : "\(base)|\(captureMetadata)").utf8
         ))
@@ -777,6 +808,30 @@ final class JournalAtomicCaptureWriter {
             .replacingOccurrences(of: "-", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return stem.isEmpty ? "Journal media" : String(stem.prefix(160))
+    }
+
+    private static func resolvedMediaTitles(for request: JournalAtomicCaptureRequest) throws -> [String] {
+        let titleBase = try request.mediaTitleBase.map {
+            try CiderDisplayTitlePolicy.normalizedTitleBase($0)
+        }
+        var kindOrdinals: [JournalMediaKind: Int] = [:]
+        return try request.media.map { media in
+            let ordinal = (kindOrdinals[media.kind] ?? 0) + 1
+            kindOrdinals[media.kind] = ordinal
+            if let supplied = media.displayTitle {
+                return try CiderDisplayTitlePolicy.normalizedTitle(supplied, field: "Media title")
+            }
+            if let titleBase {
+                let kindLabel: String
+                switch media.kind {
+                case .photo: kindLabel = "Photo"
+                case .audio: kindLabel = "Audio"
+                case .media: kindLabel = "Media"
+                }
+                return "\(titleBase) — \(kindLabel) \(ordinal)"
+            }
+            return friendlyTitle(nil, rawFilename: media.sourceURL.lastPathComponent)
+        }
     }
 
     private static func isValidTime(_ value: String) -> Bool {

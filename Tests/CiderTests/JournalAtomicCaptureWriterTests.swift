@@ -45,6 +45,77 @@ struct JournalAtomicCaptureWriterTests {
         }
     }
 
+    @Test("friendly title base numbers photos and explicit media title wins")
+    func friendlyTitleBaseNumbersPhotosWithOverride() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let media = try fixture.reflectionLakeMedia().enumerated().map { index, source in
+            JournalAtomicMediaSource(
+                sourceURL: source.sourceURL,
+                sourceID: source.sourceID,
+                kind: source.kind,
+                displayTitle: index == 1 ? "Reflection Lake favorite" : nil,
+                mimeType: source.mimeType
+            )
+        }
+
+        let receipt = try fixture.writer().capture(
+            fixture.request(media: media, mediaTitleBase: "Reflection Lake")
+        )
+
+        #expect(receipt.mediaSources.map(\.displayTitle) == [
+            "Reflection Lake — Photo 1",
+            "Reflection Lake favorite",
+            "Reflection Lake — Photo 3",
+        ])
+        #expect(receipt.mediaSources.map(\.rawFilename) == ["IMG_8741.jpeg", "IMG_8742.jpeg", "IMG_8743.jpeg"])
+        #expect(try fixture.itemTitles(type: "vaultFile") == [
+            "Reflection Lake favorite",
+            "Reflection Lake — Photo 1",
+            "Reflection Lake — Photo 3",
+        ])
+    }
+
+    @Test("invalid title bases fail before mutation and changed base conflicts without mutation")
+    func invalidAndChangedTitleBaseFailClosed() throws {
+        for invalid in ["   ", "Reflection\u{0007}Lake", String(repeating: "x", count: 121)] {
+            let fixture = try Fixture()
+            defer { fixture.cleanup() }
+            let before = try fixture.fingerprint()
+            #expect(throws: JournalAtomicCaptureError.self) {
+                try fixture.writer().capture(
+                    fixture.request(media: try fixture.reflectionLakeMedia(), mediaTitleBase: invalid)
+                )
+            }
+            #expect(try fixture.fingerprint() == before)
+        }
+
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let media = try fixture.reflectionLakeMedia().map {
+            JournalAtomicMediaSource(
+                sourceURL: $0.sourceURL,
+                sourceID: $0.sourceID,
+                kind: $0.kind,
+                mimeType: $0.mimeType
+            )
+        }
+        let firstRequest = fixture.request(media: media, mediaTitleBase: "Reflection Lake")
+        let first = try fixture.writer().capture(firstRequest)
+        let retry = try fixture.writer().capture(firstRequest)
+        #expect(retry.receiptID == first.receiptID)
+        #expect(retry.wasReused)
+        let beforeConflict = try fixture.fingerprint()
+
+        do {
+            _ = try fixture.writer().capture(fixture.request(media: media, mediaTitleBase: "Narada Falls"))
+            Issue.record("Expected title-base retry conflict")
+        } catch let error as JournalAtomicCaptureError {
+            #expect(error.code == .idempotencyConflict)
+        }
+        #expect(try fixture.fingerprint() == beforeConflict)
+    }
+
     @Test("exact retry and database reopen reuse one durable receipt without duplicates")
     func retryAndReopenReuseReceipt() throws {
         let fixture = try Fixture()
@@ -329,7 +400,10 @@ private extension JournalAtomicCaptureWriterTests {
             )
         }
 
-        func request(media: [JournalAtomicMediaSource]) -> JournalAtomicCaptureRequest {
+        func request(
+            media: [JournalAtomicMediaSource],
+            mediaTitleBase: String? = nil
+        ) -> JournalAtomicCaptureRequest {
             JournalAtomicCaptureRequest(
                 journalDate: "2026-07-15",
                 time: "11:42",
@@ -345,7 +419,8 @@ private extension JournalAtomicCaptureWriterTests {
                     senderID: "visher",
                     originalText: "Reflection Lake was glassy this morning. The trail was quiet and the shoreline still had snow."
                 ),
-                media: media
+                media: media,
+                mediaTitleBase: mediaTitleBase
             )
         }
 
@@ -369,6 +444,14 @@ private extension JournalAtomicCaptureWriterTests {
             let statement = try database.prepare(sql)
             try statement.step()
             return statement.int(at: 0)
+        }
+
+        func itemTitles(type: String) throws -> [String] {
+            let statement = try database.prepare("SELECT title FROM items WHERE type = ? ORDER BY title COLLATE NOCASE ASC;")
+            statement.bind(type, at: 1)
+            var titles: [String] = []
+            while try statement.step() { titles.append(statement.string(at: 0)) }
+            return titles
         }
 
         func fingerprint(database: CiderDatabase? = nil) throws -> String {
