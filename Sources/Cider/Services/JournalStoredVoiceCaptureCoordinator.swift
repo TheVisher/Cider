@@ -1,12 +1,17 @@
 import Foundation
 
+@MainActor
+protocol JournalStoredVoiceCapturing: AnyObject {
+    func capture(_ request: JournalStoredVoiceCaptureRequest) async throws -> JournalStoredVoiceCaptureReceipt
+}
+
 /// Neutral stored-voice intake for Journal. The coordinator validates and
 /// transcribes a caller-accessible local audio file without canonical mutation,
 /// then delegates the only write to JournalAtomicCaptureWriter. A failed
 /// transcription therefore cannot create a source card, day entry, event,
 /// candidate source, or receipt that claims success.
 @MainActor
-final class JournalStoredVoiceCaptureCoordinator {
+final class JournalStoredVoiceCaptureCoordinator: JournalStoredVoiceCapturing {
     typealias ProviderResolver = @MainActor (
         CiderStoredAudioTranscriptionProviderRequest
     ) -> Result<CiderResolvedTranscriptionProvider, TranscriptionFailure>
@@ -50,6 +55,7 @@ final class JournalStoredVoiceCaptureCoordinator {
     }
 
     func capture(_ request: JournalStoredVoiceCaptureRequest) async throws -> JournalStoredVoiceCaptureReceipt {
+        try Task.checkCancellation()
         try validate(request)
         let mediaRequest = JournalMediaIntakeRequest(
             sourceURL: request.audioURL,
@@ -90,6 +96,8 @@ final class JournalStoredVoiceCaptureCoordinator {
                 throw JournalStoredVoiceCaptureError(.indeterminate)
             }
         }
+
+        try Task.checkCancellation()
 
         let resolution: CiderResolvedTranscriptionProvider
         switch providerResolver(request.provider) {
@@ -134,6 +142,7 @@ final class JournalStoredVoiceCaptureCoordinator {
         }
 
         let result = await mediaIntake.transcribeValidatedAudio(validated, using: service)
+        try Task.checkCancellation()
         let transcript: TranscriptionTranscript
         switch result {
         case .success(let value):
@@ -188,6 +197,11 @@ final class JournalStoredVoiceCaptureCoordinator {
             ],
             captureMetadata: captureMetadata
         )
+
+        // The atomic writer is synchronous on the main actor. Cancellation is
+        // honored up to this boundary; once the transaction begins it produces
+        // one durable receipt or rolls back as a unit.
+        try Task.checkCancellation()
 
         let atomicReceipt: JournalAtomicCaptureReceipt
         do {

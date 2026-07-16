@@ -34,6 +34,7 @@ Choose the narrowest meaningful verification:
 - Main Brain identity, send, busy, slash command, and repair paths
 - floating/detail pop-out surfaces, focus return, resizing, and pointer interactions
 - screen capture and drag/drop routing when touched
+- Journal voice Record/stop/cancel, provider permission timing, atomic day transcript plus native audio source-card playback, and temporary-file cleanup when touched
 
 ## Hang and Crash Capture
 
@@ -150,6 +151,10 @@ When note/editor code changes:
 - close and reopen
 - verify external modification protection if relevant
 - verify find/search still works
+
+## Journal Voice Smoke
+
+Use synthetic/disposable audio and a disposable database/vault for automated coverage. Never request microphone or Speech permission in tests. Verify idle does not prompt; explicit Record requests only the permissions required by the selected provider; stop yields one final normalized transcript, one canonical receipt, and one native audio source card on the selected day; exact retry reuses that receipt; changed bytes fail closed; and cancel, provider failure, atomic-writer failure, view loss, or app background yields no new Journal mutation and no working file. The remaining user-level gate is a signed-app visual check plus one explicit real-microphone Record/stop/save and one cancel, followed by native source-card playback.
 
 ## Reminder Smoke
 

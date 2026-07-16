@@ -259,6 +259,7 @@ extension CiderPanelView {
                 projection: projection,
                 notesViewModel: notesViewModel,
                 selectedEntryID: $selectedJournalEntryID,
+                voiceCaptureSession: journalVoiceCaptureSession,
                 resolveCanonicalItem: resolveLinkedRef,
                 onOpenCanonicalItem: openLinkedRef
             )

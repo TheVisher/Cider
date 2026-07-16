@@ -1,3 +1,4 @@
+import AppKit
 import ImageIO
 import SwiftUI
 
@@ -64,6 +65,7 @@ struct JournalDetailContentView: View {
     let projection: JournalLibraryReadModel
     @ObservedObject var notesViewModel: NotesViewModel
     @Binding var selectedEntryID: String?
+    @ObservedObject var voiceCaptureSession: JournalVoiceCaptureSessionController
     let resolveCanonicalItem: (LibraryEntityType, String) -> LibraryEntityRef?
     let onOpenCanonicalItem: (LibraryEntityRef) -> Void
     @State private var isEditingSource = false
@@ -83,15 +85,27 @@ struct JournalDetailContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let selectedDay {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text(selectedDay.displayTitle)
-                        .font(CiderFont.subheadingSemibold)
-                        .foregroundColor(CiderColors.primary)
-                        .lineLimit(2)
+                HStack(alignment: .center, spacing: Spacing.md) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text(selectedDay.displayTitle)
+                            .font(CiderFont.subheadingSemibold)
+                            .foregroundColor(CiderColors.primary)
+                            .lineLimit(2)
 
-                    Text(selectedDay.isAggregate ? "\(selectedDay.sourceEntries.count) preserved source notes" : selectedDay.displayTitle)
-                        .font(CiderFont.captionMedium)
-                        .foregroundColor(CiderColors.tertiary)
+                        Text(selectedDay.isAggregate ? "\(selectedDay.sourceEntries.count) preserved source notes" : selectedDay.displayTitle)
+                            .font(CiderFont.captionMedium)
+                            .foregroundColor(CiderColors.tertiary)
+                    }
+
+                    Spacer(minLength: Spacing.sm)
+
+                    if let journalDate = selectedDay.sourceEntries.first?.dateLabel {
+                        JournalVoiceCaptureControl(
+                            session: voiceCaptureSession,
+                            journalDate: journalDate,
+                            dayTitle: selectedDay.displayTitle
+                        )
+                    }
                 }
                 .padding(Spacing.md)
 
@@ -133,6 +147,7 @@ struct JournalDetailContentView: View {
             selectJournalNoteIfNeeded()
         }
         .onChange(of: selectedEntryID) { _, _ in
+            voiceCaptureSession.cancel()
             isEditingSource = false
             isIntelligenceExpanded = false
             selectJournalNoteIfNeeded()
@@ -140,6 +155,15 @@ struct JournalDetailContentView: View {
         .onChange(of: projection.days) { _, _ in selectJournalNoteIfNeeded() }
         .task(id: intelligenceLoadID) {
             await loadJournalIntelligence()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            voiceCaptureSession.cancel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            voiceCaptureSession.cancel()
+        }
+        .onDisappear {
+            voiceCaptureSession.cancel()
         }
     }
 
@@ -184,6 +208,100 @@ struct JournalDetailContentView: View {
         } else {
             notesViewModel.setRichDisplayContentOverride(displayContent)
         }
+    }
+}
+
+struct JournalVoiceCaptureControl: View {
+    @ObservedObject var session: JournalVoiceCaptureSessionController
+    let journalDate: String
+    let dayTitle: String
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            switch session.state {
+            case .idle:
+                recordButton(accessibilityLabel: "Record a voice note for \(dayTitle)")
+            case .requestingPermission:
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Requesting Journal voice permissions")
+                cancelButton(label: "Cancel Journal voice permission request")
+            case .recording(let elapsed):
+                Text(Self.elapsed(elapsed))
+                    .font(CiderFont.microMedium.monospacedDigit())
+                    .foregroundColor(CiderColors.secondary)
+                    .accessibilityLabel("Recording elapsed \(Self.elapsed(elapsed))")
+                Button {
+                    Task { await session.stopRecording() }
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Stop and save Journal voice note")
+                .help("Stop, transcribe, and save")
+                cancelButton(label: "Cancel Journal voice note")
+            case .processing:
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Transcribing and saving Journal voice note")
+                Text("Transcribing and saving")
+                    .font(CiderFont.microMedium)
+                    .foregroundColor(CiderColors.secondary)
+                cancelButton(label: "Cancel Journal voice transcription")
+            case .succeeded(let receipt):
+                statusLabel(
+                    symbol: "checkmark.circle.fill",
+                    text: receipt.wasReused ? "Voice note already saved" : "Voice note saved",
+                    color: CiderColors.controlAccent
+                )
+                .help("Saved to Journal \(receipt.journalDate) at \(receipt.time). Receipt \(receipt.receiptID).")
+                recordButton(accessibilityLabel: "Record another voice note for \(dayTitle)")
+            case .cancelled:
+                statusLabel(symbol: "xmark.circle", text: "Cancelled", color: CiderColors.tertiary)
+                recordButton(accessibilityLabel: "Record a voice note for \(dayTitle)")
+            case .failed(let failure):
+                statusLabel(symbol: "exclamationmark.circle", text: failure.title, color: CiderColors.destructive)
+                    .help(failure.detail)
+                recordButton(accessibilityLabel: "Retry recording a voice note for \(dayTitle)")
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func recordButton(accessibilityLabel: String) -> some View {
+        Button {
+            if session.state != .idle { session.reset() }
+            Task { await session.startRecording(journalDate: journalDate) }
+        } label: {
+            Image(systemName: "mic")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(accessibilityLabel)
+        .help("Record Journal voice note")
+    }
+
+    private func cancelButton(label: String) -> some View {
+        Button {
+            session.cancel()
+        } label: {
+            Image(systemName: "xmark.circle")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel(label)
+        .help("Cancel and remove the temporary recording")
+    }
+
+    private func statusLabel(symbol: String, text: String, color: Color) -> some View {
+        Label(text, systemImage: symbol)
+            .font(CiderFont.microMedium)
+            .foregroundColor(color)
+            .lineLimit(1)
+            .accessibilityLabel(text)
+    }
+
+    private static func elapsed(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded(.down)))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 

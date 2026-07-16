@@ -20,6 +20,7 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
     private let recognizer: SFSpeechRecognizer?
     private let locale: TranscriptionLocaleMetadata
     private let audioEngine = AVAudioEngine()
+    private let microphoneAuthorization: any CiderMicrophoneAuthorizationServicing
     private let now: @MainActor () -> Date
 
     private var liveRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -32,9 +33,14 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
     private var storedAudioContinuation: CheckedContinuation<TranscriptionResult, Never>?
     private var storedAudioProvenance: TranscriptionProvenance?
 
-    init(locale: Locale = .current, now: @escaping @MainActor () -> Date = Date.init) {
+    init(
+        locale: Locale = .current,
+        microphoneAuthorization: any CiderMicrophoneAuthorizationServicing = SystemCiderMicrophoneAuthorizationService(),
+        now: @escaping @MainActor () -> Date = Date.init
+    ) {
         recognizer = SFSpeechRecognizer(locale: locale)
         self.locale = TranscriptionLocaleMetadata(identifier: locale.identifier)
+        self.microphoneAuthorization = microphoneAuthorization
         self.now = now
     }
 
@@ -42,7 +48,7 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
         let speech = Self.map(SFSpeechRecognizer.authorizationStatus())
         guard input == .liveMicrophone else { return speech }
 
-        let microphone = Self.map(AVCaptureDevice.authorizationStatus(for: .audio))
+        let microphone = microphoneAuthorization.authorization()
         if speech == .denied || microphone == .denied { return .denied }
         if speech == .restricted || microphone == .restricted { return .restricted }
         if speech == .notDetermined || microphone == .notDetermined { return .notDetermined }
@@ -78,12 +84,8 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
         else {
             return authorization(for: input)
         }
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-            _ = await withCheckedContinuation { continuation in
-                AVCaptureDevice.requestAccess(for: .audio) { allowed in
-                    continuation.resume(returning: allowed)
-                }
-            }
+        if microphoneAuthorization.authorization() == .notDetermined {
+            _ = await microphoneAuthorization.requestAuthorization()
         }
         return authorization(for: input)
     }
@@ -429,13 +431,4 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
         }
     }
 
-    private static func map(_ status: AVAuthorizationStatus) -> TranscriptionAuthorization {
-        switch status {
-        case .notDetermined: .notDetermined
-        case .denied: .denied
-        case .restricted: .restricted
-        case .authorized: .authorized
-        @unknown default: .restricted
-        }
-    }
 }

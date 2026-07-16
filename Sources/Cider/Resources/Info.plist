@@ -17,9 +17,9 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Cider uses the microphone only when you start dictation into an editable room draft.</string>
+    <string>Cider uses the microphone only when you explicitly start Chat dictation or a Journal voice note.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Cider uses on-device speech recognition to add editable text to the selected room draft.</string>
+    <string>Cider uses on-device speech recognition only after you start Chat dictation or a Journal voice note.</string>
     <key>SUFeedURL</key>
     <string>https://thevisher.github.io/Cider/appcast.xml</string>
     <key>SUPublicEDKey</key>
