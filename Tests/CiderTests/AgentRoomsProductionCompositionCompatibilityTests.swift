@@ -5,6 +5,131 @@ import XCTest
 
 final class AgentRoomsProductionCompositionCompatibilityTests: XCTestCase {
     @MainActor
+    func testCurrentAssignedHermesCompositionAcceptsCombinedInputsAndContinuesAfterPhysicalReopen() async throws {
+        let fixture = try CompatibilityFixture()
+        defer { fixture.cleanup() }
+        let first = try fixture.makeProductionComposition()
+        let room = try AgentRoomsActionService(
+            repository: first.repository,
+            agentAssignments: first.assignments
+        ).createConversation(title: "Disposable production composition")
+        first.session.selectRoom(id: room.id.uuidString, persistIfCanonical: true)
+        await first.session.liveChat.refreshTransportReadiness()
+
+        XCTAssertEqual(try first.assignments.assignment(roomID: room.id)?.profile.id, "hermes")
+        let hermesParticipantID = try XCTUnwrap(
+            try first.participants.roster(roomID: room.id)?.actingAgent?.id
+        )
+
+        first.session.composerText = "Typed seed  with spacing"
+        await first.session.startTranscription()
+        first.session.cancelTranscription()
+        XCTAssertEqual(first.session.composerText, "Typed seed  with spacing")
+        XCTAssertEqual(first.session.speechPresentation.state, .cancelled)
+
+        await first.session.startTranscription()
+        first.transcription.emitFinal("dictated words")
+        first.session.composerText += " edited"
+        XCTAssertEqual(first.session.composerText, "Typed seed  with spacing dictated words edited")
+        let sendCountBeforeSubmission = await first.transport.currentSendCount()
+        XCTAssertEqual(sendCountBeforeSubmission, 0)
+
+        first.session.liveChat.stageAttachments(
+            from: [try fixture.writeTextAttachment()],
+            source: .filePicker
+        )
+        XCTAssertEqual(first.session.liveChat.stagedAttachments.count, 1)
+        XCTAssertEqual(try first.repository.turns(roomID: room.id), [])
+
+        XCTAssertEqual(
+            first.session.liveChat.startSubmission(
+                first.session.composerText,
+                selectedRoomID: room.id.uuidString,
+                invokedParticipantIDs: [hermesParticipantID]
+            ),
+            .accepted
+        )
+        await waitForTerminal(first.session.liveChat)
+
+        XCTAssertEqual(first.session.liveChat.turnState, .completed)
+        XCTAssertEqual(first.session.liveChat.activeRoom?.transcript.messages.map(\.body), [
+            "Typed seed  with spacing dictated words edited",
+            "Production composition reply 1",
+        ])
+        XCTAssertEqual(
+            first.session.liveChat.activeRoom?.transcript.receipt?.activity.map(\.kind),
+            [.reasoning, .toolStarted, .toolCompleted]
+        )
+        XCTAssertEqual(first.session.liveChat.activeRoom?.transcript.receipt?.status, .completed)
+        XCTAssertTrue(
+            first.session.liveChat.activeRoom?.transcript.receipt?.runIdentity?
+                .hasPrefix("compatibility-") == true
+        )
+        let sendCountAfterSubmission = await first.transport.currentSendCount()
+        let attachmentCountAfterSubmission = await first.transport.lastAttachmentCount()
+        XCTAssertEqual(sendCountAfterSubmission, 1)
+        XCTAssertEqual(attachmentCountAfterSubmission, 1)
+        let firstTurn = try XCTUnwrap(try first.repository.turns(roomID: room.id).first)
+        XCTAssertEqual(
+            try first.participants.turnAttribution(firstTurn)?.participantID,
+            hermesParticipantID
+        )
+        XCTAssertEqual(firstTurn.status, .completed)
+
+        try fixture.reopen()
+        let reopened = try fixture.makeProductionComposition()
+        reopened.session.selectRoom(id: room.id.uuidString, persistIfCanonical: true)
+        await reopened.session.liveChat.refreshTransportReadiness()
+
+        XCTAssertEqual(reopened.session.liveChat.activeRoom?.id, room.id.uuidString)
+        XCTAssertEqual(reopened.session.liveChat.activeRoom?.transcript.messages.map(\.body), [
+            "Typed seed  with spacing dictated words edited",
+            "Production composition reply 1",
+        ])
+        XCTAssertEqual(reopened.session.liveChat.activeRoom?.transcript.receipt?.status, .completed)
+        XCTAssertEqual(reopened.session.liveChat.activeRoom?.transcript.receipt?.activity.count, 3)
+        let restored = try XCTUnwrap(
+            try AgentRoomsConversationPersistence(
+                database: fixture.database,
+                repository: reopened.repository
+            ).restoreCanonicalRoom(id: room.id)
+        )
+        XCTAssertEqual(restored.latestAttachments.count, 1)
+        XCTAssertEqual(restored.latestAttachments.first?.lifecycle, "accepted")
+        XCTAssertEqual(restored.latestAttachments.first?.sha256?.count, 64)
+        XCTAssertFalse(String(describing: restored.latestAttachments).contains(fixture.root.path))
+
+        let reopenedHermesID = try XCTUnwrap(
+            try reopened.participants.roster(roomID: room.id)?.actingAgent?.id
+        )
+        XCTAssertEqual(
+            reopened.session.liveChat.startSubmission(
+                "Continue after physical reopen",
+                selectedRoomID: room.id.uuidString,
+                invokedParticipantIDs: [reopenedHermesID]
+            ),
+            .accepted
+        )
+        await waitForTerminal(reopened.session.liveChat)
+
+        XCTAssertEqual(reopened.session.liveChat.turnState, .completed)
+        XCTAssertEqual(try reopened.repository.turns(roomID: room.id).map(\.status), [
+            .completed, .completed,
+        ])
+        XCTAssertEqual(try reopened.repository.messages(roomID: room.id).map(\.contentText), [
+            "Typed seed  with spacing dictated words edited",
+            "Production composition reply 1",
+            "Continue after physical reopen",
+            "Production composition reply 1",
+        ])
+        let runtimeSessions = try reopened.repository.bindings(roomID: room.id)
+            .compactMap(\.externalSessionID)
+        XCTAssertEqual(runtimeSessions.count, 2)
+        XCTAssertEqual(Set(runtimeSessions).count, 2)
+        XCTAssertTrue(try fixture.database.integrityCheck().isHealthy)
+    }
+
+    @MainActor
     func testPreCheckpointTestChatReopensWithoutImplicitMetadataAndKeepsDistinctInputGates() async throws {
         let fixture = try CompatibilityFixture()
         defer { fixture.cleanup() }
@@ -119,6 +244,14 @@ final class AgentRoomsProductionCompositionCompatibilityTests: XCTestCase {
         XCTAssertEqual(AgentRoomsWorkspaceLayoutPolicy.mode(width: 520, usesAccessibilityText: false), .stacked)
         XCTAssertTrue(AgentRoomsTranscriptMotionPolicy.disablesScrollAnimations(reduceMotion: true))
         XCTAssertFalse(AgentRoomsTranscriptMotionPolicy.disablesScrollAnimations(reduceMotion: false))
+    }
+
+    @MainActor
+    private func waitForTerminal(_ model: AgentRoomsLiveChatModel) async {
+        for _ in 0..<200 where model.turnState != .completed && model.turnState != .failed {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     @MainActor
@@ -425,18 +558,93 @@ private final class CompatibilityTranscriptionService: CiderTranscriptionServici
 }
 
 private actor CompatibilityTransport: HermesBridgeTransport {
+    private let instanceID = UUID().uuidString.lowercased()
     private(set) var sendCount = 0
+    private(set) var attachmentCount = 0
+
     func availability() async -> HermesBridgeAvailability { .apiRuns }
     func attachmentCapability() async -> ConversationAttachmentTransportCapability { .supported }
+
     func send(
         text: String,
         state: HermesConversationState,
         existingMessages: [AIAssistantMessage],
         onEvent: (@Sendable (HermesRunEvent) async -> Void)?
     ) async throws -> HermesBridgeSendResult {
-        sendCount += 1
-        throw CancellationError()
+        try await send(
+            text: text,
+            state: state,
+            existingMessages: existingMessages,
+            attachments: [],
+            onEvent: onEvent
+        )
     }
+
+    func send(
+        text: String,
+        state: HermesConversationState,
+        existingMessages: [AIAssistantMessage],
+        attachments: [ConversationAttachmentTransportPayload],
+        onEvent: (@Sendable (HermesRunEvent) async -> Void)?
+    ) async throws -> HermesBridgeSendResult {
+        sendCount += 1
+        attachmentCount = attachments.count
+        let runID = "compatibility-\(instanceID)-run-\(sendCount)"
+        let sessionID = "compatibility-\(instanceID)-session-\(sendCount)"
+        let timestamp = Date(timeIntervalSince1970: 1_830_000_000 + Double(sendCount))
+        let userSourceID = "hermes-run:\(runID):user"
+        let assistantSourceID = "hermes-run:\(runID):assistant"
+        let reply = "Production composition reply \(sendCount)"
+        await onEvent?(.runStarted(runID))
+        await onEvent?(.messageDelta("Production composition "))
+        await onEvent?(.reasoningAvailable("Checking shared composition"))
+        await onEvent?(.toolStarted(name: "Safe intake", preview: "Reading accepted attachment"))
+        await onEvent?(.toolCompleted(name: "Safe intake", isError: false))
+
+        var finalState = state
+        finalState.activeRuntimeSessionID = sessionID
+        finalState.runtimeSessionLineage.append(sessionID)
+        finalState.lastSyncedAt = timestamp
+        finalState.lastSyncedMessageID = assistantSourceID
+        finalState.lastSyncedTimestamp = timestamp
+        finalState.lastImportedRuntimeSessionID = sessionID
+        return HermesBridgeSendResult(completion: .init(
+            provenance: .hermesRunsAPI,
+            runID: runID,
+            terminalStatus: .completed,
+            observedFacts: .none,
+            finalSessionSynchronizationComplete: true,
+            finalMessages: existingMessages + [
+                AIAssistantMessage(
+                    role: .user,
+                    content: text,
+                    timestamp: timestamp,
+                    sourceID: userSourceID,
+                    sourceSessionID: sessionID,
+                    sourceName: "Hermes"
+                ),
+                AIAssistantMessage(
+                    role: .assistant,
+                    content: reply,
+                    timestamp: timestamp,
+                    sourceID: assistantSourceID,
+                    sourceSessionID: sessionID,
+                    sourceName: "Hermes"
+                ),
+            ],
+            finalState: finalState,
+            modelIdentity: "compatibility-production-composition",
+            terminalSourceEvidence: .init(
+                reportedTerminalRunID: runID,
+                userSourceID: userSourceID,
+                assistantSourceID: assistantSourceID,
+                userSourceSessionID: sessionID,
+                assistantSourceSessionID: sessionID
+            )
+        ))
+    }
+
     func stop(runID: String) async throws {}
     func currentSendCount() -> Int { sendCount }
+    func lastAttachmentCount() -> Int { attachmentCount }
 }

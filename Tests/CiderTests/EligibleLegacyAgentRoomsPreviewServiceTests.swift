@@ -69,7 +69,10 @@ final class EligibleLegacyAgentRoomsPreviewServiceTests: XCTestCase {
         })
         for required in [
             "let repository = ConversationRepository(database: CiderDatabase.shared)",
-            "let canonical = AgentRoomsReadService(repository: repository)",
+            "let canonical = AgentRoomsReadService(",
+            "repository: repository",
+            "agentAssignments: assignments",
+            "participants: participants",
             "let paths = StoragePaths.legacyConversationPreviewDirectories()",
             "let parityReader = ConversationRepositoryParityReader(repository: repository)",
             "let eligible = LegacyConversationEligiblePreviewService(",
