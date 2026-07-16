@@ -193,7 +193,6 @@ final class LegacyConversationEligiblePreviewService {
     private let canonicalIsHonestlyEmpty: () throws -> Bool
     private let limits: Limits
     private let fileManager: FileManager
-    private let beforeRevalidation: () -> Void
     private let decoder: JSONDecoder
     private let mapper = LegacyConversationSnapshotMapper()
     private let sourceMapper = LegacyConversationSourceIdentityMapper()
@@ -204,8 +203,7 @@ final class LegacyConversationEligiblePreviewService {
         parityReader: any ConversationCoreParityReading,
         canonicalIsHonestlyEmpty: @escaping () throws -> Bool,
         limits: Limits = .init(),
-        fileManager: FileManager = .default,
-        beforeRevalidation: @escaping () -> Void = {}
+        fileManager: FileManager = .default
     ) {
         self.registryDirectory = registryDirectory
         self.conversationDirectory = conversationDirectory
@@ -213,7 +211,6 @@ final class LegacyConversationEligiblePreviewService {
         self.canonicalIsHonestlyEmpty = canonicalIsHonestlyEmpty
         self.limits = limits
         self.fileManager = fileManager
-        self.beforeRevalidation = beforeRevalidation
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
@@ -224,7 +221,6 @@ final class LegacyConversationEligiblePreviewService {
             guard try canonicalIsHonestlyEmpty() else { return .sanitized(.blocked) }
             let snapshot = try captureSnapshot()
             let result = try evaluate(snapshot)
-            beforeRevalidation()
             guard try snapshotIsUnchanged(snapshot) else { return .sanitized(.failed) }
             return result
         } catch SnapshotError.blocked {

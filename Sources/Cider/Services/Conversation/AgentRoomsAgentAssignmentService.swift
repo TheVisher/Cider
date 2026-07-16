@@ -12,6 +12,25 @@ protocol AgentRoomsAgentAssignmentReading: AnyObject {
     func assignment(roomID: UUID) throws -> ConversationRoomAgentAssignment?
     func sendEligibility(roomID: UUID) throws -> AgentRoomsAgentSendEligibility
     func presentation(roomID: UUID) throws -> AgentRoomActingAgent?
+    func observeAssignmentChanges(
+        roomID: UUID,
+        _ observer: @escaping @MainActor (ConversationRoomAgentAssignment) -> Void
+    ) -> AgentRoomsAgentAssignmentObservation
+}
+
+@MainActor
+struct AgentRoomsAgentAssignmentObservation {
+    let cancel: @MainActor () -> Void
+}
+
+extension AgentRoomsAgentAssignmentReading {
+    func observeAssignmentChanges(
+        roomID _: UUID,
+        _ observer: @escaping @MainActor (ConversationRoomAgentAssignment) -> Void
+    ) -> AgentRoomsAgentAssignmentObservation {
+        _ = observer
+        return AgentRoomsAgentAssignmentObservation(cancel: {})
+    }
 }
 
 @MainActor
@@ -27,6 +46,8 @@ final class AgentRoomsAgentAssignmentService: AgentRoomsAgentAssignmentActing {
     private let repository: ConversationRepository
     private let catalog: ConversationAgentProfileCatalog
     private let now: () -> Date
+    private var assignmentObservers:
+        [UUID: [UUID: @MainActor (ConversationRoomAgentAssignment) -> Void]] = [:]
 
     init(
         repository: ConversationRepository,
@@ -61,11 +82,32 @@ final class AgentRoomsAgentAssignmentService: AgentRoomsAgentAssignmentActing {
             )
         }
         let timestamp = now()
-        return try repository.setAgentAssignment(
+        let assignment = try repository.setAgentAssignment(
             roomID: room.id,
             assignment: .init(profile: profile, assignedAt: timestamp),
+            actor: .user,
             at: timestamp
         )
+        if let observers = assignmentObservers[room.id] {
+            for observer in observers.values {
+                observer(assignment)
+            }
+        }
+        return assignment
+    }
+
+    func observeAssignmentChanges(
+        roomID: UUID,
+        _ observer: @escaping @MainActor (ConversationRoomAgentAssignment) -> Void
+    ) -> AgentRoomsAgentAssignmentObservation {
+        let id = UUID()
+        assignmentObservers[roomID, default: [:]][id] = observer
+        return AgentRoomsAgentAssignmentObservation { [weak self] in
+            self?.assignmentObservers[roomID]?.removeValue(forKey: id)
+            if self?.assignmentObservers[roomID]?.isEmpty == true {
+                self?.assignmentObservers.removeValue(forKey: roomID)
+            }
+        }
     }
 
     func sendEligibility(roomID: UUID) throws -> AgentRoomsAgentSendEligibility {
@@ -123,6 +165,7 @@ final class AgentRoomsAgentAssignmentService: AgentRoomsAgentAssignmentActing {
         return AgentRoomActingAgent(
             profileID: assignment.profile.id,
             displayName: assignment.profile.displayName,
+            headRoutingEpoch: assignment.headRoutingEpoch,
             providerID: assignment.profile.runtimeBinding.providerID,
             runtimeID: assignment.profile.runtimeBinding.runtimeID,
             capabilities: assignment.profile.capabilities.map(\.displayName),

@@ -14,6 +14,7 @@ enum AgentRoomMessageDeliveryState: String, Equatable, Sendable {
     case pending
     case sent
     case failed
+    case held
 }
 
 struct AgentRoomMessage: Identifiable, Equatable, Sendable {
@@ -72,6 +73,7 @@ struct AgentRoomTranscript: Equatable, Sendable {
 struct AgentRoomActingAgent: Equatable, Sendable {
     let profileID: String
     let displayName: String
+    let headRoutingEpoch: Int64
     let providerID: String
     let runtimeID: String
     let capabilities: [String]

@@ -338,7 +338,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registry: CiderAgentChatRegistry,
         conversationStorage: AIConversationStorage,
         runtimeLogger: ConversationShadowRuntimeLogger,
-        writerCheckpoint: @escaping (ConversationShadowWriterCheckpoint) throws -> Void = { _ in },
         installCoordinator: (LegacyConversationPrimarySaveCoordinator?) -> Bool
     ) {
         guard !didAttemptConversationShadowRuntimeComposition else { return }
@@ -361,8 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 diagnosticsDirectoryURL: diagnosticsDirectoryURL,
                 registry: registry,
                 conversationStorage: conversationStorage,
-                runtimeLogger: runtimeLogger,
-                writerCheckpoint: writerCheckpoint
+                runtimeLogger: runtimeLogger
             )
             guard installCoordinator(composition.coordinator) else {
                 runtimeLogger.logStartupFailure(.viewModelBootstrapUnavailable)

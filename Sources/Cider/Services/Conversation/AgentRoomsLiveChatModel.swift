@@ -404,6 +404,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
     private var assignedProfileSupportsAttachments = true
     private var stagedAttachmentsByRoomID: [UUID: [ConversationStagedAttachment]] = [:]
     private var activeRoomIsDurable = false
+    private var assignmentObservation: AgentRoomsAgentAssignmentObservation?
 
     private struct AcceptedSubmission {
         let text: String
@@ -490,6 +491,8 @@ final class AgentRoomsLiveChatModel: ObservableObject {
 
     func deactivateRoom() {
         guard activeAttemptID == nil else { return }
+        assignmentObservation?.cancel()
+        assignmentObservation = nil
         if let roomID { stagedAttachmentsByRoomID[roomID] = stagedAttachments }
         roomID = nil
         activeRoomTitle = Self.roomTitle
@@ -748,6 +751,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     runID: attemptID,
                     participantID: participant.id,
                     profileID: participant.profile.id,
+                    displayName: participant.profile.displayName,
                     participantRole: participant.role,
                     selectionSequence: 1
                 )
@@ -811,7 +815,10 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             }
         } catch {
             attachmentService.discard(acceptedAttachments)
-            surfacePreAcceptFailure("Cider could not safely save this message. Nothing was sent.")
+            let message = (error as? AgentRoomsConversationPersistenceError)
+                .flatMap { $0 == .writerConflict ? $0.errorDescription : nil }
+                ?? "Cider could not safely save this message. Nothing was sent."
+            surfacePreAcceptFailure(message)
             return nil
         }
         roomMessages.append(.init(
@@ -942,6 +949,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     runID: attemptID,
                     participantID: previous.participantID,
                     profileID: previous.profileID,
+                    displayName: plan[0].profile.displayName,
                     participantRole: previous.participantRole,
                     selectionSequence: 1
                 )
@@ -1005,15 +1013,36 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         let partial = streamingAssistantID.flatMap { id in
             roomMessages.first(where: { $0.id == id })?.body
         }
+        var terminalOutcome: ConversationResultPublicationOutcome?
         if let persistentAttempt {
-            try? persistence?.terminate(
-                persistentAttempt,
-                status: .cancelled,
-                runID: activeRunID,
-                partialAssistantText: partial,
-                activity: liveActivity,
-                at: now()
-            )
+            do {
+                terminalOutcome = try persistence?.terminate(
+                    persistentAttempt,
+                    status: .cancelled,
+                    runID: activeRunID,
+                    partialAssistantText: partial,
+                    activity: liveActivity,
+                    at: now()
+                )
+            } catch {
+                failActiveMessage(
+                    message: "Cider could not durably record the cancellation. Reopen this conversation before continuing.",
+                    canRetry: false
+                )
+                turnState = .failed
+                receipt = makeReceipt(
+                    title: "Cancellation persistence failed",
+                    detail: "Provider stop requested · Durable terminal state unconfirmed",
+                    status: .failed,
+                    runID: activeRunID
+                )
+                clearActiveAttempt()
+                rebuildRoom()
+                return
+            }
+        }
+        if terminalOutcome == .heldStale || terminalOutcome == .published {
+            if restoreActiveRoomSnapshot() { return }
         }
         failActiveMessage(message: "Hermes response cancelled.", canRetry: activeRunID == nil)
         turnState = .failed
@@ -1044,12 +1073,23 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                   activeRunID == nil || activeRunID == terminalRunID
             else { throw AgentRoomsLiveChatError.invalidTerminalReceipt }
             if let persistentAttempt {
-                try persistence?.complete(
+                let publication = try persistence?.complete(
                     persistentAttempt,
                     completion: result.completion,
                     expectedText: text,
                     activity: liveActivity
                 )
+                if publication != .published {
+                    if !restoreActiveRoomSnapshot() {
+                        clearActiveAttempt()
+                        turnState = .failed
+                        composerMessage = publication == .heldStale
+                            ? "The response was held because the room head changed."
+                            : "The durable terminal outcome won this response race."
+                        rebuildRoom()
+                    }
+                    return
+                }
             }
             try applyCompletion(result.completion, expectedText: text, clientID: clientID, inputAttachments: submission.attachments.map(\.fact))
             turnState = .completed
@@ -1060,15 +1100,29 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             let partial = streamingAssistantID.flatMap { id in
                 roomMessages.first(where: { $0.id == id })?.body
             }
+            var terminalOutcome: ConversationResultPublicationOutcome?
             if let persistentAttempt {
-                try? persistence?.terminate(
-                    persistentAttempt,
-                    status: .cancelled,
-                    runID: activeRunID,
-                    partialAssistantText: partial,
-                    activity: liveActivity,
-                    at: now()
-                )
+                do {
+                    terminalOutcome = try persistence?.terminate(
+                        persistentAttempt,
+                        status: .cancelled,
+                        runID: activeRunID,
+                        partialAssistantText: partial,
+                        activity: liveActivity,
+                        at: now()
+                    )
+                } catch {
+                    surfaceTerminalPersistenceFailure(
+                        text: text,
+                        message: "Cider could not durably record the transport cancellation. Reopen this conversation before continuing.",
+                        title: "Cancellation persistence failed",
+                        detail: "Transport cancellation observed · Durable terminal state unconfirmed"
+                    )
+                    return
+                }
+            }
+            if terminalOutcome == .heldStale || terminalOutcome == .published {
+                if restoreActiveRoomSnapshot() { return }
             }
             failActiveMessage(message: "Hermes response was interrupted.", canRetry: activeRunID == nil)
             if activeRunID == nil { setRecoveredDraft(text) }
@@ -1089,15 +1143,29 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             let partial = streamingAssistantID.flatMap { id in
                 roomMessages.first(where: { $0.id == id })?.body
             }
+            var terminalOutcome: ConversationResultPublicationOutcome?
             if let persistentAttempt {
-                try? persistence?.terminate(
-                    persistentAttempt,
-                    status: .failed,
-                    runID: activeRunID,
-                    partialAssistantText: partial,
-                    activity: liveActivity,
-                    at: now()
-                )
+                do {
+                    terminalOutcome = try persistence?.terminate(
+                        persistentAttempt,
+                        status: .failed,
+                        runID: activeRunID,
+                        partialAssistantText: partial,
+                        activity: liveActivity,
+                        at: now()
+                    )
+                } catch {
+                    surfaceTerminalPersistenceFailure(
+                        text: text,
+                        message: "Cider could not durably record the transport failure. Reopen this conversation before continuing.",
+                        title: "Failure persistence failed",
+                        detail: "Transport failure observed · Durable terminal state unconfirmed"
+                    )
+                    return
+                }
+            }
+            if terminalOutcome == .heldStale || terminalOutcome == .published {
+                if restoreActiveRoomSnapshot() { return }
             }
             failActiveMessage(
                 message: accepted ? Self.acceptedInterruptionMessage : Self.failedMessage,
@@ -1143,8 +1211,69 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    private func refreshLiveRoutingStaleness() -> Bool {
+        guard let attempt = persistentAttempt,
+              attempt.participantAttribution == nil,
+              let roomID,
+              let agentAssignments
+        else { return false }
+        let stale: Bool
+        do {
+            let current = try agentAssignments.assignment(roomID: roomID)
+            stale = current?.headRoutingEpoch
+                != attempt.routingContext.observedHeadRoutingEpoch
+                || current?.profile.id != attempt.routingContext.recipient.profileID
+        } catch {
+            stale = true
+        }
+        guard stale else { return false }
+        if let streamingAssistantID,
+           let index = roomMessages.firstIndex(where: { $0.id == streamingAssistantID }) {
+            roomMessages[index].deliveryState = .held
+        }
+        composerMessage = "Former-head output is held for review and will not become current-head continuation."
+        rebuildRoom()
+        return true
+    }
+
+    private func observeAssignmentChanges(for roomID: UUID) {
+        assignmentObservation?.cancel()
+        assignmentObservation = agentAssignments?.observeAssignmentChanges(
+            roomID: roomID
+        ) { [weak self] _ in
+            guard let self, self.roomID == roomID else { return }
+            if self.activeAttemptID != nil {
+                _ = self.refreshLiveRoutingStaleness()
+            } else {
+                _ = self.refreshAssignedAgentEligibility()
+                self.rebuildRoom()
+            }
+        }
+    }
+
+    @discardableResult
+    private func restoreActiveRoomSnapshot() -> Bool {
+        do {
+            let snapshot: AgentRoomsConversationSnapshot?
+            if isReservedTestChat {
+                snapshot = try persistence?.restoreReservedTestChat()
+            } else if let roomID {
+                snapshot = try persistence?.restoreCanonicalRoom(id: roomID)
+            } else {
+                snapshot = nil
+            }
+            guard let snapshot else { return false }
+            apply(snapshot, reservedTestChat: isReservedTestChat)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private func receive(_ event: HermesRunEvent, attemptID: UUID) {
         guard activeAttemptID == attemptID else { return }
+        let stale = refreshLiveRoutingStaleness()
         switch event {
         case .runStarted(let runID):
             guard nonempty(runID) != nil else {
@@ -1171,7 +1300,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             }
         case .messageDelta(let delta):
             guard activeRunID != nil else { eventIntegrityFailed = true; return }
-            appendStreamingDelta(delta)
+            appendStreamingDelta(delta, held: stale)
         case .toolStarted(let name, let preview):
             guard activeRunID != nil else { eventIntegrityFailed = true; return }
             appendActivity(.toolStarted, detail: preview ?? name)
@@ -1185,13 +1314,13 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             eventIntegrityFailed = true
         case .completed(let output):
             guard activeRunID != nil else { eventIntegrityFailed = true; return }
-            reconcileStreamingOutput(output)
+            reconcileStreamingOutput(output, held: stale)
         case .approvalRequested:
             break
         }
     }
 
-    private func appendStreamingDelta(_ raw: String) {
+    private func appendStreamingDelta(_ raw: String, held: Bool = false) {
         let delta = sanitized(raw, limit: Self.maximumStreamingMessageLength, trimmingWhitespace: false)
         guard !delta.isEmpty else { return }
         turnState = .streaming
@@ -1201,13 +1330,20 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             let remaining = max(0, Self.maximumStreamingMessageLength - roomMessages[index].body.count)
             guard remaining > 0 else { return }
             roomMessages[index].body += String(delta.prefix(remaining))
+            if held { roomMessages[index].deliveryState = .held }
         } else {
-            roomMessages.append(.init(id: id, role: .agent, author: "Hermes", body: String(delta.prefix(Self.maximumStreamingMessageLength))))
+            roomMessages.append(.init(
+                id: id,
+                role: .agent,
+                author: persistentAttempt?.routingContext.recipient.displayName ?? "Hermes",
+                body: String(delta.prefix(Self.maximumStreamingMessageLength)),
+                deliveryState: held ? .held : .sent
+            ))
         }
         rebuildRoom()
     }
 
-    private func reconcileStreamingOutput(_ raw: String) {
+    private func reconcileStreamingOutput(_ raw: String, held: Bool = false) {
         let output = sanitized(raw, limit: Self.maximumStreamingMessageLength)
         guard !output.isEmpty else { return }
         turnState = .streaming
@@ -1215,8 +1351,15 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         streamingAssistantID = id
         if let index = roomMessages.firstIndex(where: { $0.id == id }) {
             if output.hasPrefix(roomMessages[index].body) { roomMessages[index].body = output }
+            if held { roomMessages[index].deliveryState = .held }
         } else {
-            roomMessages.append(.init(id: id, role: .agent, author: "Hermes", body: output))
+            roomMessages.append(.init(
+                id: id,
+                role: .agent,
+                author: persistentAttempt?.routingContext.recipient.displayName ?? "Hermes",
+                body: output,
+                deliveryState: held ? .held : .sent
+            ))
         }
         rebuildRoom()
     }
@@ -1298,7 +1441,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                 roomMessages.append(.init(
                     id: persistentAttempt?.assistantMessageID.uuidString ?? expectedAssistantSourceID,
                     role: .agent,
-                    author: "Hermes",
+                    author: persistentAttempt?.routingContext.recipient.displayName ?? "Hermes",
                     body: assistant.content
                 ))
             }
@@ -1391,6 +1534,26 @@ final class AgentRoomsLiveChatModel: ObservableObject {
         }
     }
 
+    private func surfaceTerminalPersistenceFailure(
+        text: String,
+        message: String,
+        title: String,
+        detail: String
+    ) {
+        let accepted = activeRunID != nil
+        failActiveMessage(message: message, canRetry: false)
+        if !accepted { setRecoveredDraft(text) }
+        turnState = .failed
+        receipt = makeReceipt(
+            title: title,
+            detail: detail,
+            status: .failed,
+            runID: activeRunID
+        )
+        clearActiveAttempt()
+        rebuildRoom()
+    }
+
     private func clearActiveAttempt() {
         activeSendTask = nil
         activeAttemptID = nil
@@ -1481,6 +1644,7 @@ final class AgentRoomsLiveChatModel: ObservableObject {
             stagedAttachmentsByRoomID[roomID] = stagedAttachments
         }
         roomID = snapshot.room.id
+        observeAssignmentChanges(for: snapshot.room.id)
         activeRoomIsDurable = true
         stagedAttachments = stagedAttachmentsByRoomID[snapshot.room.id] ?? []
         activeRoomTitle = snapshot.room.title
@@ -1538,13 +1702,21 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                     "Completed · Source-backed · Live continuation"
                 )
             case .cancelled:
-                presentation = (
-                    .cancelled,
-                    "Hermes turn cancelled",
-                    snapshot.latestRunID == nil
-                        ? "Cancelled before acceptance · Safe to retry"
-                        : "Cancelled · Accepted by Hermes · Partial response kept"
-                )
+                if snapshot.latestErrorCode == "stale_head_routing_epoch" {
+                    presentation = (
+                        .cancelled,
+                        "Former-head response held and cancelled",
+                        "Held for review · Former-head attribution preserved · Not published"
+                    )
+                } else {
+                    presentation = (
+                        .cancelled,
+                        "Hermes turn cancelled",
+                        snapshot.latestRunID == nil
+                            ? "Cancelled before acceptance · Safe to retry"
+                            : "Cancelled · Accepted by Hermes · Partial response kept"
+                    )
+                }
             case .failed:
                 switch snapshot.latestErrorCode {
                 case "pre_accept_interruption":
@@ -1558,6 +1730,12 @@ final class AgentRoomsLiveChatModel: ObservableObject {
                         .failed,
                         "Hermes response interrupted",
                         "Accepted by Hermes · Cannot retry safely"
+                    )
+                case "stale_head_routing_epoch":
+                    presentation = (
+                        .failed,
+                        "Response held after head change",
+                        "Held for review · Former-head attribution preserved · Not published"
                     )
                 default:
                     presentation = (

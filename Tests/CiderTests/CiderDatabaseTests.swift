@@ -858,6 +858,156 @@ struct CiderDatabaseTests {
         #expect(stmt.int(at: 0) == 2)
     }
 
+    @Test("Immediate transaction nested in immediate root keeps writer reservation")
+    func immediateNestedInImmediateCommits() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        try db.withImmediateTransaction {
+            try db.withImmediateTransaction {
+                try db.runSQL("""
+                    INSERT INTO labels (
+                        id, name, color_hex, kind, created_at, updated_at
+                    ) VALUES (
+                        'nested-immediate', 'Nested Immediate', '#333333',
+                        'custom', 0, 0
+                    );
+                    """)
+            }
+        }
+
+        let statement = try db.prepare("SELECT count(*) FROM labels WHERE id = ?;")
+        statement.bind("nested-immediate", at: 1)
+        #expect(try statement.step())
+        #expect(statement.int(at: 0) == 1)
+    }
+
+    @Test("Deferred transaction nested in immediate root uses a savepoint")
+    func deferredNestedInImmediateCommits() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        try db.withImmediateTransaction {
+            try db.withTransaction {
+                try db.runSQL("""
+                    INSERT INTO labels (
+                        id, name, color_hex, kind, created_at, updated_at
+                    ) VALUES (
+                        'nested-deferred', 'Nested Deferred', '#444444',
+                        'custom', 0, 0
+                    );
+                    """)
+            }
+        }
+
+        let statement = try db.prepare("SELECT count(*) FROM labels WHERE id = ?;")
+        statement.bind("nested-deferred", at: 1)
+        #expect(try statement.step())
+        #expect(statement.int(at: 0) == 1)
+    }
+
+    @Test("Immediate transaction cannot upgrade a deferred root")
+    func immediateNestedInDeferredFailsBeforeBodyOrWrite() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+        var nestedBodyRan = false
+
+        do {
+            try db.withTransaction {
+                try db.withImmediateTransaction {
+                    nestedBodyRan = true
+                    try db.runSQL("""
+                        INSERT INTO labels (
+                            id, name, color_hex, kind, created_at, updated_at
+                        ) VALUES (
+                            'invalid-upgrade', 'Invalid Upgrade', '#555555',
+                            'custom', 0, 0
+                        );
+                        """)
+                }
+            }
+            Issue.record("Expected immediate-inside-deferred to fail")
+        } catch let error as CiderDatabaseError {
+            guard case .immediateTransactionRequiresImmediateRoot = error else {
+                Issue.record("Expected typed immediate-root error, got \(error)")
+                return
+            }
+            #expect(
+                error.errorDescription
+                    == "An immediate transaction cannot be nested inside a deferred transaction because SQLite cannot upgrade the root transaction's writer reservation."
+            )
+        }
+
+        #expect(!nestedBodyRan)
+        let statement = try db.prepare("SELECT count(*) FROM labels WHERE id = ?;")
+        statement.bind("invalid-upgrade", at: 1)
+        #expect(try statement.step())
+        #expect(statement.int(at: 0) == 0)
+    }
+
+    @Test("Root transaction mode resets after rollback")
+    func rootTransactionModeResetsAfterRollback() throws {
+        let url = makeTempDBURL()
+        defer { cleanup(url) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+
+        do {
+            try db.withImmediateTransaction {
+                try db.runSQL("""
+                    INSERT INTO labels (
+                        id, name, color_hex, kind, created_at, updated_at
+                    ) VALUES (
+                        'rolled-back-mode', 'Rolled Back Mode', '#666666',
+                        'custom', 0, 0
+                    );
+                    """)
+                throw TransactionModeTestFailure()
+            }
+            Issue.record("Expected root transaction rollback")
+        } catch is TransactionModeTestFailure {
+            // Expected.
+        }
+
+        try db.withImmediateTransaction {
+            try db.withTransaction {
+                try db.runSQL("""
+                    INSERT INTO labels (
+                        id, name, color_hex, kind, created_at, updated_at
+                    ) VALUES (
+                        'mode-reset', 'Mode Reset', '#777777',
+                        'custom', 0, 0
+                    );
+                    """)
+            }
+        }
+
+        let statement = try db.prepare(
+            "SELECT id FROM labels WHERE id IN (?, ?) ORDER BY id;"
+        )
+        statement.bind("mode-reset", at: 1)
+            .bind("rolled-back-mode", at: 2)
+        var identifiers: [String] = []
+        while try statement.step() {
+            identifiers.append(statement.string(at: 0))
+        }
+        #expect(identifiers == ["mode-reset"])
+    }
+
     // MARK: - Foreign Key Enforcement
 
     @Test("Foreign key constraint prevents orphan items")
@@ -1040,3 +1190,5 @@ struct CiderDatabaseTests {
         return false
     }
 }
+
+private struct TransactionModeTestFailure: Error {}

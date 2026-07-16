@@ -15,6 +15,8 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
         let title: String
         let kind: String
         let lifecycleState: ConversationRoomLifecycle
+        let selectedHead: ConversationRoutingRecipient?
+        let headRoutingEpoch: Int64?
         let createdAt: String
         let updatedAt: String
     }
@@ -55,6 +57,9 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
         let updatedAt: String
         let participantAttribution: ConversationParticipantRunAttribution?
         let participantActivity: [ConversationParticipantActivity]
+        let generatedRouting: ConversationGeneratedRoutingContext?
+        let publicationState: ConversationPublicationState?
+        let observedCurrentHeadRoutingEpoch: Int64?
         let sources: AgentRoomsRoomExportFactCollection<HermesCiderReference>
         let context: AgentRoomsRoomExportFactCollection<HermesCiderContextCheckpoint>
         let approvals: AgentRoomsRoomExportFactCollection<HermesApprovalRequest>
@@ -77,6 +82,11 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
         let createdAt: String
         let updatedAt: String
         let participantAttribution: ConversationParticipantMessageAttribution?
+        let submissionRouting: ConversationSubmissionRoutingContext?
+        let generatedRouting: ConversationGeneratedRoutingContext?
+        let publicationState: ConversationPublicationState?
+        let observedCurrentHeadRoutingEpoch: Int64?
+        let headRoutingChangeEvent: ConversationHeadRoutingChangeEvent?
     }
 
     let schemaVersion: Int
@@ -85,6 +95,7 @@ struct AgentRoomsRoomExportManifest: Codable, Equatable, Sendable {
     let participants: [Participant]
     let turns: [Turn]
     let messages: [Message]
+    let headRoutingEvents: [ConversationHeadRoutingChangeEvent]
 }
 
 struct AgentRoomsRoomExportPackage: Equatable, Sendable {
@@ -130,86 +141,100 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
 
     private let repository: ConversationRepository
     private let fileManager: AgentRoomsSendableFileManager
-    private let beforeDiskWrite: @Sendable () -> Void
 
     init(
         repository: ConversationRepository,
-        fileManager: FileManager = .default,
-        beforeDiskWrite: @escaping @Sendable () -> Void = {}
+        fileManager: FileManager = .default
     ) {
         self.repository = repository
         self.fileManager = AgentRoomsSendableFileManager(value: fileManager)
-        self.beforeDiskWrite = beforeDiskWrite
     }
 
     func render(roomID: UUID) throws -> AgentRoomsRoomExportPackage {
-        guard let room = try repository.room(id: roomID) else { throw AgentRoomsRoomExportError.roomNotFound }
-        try validateAuthority(room)
-        let bindings = try repository.bindings(roomID: roomID)
-        let turns = try repository.turns(roomID: roomID)
-        let messages = try repository.messages(roomID: roomID)
-        let roster = try repository.participantRoster(roomID: roomID)
-        try validateRows(
-            room: room,
-            roster: roster,
-            bindings: bindings,
-            turns: turns,
-            messages: messages
-        )
-
-        let manifest = AgentRoomsRoomExportManifest(
-            schemaVersion: 2,
-            room: .init(
-                id: room.id,
-                title: room.title,
-                kind: room.kind,
-                lifecycleState: room.lifecycleState,
-                createdAt: Self.timestamp(room.createdAt),
-                updatedAt: Self.timestamp(room.updatedAt)
-            ),
-            runtimeBindings: bindings.map {
-                .init(
-                    id: $0.id,
-                    parentBindingID: $0.parentBindingID,
-                    runtimeID: $0.runtimeID,
-                    transportID: $0.transportID,
-                    sourceNamespace: $0.sourceNamespace,
-                    state: $0.state,
-                    externalSessionID: nil
-                )
-            },
-            participants: roster?.members.map { member in
-                .init(
-                    id: member.id,
-                    profileID: member.profile.id,
-                    displayName: member.profile.displayName,
-                    role: member.role,
-                    providerID: member.profile.runtimeBinding.providerID,
-                    runtimeID: member.profile.runtimeBinding.runtimeID,
-                    capabilities: member.profile.capabilities.map(\.displayName),
-                    availability: member.profile.availability
-                )
-            } ?? [],
-            turns: try turns.map(exportTurn),
-            messages: try messages.map {
-                return .init(
-                    id: $0.id,
-                    turnID: $0.turnID,
-                    runtimeBindingID: $0.runtimeBindingID,
-                    parentMessageID: $0.parentMessageID,
-                    sequence: $0.sequence,
-                    role: $0.role,
-                    body: $0.contentText,
-                    status: $0.status,
-                    finishReason: $0.finishReason,
-                    source: $0.source,
-                    sourceCreatedAt: $0.sourceCreatedAt.map(Self.timestamp),
-                    createdAt: Self.timestamp($0.createdAt),
-                    updatedAt: Self.timestamp($0.updatedAt),
-                    participantAttribution: try participantMessageAttribution($0)
-                )
+        let manifest = try repository.withTransaction {
+            guard let room = try repository.room(id: roomID) else {
+                throw AgentRoomsRoomExportError.roomNotFound
             }
-        )
+            try validateAuthority(room)
+            let bindings = try repository.bindings(roomID: roomID)
+            let turns = try repository.turns(roomID: roomID)
+            let messages = try repository.messages(roomID: roomID)
+            let roster = try repository.participantRoster(roomID: roomID)
+            let assignment = try repository.agentAssignment(roomID: roomID)
+            try validateRows(
+                room: room,
+                roster: roster,
+                assignment: assignment,
+                bindings: bindings,
+                turns: turns,
+                messages: messages
+            )
+
+            return AgentRoomsRoomExportManifest(
+                schemaVersion: 3,
+                room: .init(
+                    id: room.id,
+                    title: room.title,
+                    kind: room.kind,
+                    lifecycleState: room.lifecycleState,
+                    selectedHead: assignment.map {
+                        ConversationRoutingRecipient(profile: $0.profile)
+                    },
+                    headRoutingEpoch: assignment?.headRoutingEpoch,
+                    createdAt: Self.timestamp(room.createdAt),
+                    updatedAt: Self.timestamp(room.updatedAt)
+                ),
+                runtimeBindings: bindings.map {
+                    .init(
+                        id: $0.id,
+                        parentBindingID: $0.parentBindingID,
+                        runtimeID: $0.runtimeID,
+                        transportID: $0.transportID,
+                        sourceNamespace: $0.sourceNamespace,
+                        state: $0.state,
+                        externalSessionID: nil
+                    )
+                },
+                participants: roster?.members.map { member in
+                    .init(
+                        id: member.id,
+                        profileID: member.profile.id,
+                        displayName: member.profile.displayName,
+                        role: member.role,
+                        providerID: member.profile.runtimeBinding.providerID,
+                        runtimeID: member.profile.runtimeBinding.runtimeID,
+                        capabilities: member.profile.capabilities.map(\.displayName),
+                        availability: member.profile.availability
+                    )
+                } ?? [],
+                turns: try turns.map(exportTurn),
+                messages: try messages.map {
+                    return .init(
+                        id: $0.id,
+                        turnID: $0.turnID,
+                        runtimeBindingID: $0.runtimeBindingID,
+                        parentMessageID: $0.parentMessageID,
+                        sequence: $0.sequence,
+                        role: $0.role,
+                        body: $0.contentText,
+                        status: $0.status,
+                        finishReason: $0.finishReason,
+                        source: $0.source,
+                        sourceCreatedAt: $0.sourceCreatedAt.map(Self.timestamp),
+                        createdAt: Self.timestamp($0.createdAt),
+                        updatedAt: Self.timestamp($0.updatedAt),
+                        participantAttribution: try participantMessageAttribution($0),
+                        submissionRouting: try submissionRouting($0.metadata),
+                        generatedRouting: try generatedRouting($0.metadata),
+                        publicationState: try publicationState($0.metadata),
+                        observedCurrentHeadRoutingEpoch:
+                            try observedCurrentHeadRoutingEpoch($0.metadata),
+                        headRoutingChangeEvent: try headRoutingChangeEvent($0)
+                    )
+                },
+                headRoutingEvents: try messages.compactMap(headRoutingChangeEvent)
+            )
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let manifestData: Data
@@ -229,21 +254,18 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
         return try Self.write(
             package: package,
             to: destination,
-            fileManager: fileManager.value,
-            beforeDiskWrite: beforeDiskWrite
+            fileManager: fileManager.value
         )
     }
 
     func exportForPresentation(roomID: UUID, to destination: URL) async throws -> AgentRoomsRoomExportResult {
         let package = try render(roomID: roomID)
         let fileManager = fileManager
-        let beforeDiskWrite = beforeDiskWrite
         return try await Task.detached(priority: .utility) {
             try Self.write(
                 package: package,
                 to: destination,
-                fileManager: fileManager.value,
-                beforeDiskWrite: beforeDiskWrite
+                fileManager: fileManager.value
             )
         }.value
     }
@@ -251,10 +273,8 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
     nonisolated private static func write(
         package: AgentRoomsRoomExportPackage,
         to destination: URL,
-        fileManager: FileManager,
-        beforeDiskWrite: @Sendable () -> Void
+        fileManager: FileManager
     ) throws -> AgentRoomsRoomExportResult {
-        beforeDiskWrite()
         let markdownURL = destination.appendingPathComponent(Self.markdownFileName)
         let manifestURL = destination.appendingPathComponent(Self.manifestFileName)
         do {
@@ -315,6 +335,7 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
     private func validateRows(
         room: ConversationRoom,
         roster: ConversationRoomParticipantRoster?,
+        assignment: ConversationRoomAgentAssignment?,
         bindings: [ConversationRuntimeBinding],
         turns: [ConversationTurn],
         messages: [ConversationMessage]
@@ -356,6 +377,9 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
         for turn in turns {
             let attribution = try participantRunAttribution(turn)
             let activity = try participantActivity(turn)
+            _ = try generatedRouting(turn.metadata)
+            _ = try publicationState(turn.metadata)
+            _ = try observedCurrentHeadRoutingEpoch(turn.metadata)
             let attributedParticipant = attribution.flatMap { participantsByID[$0.participantID] }
             guard turn.runtimeBindingID.map(bindingIDs.contains) ?? true,
                   turn.source.map({ safeSource($0) }) ?? true,
@@ -374,6 +398,11 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
         }
         for message in messages {
             let attribution = try participantMessageAttribution(message)
+            _ = try submissionRouting(message.metadata)
+            _ = try generatedRouting(message.metadata)
+            _ = try publicationState(message.metadata)
+            _ = try observedCurrentHeadRoutingEpoch(message.metadata)
+            _ = try headRoutingChangeEvent(message)
             let participantAttributionIsValid = attribution.map { value in
                 if let participantID = value.participantID {
                     guard let participant = participantsByID[participantID] else { return false }
@@ -390,6 +419,23 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
                   safeText(message.contentText, limit: AgentRoomsLiveChatModel.maximumStreamingMessageLength),
                   participantAttributionIsValid
             else { throw AgentRoomsRoomExportError.privateContent }
+        }
+        let routingEvents = try messages.compactMap(headRoutingChangeEvent)
+        for pair in zip(routingEvents, routingEvents.dropFirst()) {
+            guard pair.1.oldHeadRoutingEpoch == pair.0.newHeadRoutingEpoch,
+                  pair.1.oldHead?.profileID == pair.0.newHead.profileID,
+                  pair.1.changedAt >= pair.0.changedAt
+            else { throw AgentRoomsRoomExportError.corruptHistory }
+        }
+        if let final = routingEvents.last {
+            guard let assignment,
+                  final.newHeadRoutingEpoch == assignment.headRoutingEpoch,
+                  final.newHead.profileID == assignment.profile.id
+            else { throw AgentRoomsRoomExportError.corruptHistory }
+        } else if let assignment {
+            guard assignment.headRoutingEpoch == 0 || assignment.headRoutingEpoch == 1 else {
+                throw AgentRoomsRoomExportError.corruptHistory
+            }
         }
     }
 
@@ -414,6 +460,10 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             updatedAt: Self.timestamp(turn.updatedAt),
             participantAttribution: attribution,
             participantActivity: activity,
+            generatedRouting: try generatedRouting(turn.metadata),
+            publicationState: try publicationState(turn.metadata),
+            observedCurrentHeadRoutingEpoch:
+                try observedCurrentHeadRoutingEpoch(turn.metadata),
             sources: references,
             context: context,
             approvals: approvals,
@@ -467,6 +517,87 @@ final class AgentRoomsRoomExportService: AgentRoomsRoomExporting {
             throw AgentRoomsRoomExportError.corruptHistory
         }
         return values.sorted { $0.sequence < $1.sequence }
+    }
+
+    private func submissionRouting(
+        _ metadata: [String: String]
+    ) throws -> ConversationSubmissionRoutingContext? {
+        guard let raw = metadata[
+            AgentRoomsConversationPersistence.submissionRoutingMetadataKey
+        ] else { return nil }
+        guard let value = DatabaseHelpers.decodeJSON(
+            ConversationSubmissionRoutingContext.self,
+            from: raw
+        ) else { throw AgentRoomsRoomExportError.corruptHistory }
+        do {
+            try value.validate()
+        } catch {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return value
+    }
+
+    private func generatedRouting(
+        _ metadata: [String: String]
+    ) throws -> ConversationGeneratedRoutingContext? {
+        guard let raw = metadata[
+            AgentRoomsConversationPersistence.generatedRoutingMetadataKey
+        ] else { return nil }
+        guard let value = DatabaseHelpers.decodeJSON(
+            ConversationGeneratedRoutingContext.self,
+            from: raw
+        ) else { throw AgentRoomsRoomExportError.corruptHistory }
+        do {
+            try value.validate()
+        } catch {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return value
+    }
+
+    private func publicationState(
+        _ metadata: [String: String]
+    ) throws -> ConversationPublicationState? {
+        guard let raw = metadata[
+            AgentRoomsConversationPersistence.publicationStateMetadataKey
+        ] else { return nil }
+        guard let value = ConversationPublicationState(rawValue: raw) else {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return value
+    }
+
+    private func observedCurrentHeadRoutingEpoch(
+        _ metadata: [String: String]
+    ) throws -> Int64? {
+        guard let raw = metadata["current_head_routing_epoch"] else { return nil }
+        guard let value = Int64(raw), value >= 0 else {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        return value
+    }
+
+    private func headRoutingChangeEvent(
+        _ message: ConversationMessage
+    ) throws -> ConversationHeadRoutingChangeEvent? {
+        guard let raw = message.metadata[
+            ConversationRepository.headChangeEventMetadataKey
+        ] else { return nil }
+        guard let value = DatabaseHelpers.decodeJSON(
+            ConversationHeadRoutingChangeEvent.self,
+            from: raw
+        ) else { throw AgentRoomsRoomExportError.corruptHistory }
+        do {
+            try value.validate()
+        } catch {
+            throw AgentRoomsRoomExportError.corruptHistory
+        }
+        guard value.id == message.id,
+              message.source?.namespace
+                == ConversationRepository.headChangeEventSourceNamespace,
+              message.source?.id == value.id.uuidString
+        else { throw AgentRoomsRoomExportError.corruptHistory }
+        return value
     }
 
     private func referencesFact(_ raw: String?) -> AgentRoomsRoomExportFactCollection<HermesCiderReference> {

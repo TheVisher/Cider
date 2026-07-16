@@ -6,33 +6,59 @@ import Testing
 @Suite("Conversation Shadow Writer Tests")
 @MainActor
 struct ConversationShadowWriterTests {
-    private enum ForcedFailure: Error { case checkpoint }
+    private enum ForcedFailure: Error { case injected }
 
     @Test("Coordinator owns one generation and orders registry, JSONL, reservation, then SQLite")
     func coordinatedOrdering() throws {
-        var events: [String] = []
+        var auditDatabase: CiderDatabase?
+        var fixtureReference: Fixture?
+        var primaryTree: Fixture.LegacyTreeSnapshot?
         var registryPersistence = CiderAgentChatRegistry.Persistence.live()
         let registryWrite = registryPersistence.writeAtomically
         registryPersistence.writeAtomically = { data, url in
-            events.append("registry")
             try registryWrite(data, url)
+            try auditDatabase?.runSQL(
+                "INSERT INTO shadow_writer_ordering_audit (phase) VALUES ('registry');"
+            )
         }
         var conversationPersistence = AIConversationStorage.Persistence.live()
         let conversationWrite = conversationPersistence.writeAtomically
         conversationPersistence.writeAtomically = { data, url in
-            events.append("jsonl")
             try conversationWrite(data, url)
+            try auditDatabase?.runSQL(
+                "INSERT INTO shadow_writer_ordering_audit (phase) VALUES ('jsonl');"
+            )
+            primaryTree = try fixtureReference?.legacyTree()
         }
-        let fixture = try Fixture(registryPersistence: registryPersistence, conversationPersistence: conversationPersistence)
-        defer { fixture.remove() }
-        var primaryTree: Fixture.LegacyTreeSnapshot?
-        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) { checkpoint in
-            if checkpoint == .room {
-                #expect(fixture.healthStore.snapshot().unresolved.first?.status == .reserved)
-                primaryTree = try fixture.legacyTree()
-                events.append("sqlite")
+        var healthPersistence = ConversationShadowHealthStore.Persistence.live()
+        let healthWrite = healthPersistence.writeAtomically
+        healthPersistence.writeAtomically = { data, url in
+            try healthWrite(data, url)
+            guard String(decoding: data, as: UTF8.self).contains("\"reserved\"") else {
+                return
             }
+            try auditDatabase?.runSQL("""
+                INSERT INTO shadow_writer_ordering_audit (phase)
+                SELECT 'reservation'
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM shadow_writer_ordering_audit
+                    WHERE phase = 'reservation'
+                );
+                """)
         }
+        let fixture = try Fixture(
+            registryPersistence: registryPersistence,
+            conversationPersistence: conversationPersistence,
+            healthPersistence: healthPersistence
+        )
+        defer { fixture.remove() }
+        auditDatabase = fixture.database
+        fixtureReference = fixture
+        try fixture.installOrderingAudit()
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
         let result = fixture.coordinator(writer: writer).save(
             record: fixture.record,
             title: fixture.record.title,
@@ -41,7 +67,9 @@ struct ConversationShadowWriterTests {
             hermesState: fixture.hermesState
         )
 
-        #expect(events == ["registry", "jsonl", "sqlite"])
+        #expect(try fixture.orderingAudit() == [
+            "registry", "jsonl", "reservation", "sqlite",
+        ])
         #expect(result.registryReceipt?.generation == result.generation)
         #expect(result.primaryReceipt.generation == result.generation)
         #expect(result.registryReceipt?.snapshot.generation == result.generation)
@@ -56,11 +84,14 @@ struct ConversationShadowWriterTests {
     func splitSuccessSkipsShadow() throws {
         do {
             var conversationPersistence = AIConversationStorage.Persistence.live()
-            conversationPersistence.writeAtomically = { _, _ in throw ForcedFailure.checkpoint }
+            conversationPersistence.writeAtomically = { _, _ in throw ForcedFailure.injected }
             let fixture = try Fixture(conversationPersistence: conversationPersistence)
             defer { fixture.remove() }
-            var sqliteCalled = false
-            let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) { _ in sqliteCalled = true }
+            try fixture.installAbortTriggersForAnyCanonicalMutation()
+            let writer = ConversationShadowWriter(
+                database: fixture.database,
+                repository: fixture.repository
+            )
             let result = fixture.coordinator(writer: writer).save(
                 record: fixture.record,
                 title: fixture.record.title,
@@ -71,16 +102,18 @@ struct ConversationShadowWriterTests {
             #expect(result.registryReceipt != nil)
             #expect(!result.primaryReceipt.isCommitted)
             #expect(!result.invokedShadowWriter)
-            #expect(!sqliteCalled)
-            #expect(try fixture.coreSnapshot().isEmpty)
+            #expect(try fixture.databaseFingerprint().isEmpty)
         }
         do {
             var registryPersistence = CiderAgentChatRegistry.Persistence.live()
-            registryPersistence.writeAtomically = { _, _ in throw ForcedFailure.checkpoint }
+            registryPersistence.writeAtomically = { _, _ in throw ForcedFailure.injected }
             let fixture = try Fixture(registryPersistence: registryPersistence)
             defer { fixture.remove() }
-            var sqliteCalled = false
-            let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) { _ in sqliteCalled = true }
+            try fixture.installAbortTriggersForAnyCanonicalMutation()
+            let writer = ConversationShadowWriter(
+                database: fixture.database,
+                repository: fixture.repository
+            )
             let result = fixture.coordinator(writer: writer).save(
                 record: fixture.record,
                 title: fixture.record.title,
@@ -92,20 +125,23 @@ struct ConversationShadowWriterTests {
             #expect(result.registryFailureDetail != nil)
             #expect(result.primaryReceipt.isCommitted)
             #expect(!result.invokedShadowWriter)
-            #expect(!sqliteCalled)
-            #expect(try fixture.coreSnapshot().isEmpty)
+            #expect(try fixture.databaseFingerprint().isEmpty)
         }
     }
 
     @Test("Reservation failure prevents every SQLite operation")
     func reservationFailurePreventsWrite() throws {
         let fixture = try Fixture(healthPersistence: .init(
-            writeAtomically: { _, _ in throw ForcedFailure.checkpoint },
+            writeAtomically: { _, _ in throw ForcedFailure.injected },
             read: { try Data(contentsOf: $0) }
         ))
         defer { fixture.remove() }
-        var sqliteCalled = false
-        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) { _ in sqliteCalled = true }
+        try fixture.installAbortTriggersForAnyCanonicalMutation()
+        let before = try fixture.databaseFingerprint()
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
         let result = fixture.coordinator(writer: writer).save(
             record: fixture.record,
             title: fixture.record.title,
@@ -117,28 +153,31 @@ struct ConversationShadowWriterTests {
         #expect(result.primaryReceipt.isCommitted)
         #expect(!result.invokedShadowWriter)
         #expect(result.shadowCode == .gateBlocked)
-        #expect(!sqliteCalled)
-        #expect(try fixture.coreSnapshot().isEmpty)
+        #expect(before.isEmpty)
+        #expect(try fixture.databaseFingerprint() == before)
     }
 
-    @Test("A throw after every table family and parity rolls back all rows, counters, and timestamps", arguments: [
-        ConversationShadowWriterCheckpoint.room,
-        .bindings,
-        .turns,
-        .messages,
-        .parity,
-    ])
-    func rollbackAtEveryCheckpoint(checkpoint: ConversationShadowWriterCheckpoint) throws {
+    @Test(
+        "TEMP trigger failures at every normal mutation family and parity roll back the exact database",
+        arguments: NormalImportFailurePhase.allCases
+    )
+    fileprivate func rollbackAtEveryObservableNormalPhase(
+        phase: NormalImportFailurePhase
+    ) throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let payload = try fixture.payload()
-        let before = try fixture.coreSnapshot()
-        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) {
-            if $0 == checkpoint { throw ForcedFailure.checkpoint }
-        }
+        let before = try fixture.databaseFingerprint()
+        try fixture.installNormalImportFailureTrigger(phase, payload: payload)
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
 
-        #expect(throws: ForcedFailure.self) { try writer.write(payload) }
-        #expect(try fixture.coreSnapshot() == before)
+        expectInjectedDatabaseFailure(phase: phase, operation: {
+            try writer.write(payload)
+        })
+        try fixture.assertExactFingerprintAfterPhysicalReopen(before)
     }
 
     @Test("Exact retry is idempotent without sequence or timestamp consumption")
@@ -317,13 +356,25 @@ struct ConversationShadowWriterTests {
 
     @Test("Repository failure is durable repair-needed and leaves legacy bytes authoritative")
     func repositoryFailureIsDurable() throws {
-        let fixture = try Fixture()
-        defer { fixture.remove() }
+        var fixtureReference: Fixture?
         var primaryTree: Fixture.LegacyTreeSnapshot?
-        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) { checkpoint in
-            if checkpoint == .room { primaryTree = try fixture.legacyTree() }
-            if checkpoint == .messages { throw ForcedFailure.checkpoint }
+        var healthPersistence = ConversationShadowHealthStore.Persistence.live()
+        let healthWrite = healthPersistence.writeAtomically
+        healthPersistence.writeAtomically = { data, url in
+            try healthWrite(data, url)
+            if String(decoding: data, as: UTF8.self).contains("\"reserved\"") {
+                primaryTree = try fixtureReference?.legacyTree()
+            }
         }
+        let fixture = try Fixture(healthPersistence: healthPersistence)
+        fixtureReference = fixture
+        defer { fixture.remove() }
+        let payload = try fixture.payload()
+        try fixture.installNormalImportFailureTrigger(.messageInsert, payload: payload)
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
         let result = fixture.coordinator(writer: writer).save(
             record: fixture.record,
             title: fixture.record.title,
@@ -343,22 +394,25 @@ struct ConversationShadowWriterTests {
 
     @Test("Mapper parity failure rolls back the entire transaction and records durable repair")
     func parityFailureRollsBackAndRepairs() throws {
-        let fixture = try Fixture()
-        defer { fixture.remove() }
+        var fixtureReference: Fixture?
         var primaryTree: Fixture.LegacyTreeSnapshot?
-        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) { checkpoint in
-            guard checkpoint == .messages else {
-                if checkpoint == .room { primaryTree = try fixture.legacyTree() }
-                return
+        var healthPersistence = ConversationShadowHealthStore.Persistence.live()
+        let healthWrite = healthPersistence.writeAtomically
+        healthPersistence.writeAtomically = { data, url in
+            try healthWrite(data, url)
+            if String(decoding: data, as: UTF8.self).contains("\"reserved\"") {
+                primaryTree = try fixtureReference?.legacyTree()
             }
-            _ = try fixture.repository.upsertMessage(.init(
-                roomID: fixture.record.conversationID,
-                parentMessageID: fixture.messages.last?.id,
-                role: "assistant",
-                contentText: "not in legacy snapshot",
-                createdAt: fixture.now
-            ), intent: .historicalReplay)
         }
+        let fixture = try Fixture(healthPersistence: healthPersistence)
+        fixtureReference = fixture
+        defer { fixture.remove() }
+        let payload = try fixture.payload()
+        try fixture.installNormalImportFailureTrigger(.parityReadback, payload: payload)
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
         let result = fixture.coordinator(writer: writer).save(
             record: fixture.record,
             title: fixture.record.title,
@@ -383,7 +437,7 @@ struct ConversationShadowWriterTests {
         let persistence = ConversationShadowHealthStore.Persistence(
             writeAtomically: { data, url in
                 writes += 1
-                if writes == 2 { throw ForcedFailure.checkpoint }
+                if writes == 2 { throw ForcedFailure.injected }
                 try live.writeAtomically(data, url)
             },
             read: live.read
@@ -410,9 +464,12 @@ struct ConversationShadowWriterTests {
     func sameHashRetryReconciles() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
-        let failing = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) {
-            if $0 == .messages { throw ForcedFailure.checkpoint }
-        }
+        let payload = try fixture.payload()
+        try fixture.installNormalImportFailureTrigger(.messageInsert, payload: payload)
+        let failing = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
         let first = fixture.coordinator(writer: failing).save(
             record: fixture.record,
             title: fixture.record.title,
@@ -425,6 +482,9 @@ struct ConversationShadowWriterTests {
         let restartedHealth = try ConversationShadowHealthStore(diagnosticsDirectoryURL: fixture.diagnosticsDirectory)
         #expect(restartedHealth.snapshot().unresolved.map(\.correlationID).contains(oldCorrelation))
 
+        try fixture.database.runSQL(
+            "DROP TRIGGER shadow_normal_fail_message_insert;"
+        )
         let succeeding = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
         let reconciler = ConversationShadowReconciler(writer: succeeding, healthStore: restartedHealth, now: { fixture.now })
         let coordinator = LegacyConversationPrimarySaveCoordinator(
@@ -606,36 +666,38 @@ struct ConversationShadowWriterTests {
         }
     }
 
-    @Test("Sequential transaction rolls back after every mutation and parity phase", arguments: [
-        ConversationShadowWriterCheckpoint.room,
-        .roomUpdate,
-        .bindings,
-        .bindingUpdates,
-        .turns,
-        .messages,
-        .counterFinalization,
-        .parity,
-    ])
-    func sequentialRollbackAtEveryPhase(checkpoint: ConversationShadowWriterCheckpoint) throws {
+    @Test(
+        "Sequential TEMP trigger failures roll back every distinct observable mutation boundary",
+        arguments: SequentialImportFailurePhase.allCases
+    )
+    fileprivate func sequentialRollbackAtEveryObservablePhase(
+        phase: SequentialImportFailurePhase
+    ) throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
-        let seed = ConversationShadowWriter(database: fixture.database, repository: fixture.repository)
-        try seed.writeVerifiedSequentialCompletedSnapshot(try fixture.payload())
-        let before = try fixture.coreSnapshot()
-        let advanced = advancedSnapshot(fixture, appendLineage: true)
-        let payload = try fixture.payload(
-            record: advanced.record,
-            messages: advanced.messages,
-            hermesState: advanced.state
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
         )
-        let failing = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) {
-            if $0 == checkpoint { throw ForcedFailure.checkpoint }
+        let payload: ConversationShadowPayload
+        if phase == .roomInsert {
+            payload = try fixture.payload()
+        } else {
+            try writer.writeVerifiedSequentialCompletedSnapshot(try fixture.payload())
+            let advanced = advancedSnapshot(fixture, appendLineage: true)
+            payload = try fixture.payload(
+                record: advanced.record,
+                messages: advanced.messages,
+                hermesState: advanced.state
+            )
         }
+        let before = try fixture.databaseFingerprint()
+        try fixture.installSequentialImportFailureTrigger(phase, payload: payload)
 
-        #expect(throws: ForcedFailure.self) {
-            try failing.writeVerifiedSequentialCompletedSnapshot(payload)
-        }
-        #expect(try fixture.coreSnapshot() == before)
+        expectInjectedDatabaseFailure(phase: phase, operation: {
+            try writer.writeVerifiedSequentialCompletedSnapshot(payload)
+        })
+        try fixture.assertExactFingerprintAfterPhysicalReopen(before)
     }
 
     @Test("Later exact-prefix parity reconciles older semantic evidence after restart")
@@ -766,10 +828,12 @@ struct ConversationShadowWriterTests {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let reporter = ConversationShadowActivationReceiptReporter(maximumRecords: 1)
-        var sqliteCalled = false
-        let writer = ConversationShadowWriter(database: fixture.database, repository: fixture.repository) {
-            _ in sqliteCalled = true
-        }
+        try fixture.installAbortTriggersForAnyCanonicalMutation()
+        let before = try fixture.databaseFingerprint()
+        let writer = ConversationShadowWriter(
+            database: fixture.database,
+            repository: fixture.repository
+        )
         let reconciler = ConversationShadowReconciler(
             writer: writer,
             healthStore: fixture.healthStore,
@@ -795,7 +859,8 @@ struct ConversationShadowWriterTests {
 
         #expect(result.primaryReceipt.isCommitted)
         #expect(result.shadowCode == .gateStale)
-        #expect(!sqliteCalled)
+        #expect(!result.invokedShadowWriter)
+        #expect(try fixture.databaseFingerprint() == before)
         #expect(reporter.receipts.count == 1)
         #expect(reporter.receipts[0].generationID == result.generation.id)
         #expect(reporter.receipts[0].conversationID == fixture.record.conversationID)
@@ -827,6 +892,49 @@ struct ConversationShadowWriterTests {
             .init(provenance: .hermesRunsAPI, runState: .completed, containsTools: false, containsReasoning: false, containsApproval: false, sessionSyncComplete: false),
         ]
         #expect(excluded.allSatisfy { !$0.isEligible })
+    }
+
+    private func expectInjectedDatabaseFailure(
+        phase: NormalImportFailurePhase,
+        operation: () throws -> Void
+    ) {
+        expectInjectedDatabaseFailure(
+            expectsParityFailure: phase == .parityReadback,
+            operation: operation
+        )
+    }
+
+    private func expectInjectedDatabaseFailure(
+        phase: SequentialImportFailurePhase,
+        operation: () throws -> Void
+    ) {
+        expectInjectedDatabaseFailure(
+            expectsParityFailure: phase == .parityReadback,
+            operation: operation
+        )
+    }
+
+    private func expectInjectedDatabaseFailure(
+        expectsParityFailure: Bool,
+        operation: () throws -> Void
+    ) {
+        do {
+            try operation()
+            Issue.record("Expected the disposable SQLite fixture to reject the write")
+        } catch let error as ConversationShadowWriterError {
+            guard expectsParityFailure else {
+                Issue.record("Expected a SQLite trigger failure, got \(error)")
+                return
+            }
+            guard case .parity = error else {
+                Issue.record("Expected production parity rejection, got \(error)")
+                return
+            }
+        } catch is CiderDatabaseError {
+            #expect(!expectsParityFailure)
+        } catch {
+            Issue.record("Unexpected failure type: \(error)")
+        }
     }
 
     private func advancedSnapshot(
@@ -898,6 +1006,35 @@ struct ConversationShadowWriterTests {
     }
 }
 
+private enum NormalImportFailurePhase:
+    CaseIterable,
+    CustomTestStringConvertible
+{
+    case roomInsert
+    case bindingInsert
+    case turnInsert
+    case messageInsert
+    case parityReadback
+
+    var testDescription: String { String(describing: self) }
+}
+
+private enum SequentialImportFailurePhase:
+    CaseIterable,
+    CustomTestStringConvertible
+{
+    case roomInsert
+    case roomUpdate
+    case bindingInsert
+    case bindingUpdate
+    case turnInsert
+    case messageInsert
+    case counterFinalization
+    case parityReadback
+
+    var testDescription: String { String(describing: self) }
+}
+
 @MainActor
 private final class Fixture {
     struct LegacyTreeSnapshot: Equatable {
@@ -914,7 +1051,20 @@ private final class Fixture {
         var isEmpty: Bool { room == nil && bindings.isEmpty && turns.isEmpty && messages.isEmpty }
     }
 
+    struct DatabaseFingerprint: Equatable {
+        let core: CoreSnapshot
+        let tableCounts: [Int64]
+        let foreignKeyViolationCount: Int
+
+        var isEmpty: Bool {
+            core.isEmpty
+                && tableCounts == [0, 0, 0, 0]
+                && foreignKeyViolationCount == 0
+        }
+    }
+
     let root: URL
+    let databaseURL: URL
     let registryDirectory: URL
     let conversationDirectory: URL
     let diagnosticsDirectory: URL
@@ -940,8 +1090,9 @@ private final class Fixture {
         diagnosticsDirectory = root.appendingPathComponent("diagnostics", isDirectory: true)
         try FileManager.default.createDirectory(at: registryDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: conversationDirectory, withIntermediateDirectories: true)
+        databaseURL = root.appendingPathComponent("temporary-v30.db")
         database = CiderDatabase()
-        try database.open(at: root.appendingPathComponent("temporary-v30.db"))
+        try database.open(at: databaseURL)
         repository = ConversationRepository(database: database)
         let roomID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
         hermesState = HermesConversationState(
@@ -1062,12 +1213,248 @@ private final class Fixture {
     }
 
     func coreSnapshot() throws -> CoreSnapshot {
-        CoreSnapshot(
-            room: try repository.room(id: record.conversationID),
-            bindings: try repository.bindings(roomID: record.conversationID),
-            turns: try repository.turns(roomID: record.conversationID),
-            messages: try repository.messages(roomID: record.conversationID)
+        try Self.coreSnapshot(
+            repository: repository,
+            roomID: record.conversationID
         )
+    }
+
+    func databaseFingerprint() throws -> DatabaseFingerprint {
+        try Self.databaseFingerprint(
+            database: database,
+            repository: repository,
+            roomID: record.conversationID
+        )
+    }
+
+    func assertExactFingerprintAfterPhysicalReopen(
+        _ expected: DatabaseFingerprint
+    ) throws {
+        #expect(try databaseFingerprint() == expected)
+        #expect(expected.foreignKeyViolationCount == 0)
+        #expect(try database.integrityCheck().isHealthy)
+
+        database.close()
+        let reopened = CiderDatabase()
+        try reopened.open(at: databaseURL)
+        defer { reopened.close() }
+        let reopenedRepository = ConversationRepository(database: reopened)
+        #expect(
+            try Self.databaseFingerprint(
+                database: reopened,
+                repository: reopenedRepository,
+                roomID: record.conversationID
+            ) == expected
+        )
+        #expect(try reopened.integrityCheck().isHealthy)
+    }
+
+    func installOrderingAudit() throws {
+        try database.runSQL("""
+            CREATE TEMP TABLE shadow_writer_ordering_audit (
+                position INTEGER PRIMARY KEY AUTOINCREMENT,
+                phase TEXT NOT NULL
+            );
+            CREATE TEMP TRIGGER shadow_writer_ordering_room_insert
+            AFTER INSERT ON conversation_rooms
+            BEGIN
+                INSERT INTO shadow_writer_ordering_audit (phase) VALUES ('sqlite');
+            END;
+            """)
+    }
+
+    func orderingAudit() throws -> [String] {
+        let statement = try database.prepare("""
+            SELECT phase
+            FROM shadow_writer_ordering_audit
+            ORDER BY position;
+            """)
+        var phases: [String] = []
+        while try statement.step() {
+            phases.append(statement.string(at: 0))
+        }
+        return phases
+    }
+
+    func installAbortTriggersForAnyCanonicalMutation() throws {
+        try database.runSQL("""
+            CREATE TEMP TRIGGER shadow_writer_forbid_room_mutation
+            BEFORE INSERT ON conversation_rooms
+            BEGIN
+                SELECT RAISE(ABORT, 'unexpected room mutation');
+            END;
+            CREATE TEMP TRIGGER shadow_writer_forbid_binding_mutation
+            BEFORE INSERT ON conversation_runtime_bindings
+            BEGIN
+                SELECT RAISE(ABORT, 'unexpected binding mutation');
+            END;
+            CREATE TEMP TRIGGER shadow_writer_forbid_turn_mutation
+            BEFORE INSERT ON conversation_turns
+            BEGIN
+                SELECT RAISE(ABORT, 'unexpected turn mutation');
+            END;
+            CREATE TEMP TRIGGER shadow_writer_forbid_message_mutation
+            BEFORE INSERT ON conversation_messages
+            BEGIN
+                SELECT RAISE(ABORT, 'unexpected message mutation');
+            END;
+            """)
+    }
+
+    func installNormalImportFailureTrigger(
+        _ phase: NormalImportFailurePhase,
+        payload: ConversationShadowPayload
+    ) throws {
+        let plan = map(payload)
+        let room = try #require(plan.rooms.first)
+        let sql: String
+        switch phase {
+        case .roomInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_normal_fail_room_insert
+                BEFORE INSERT ON conversation_rooms
+                BEGIN
+                    SELECT RAISE(ABORT, 'normal room insert failure');
+                END;
+                """
+        case .bindingInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_normal_fail_binding_insert
+                BEFORE INSERT ON conversation_runtime_bindings
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'normal binding insert failure');
+                END;
+                """
+        case .turnInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_normal_fail_turn_insert
+                BEFORE INSERT ON conversation_turns
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'normal turn insert failure');
+                END;
+                """
+        case .messageInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_normal_fail_message_insert
+                BEFORE INSERT ON conversation_messages
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'normal message insert failure');
+                END;
+                """
+        case .parityReadback:
+            let lastMessage = try #require(plan.messages.last)
+            sql = """
+                CREATE TEMP TRIGGER shadow_normal_corrupt_for_parity
+                AFTER INSERT ON conversation_messages
+                WHEN NEW.id = '\(lastMessage.id.uuidString)'
+                BEGIN
+                    UPDATE conversation_rooms
+                    SET title = title || ' [transaction-local mismatch]'
+                    WHERE id = NEW.room_id;
+                END;
+                """
+        }
+        try database.runSQL(sql)
+    }
+
+    func installSequentialImportFailureTrigger(
+        _ phase: SequentialImportFailurePhase,
+        payload: ConversationShadowPayload
+    ) throws {
+        let plan = map(payload)
+        let room = try #require(plan.rooms.first)
+        let sql: String
+        switch phase {
+        case .roomInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_fail_room_insert
+                BEFORE INSERT ON conversation_rooms
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential room insert failure');
+                END;
+                """
+        case .roomUpdate:
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_fail_room_update
+                BEFORE UPDATE OF title, lifecycle_state, metadata_json, archived_at
+                ON conversation_rooms
+                WHEN NEW.id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential room update failure');
+                END;
+                """
+        case .bindingInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_fail_binding_insert
+                BEFORE INSERT ON conversation_runtime_bindings
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential binding insert failure');
+                END;
+                """
+        case .bindingUpdate:
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_fail_binding_update
+                BEFORE UPDATE ON conversation_runtime_bindings
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential binding update failure');
+                END;
+                """
+        case .turnInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_fail_turn_insert
+                BEFORE INSERT ON conversation_turns
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential turn insert failure');
+                END;
+                """
+        case .messageInsert:
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_fail_message_insert
+                BEFORE INSERT ON conversation_messages
+                WHEN NEW.room_id = '\(room.id.uuidString)'
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential message insert failure');
+                END;
+                """
+        case .counterFinalization:
+            let lastMessage = try #require(plan.messages.last)
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_require_finalization
+                AFTER INSERT ON conversation_messages
+                WHEN NEW.id = '\(lastMessage.id.uuidString)'
+                BEGIN
+                    UPDATE conversation_rooms
+                    SET updated_at = updated_at - 1
+                    WHERE id = NEW.room_id;
+                END;
+                CREATE TEMP TRIGGER shadow_sequential_fail_counter_finalization
+                BEFORE UPDATE OF updated_at ON conversation_rooms
+                WHEN NEW.id = '\(room.id.uuidString)'
+                  AND NEW.updated_at = \(DatabaseHelpers.encode(room.updatedAt))
+                BEGIN
+                    SELECT RAISE(ABORT, 'sequential counter finalization failure');
+                END;
+                """
+        case .parityReadback:
+            let lastMessage = try #require(plan.messages.last)
+            sql = """
+                CREATE TEMP TRIGGER shadow_sequential_corrupt_for_parity
+                AFTER INSERT ON conversation_messages
+                WHEN NEW.id = '\(lastMessage.id.uuidString)'
+                BEGIN
+                    UPDATE conversation_rooms
+                    SET title = title || ' [transaction-local mismatch]'
+                    WHERE id = NEW.room_id;
+                END;
+                """
+        }
+        try database.runSQL(sql)
     }
 
     func legacyTree() throws -> LegacyTreeSnapshot {
@@ -1082,6 +1469,46 @@ private final class Fixture {
             }
         }
         return .init(paths: bytes.keys.sorted(), bytes: bytes, hashes: hashes)
+    }
+
+    private static func coreSnapshot(
+        repository: ConversationRepository,
+        roomID: UUID
+    ) throws -> CoreSnapshot {
+        CoreSnapshot(
+            room: try repository.room(id: roomID),
+            bindings: try repository.bindings(roomID: roomID),
+            turns: try repository.turns(roomID: roomID),
+            messages: try repository.messages(roomID: roomID)
+        )
+    }
+
+    private static func databaseFingerprint(
+        database: CiderDatabase,
+        repository: ConversationRepository,
+        roomID: UUID
+    ) throws -> DatabaseFingerprint {
+        let tables = [
+            "conversation_rooms",
+            "conversation_runtime_bindings",
+            "conversation_turns",
+            "conversation_messages",
+        ]
+        let tableCounts = try tables.map { table -> Int64 in
+            let statement = try database.prepare("SELECT COUNT(*) FROM \(table);")
+            _ = try statement.step()
+            return statement.int64(at: 0)
+        }
+        let foreignKeys = try database.prepare("PRAGMA foreign_key_check;")
+        var violationCount = 0
+        while try foreignKeys.step() {
+            violationCount += 1
+        }
+        return DatabaseFingerprint(
+            core: try coreSnapshot(repository: repository, roomID: roomID),
+            tableCounts: tableCounts,
+            foreignKeyViolationCount: violationCount
+        )
     }
 
     private static func deterministicConversationPersistence() -> AIConversationStorage.Persistence {

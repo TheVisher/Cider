@@ -138,7 +138,6 @@ struct ConversationShadowRuntimeCompositionTests {
         #expect(try fixture.coreSnapshot() == coreBefore)
         #expect(composition.receiptReporter.receipts.isEmpty)
         #expect(fixture.events.isEmpty)
-        #expect(fixture.writerCheckpoints.isEmpty)
     }
 
     @Test("Composition is dormant and preserves legacy and conversation-core state")
@@ -155,14 +154,12 @@ struct ConversationShadowRuntimeCompositionTests {
             registry: fixture.registry,
             conversationStorage: fixture.storage,
             runtimeLogger: fixture.runtimeLogger,
-            writerCheckpoint: { fixture.writerCheckpoints.append($0) },
             installCoordinator: { $0 != nil }
         )
 
         let composition = try #require(delegate.conversationShadowRuntimeComposition)
         #expect(try fixture.legacyManifest() == legacyBefore)
         #expect(try fixture.coreSnapshot() == coreBefore)
-        #expect(fixture.writerCheckpoints.isEmpty)
         #expect(composition.healthStore.snapshot().unresolved.isEmpty)
         #expect(composition.healthStore.snapshot().resolvedHistory.isEmpty)
         #expect(composition.receiptReporter.receipts.isEmpty)
@@ -335,7 +332,6 @@ private final class Fixture {
     let runtimeLogger: ConversationShadowRuntimeLogger
     private let eventRecorder: EventRecorder
     var events: [ConversationShadowLogEvent] { eventRecorder.events }
-    var writerCheckpoints: [ConversationShadowWriterCheckpoint] = []
     private let seededRoomID = UUID(uuidString: "40000000-0000-4000-8000-000000000004")!
 
     init(openDatabase: Bool, seedCore: Bool = false) throws {

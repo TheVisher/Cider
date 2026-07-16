@@ -159,8 +159,27 @@ struct ConversationParticipantRunAttribution: Codable, Equatable, Sendable {
     let runID: UUID
     let participantID: UUID
     let profileID: String
+    let displayName: String?
     let participantRole: ConversationRoomParticipantRole
     let selectionSequence: Int
+
+    init(
+        invocationID: UUID,
+        runID: UUID,
+        participantID: UUID,
+        profileID: String,
+        displayName: String? = nil,
+        participantRole: ConversationRoomParticipantRole,
+        selectionSequence: Int
+    ) {
+        self.invocationID = invocationID
+        self.runID = runID
+        self.participantID = participantID
+        self.profileID = profileID
+        self.displayName = displayName
+        self.participantRole = participantRole
+        self.selectionSequence = selectionSequence
+    }
 }
 
 struct ConversationParticipantMessageAttribution: Codable, Equatable, Sendable {
@@ -168,7 +187,24 @@ struct ConversationParticipantMessageAttribution: Codable, Equatable, Sendable {
     let runID: UUID?
     let participantID: UUID?
     let profileID: String?
+    let displayName: String?
     let participantRole: ConversationRoomParticipantRole?
+
+    init(
+        invocationID: UUID,
+        runID: UUID?,
+        participantID: UUID?,
+        profileID: String?,
+        displayName: String? = nil,
+        participantRole: ConversationRoomParticipantRole?
+    ) {
+        self.invocationID = invocationID
+        self.runID = runID
+        self.participantID = participantID
+        self.profileID = profileID
+        self.displayName = displayName
+        self.participantRole = participantRole
+    }
 }
 
 struct ConversationParticipantExecutionRequest: Equatable, Sendable {
@@ -243,10 +279,11 @@ struct ConversationParticipantInvocationResult: Codable, Equatable, Sendable {
 enum ConversationParticipantInvocationError: Error, Equatable, LocalizedError {
     case invalid(String)
     case unavailable(String)
+    case conflict(String)
 
     var errorDescription: String? {
         switch self {
-        case .invalid(let message), .unavailable(let message): message
+        case .invalid(let message), .unavailable(let message), .conflict(let message): message
         }
     }
 }

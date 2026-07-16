@@ -345,7 +345,7 @@ struct AgentRoomsAttachmentArtifactExportTests {
         let recorder = ExportThreadRecorder()
         let presentationExporter = AgentRoomsRoomExportService(
             repository: repository,
-            beforeDiskWrite: { recorder.recordCurrentThread() }
+            fileManager: ExportThreadRecordingFileManager(recorder: recorder)
         )
         let presentationDestination = exportRoot.appendingPathComponent(
             "Portable Presentation.cider-room",
@@ -445,7 +445,7 @@ struct AgentRoomsAttachmentArtifactExportTests {
             at: createdAt
         )
         try persistence.markRunStarted(attempt, runID: runID, activity: [], at: createdAt)
-        try persistence.complete(
+        _ = try persistence.complete(
             attempt,
             completion: completion(
                 room: room,
@@ -567,6 +567,28 @@ private final class ExportThreadRecorder: @unchecked Sendable {
 
     func recordCurrentThread() {
         lock.withLock { observations.append(Thread.isMainThread) }
+    }
+}
+
+private final class ExportThreadRecordingFileManager: FileManager, @unchecked Sendable {
+    private let recorder: ExportThreadRecorder
+
+    init(recorder: ExportThreadRecorder) {
+        self.recorder = recorder
+        super.init()
+    }
+
+    override func createDirectory(
+        at url: URL,
+        withIntermediateDirectories createIntermediates: Bool,
+        attributes: [FileAttributeKey: Any]? = nil
+    ) throws {
+        recorder.recordCurrentThread()
+        try super.createDirectory(
+            at: url,
+            withIntermediateDirectories: createIntermediates,
+            attributes: attributes
+        )
     }
 }
 

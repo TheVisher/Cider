@@ -5,48 +5,30 @@ enum ConversationShadowWriterError: Error, Equatable {
     case parity(String)
 }
 
-enum ConversationShadowWriterCheckpoint: Equatable, Sendable {
-    case room
-    case roomUpdate
-    case bindings
-    case bindingUpdates
-    case turns
-    case messages
-    case counterFinalization
-    case parity
-}
-
 /// Dormant, fixture-driven legacy shadow writer. It has no live/shared defaults and no production caller.
 @MainActor
 final class ConversationShadowWriter {
     private let database: CiderDatabase
     private let repository: ConversationRepository
     private let mapper: LegacyConversationSnapshotMapper
-    private let checkpoint: (ConversationShadowWriterCheckpoint) throws -> Void
 
     init(
         database: CiderDatabase,
         repository: ConversationRepository,
-        mapper: LegacyConversationSnapshotMapper = .init(),
-        checkpoint: @escaping (ConversationShadowWriterCheckpoint) throws -> Void = { _ in }
+        mapper: LegacyConversationSnapshotMapper = .init()
     ) {
         self.database = database
         self.repository = repository
         self.mapper = mapper
-        self.checkpoint = checkpoint
     }
 
     func write(_ payload: ConversationShadowPayload) throws {
         let plan = mappedPlan(payload)
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             try writeRoom(try requiredSingleRoom(plan))
-            try checkpoint(.room)
             try writeBindings(plan.bindings)
-            try checkpoint(.bindings)
             try writeTurns(plan.turns)
-            try checkpoint(.turns)
             try writeMessages(plan.messages)
-            try checkpoint(.messages)
             let room = try requiredSingleRoom(plan)
             try repository.finalizeHistoricalRoomImport(
                 roomID: room.id,
@@ -55,35 +37,26 @@ final class ConversationShadowWriter {
                 updatedAt: room.updatedAt
             )
             try requireExactParity(plan)
-            try checkpoint(.parity)
         }
     }
 
     /// Dormant CID-776 mode for a completed snapshot whose persisted state is a proven exact prefix.
     func writeVerifiedSequentialCompletedSnapshot(_ payload: ConversationShadowPayload) throws {
         let plan = mappedPlan(payload)
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             let room = try requiredSingleRoom(plan)
             try validateVerifiedSequentialPrefix(plan)
             try advanceOrInsertRoom(room)
-            try checkpoint(.room)
-            try checkpoint(.roomUpdate)
             try advanceOrInsertBindings(plan.bindings)
-            try checkpoint(.bindings)
-            try checkpoint(.bindingUpdates)
             try writeTurns(plan.turns)
-            try checkpoint(.turns)
             try writeMessages(plan.messages)
-            try checkpoint(.messages)
             try repository.finalizeHistoricalRoomImport(
                 roomID: room.id,
                 nextTurnSequence: room.nextTurnSequence,
                 nextMessageSequence: room.nextMessageSequence,
                 updatedAt: room.updatedAt
             )
-            try checkpoint(.counterFinalization)
             try requireExactParity(plan)
-            try checkpoint(.parity)
         }
     }
 

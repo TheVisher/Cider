@@ -14,6 +14,10 @@ struct DatabaseIntegrityStatus: Equatable {
 /// Not a singleton — instantiate for testing, share one instance in the app.
 @MainActor
 final class CiderDatabase {
+    private enum TransactionMode: Equatable {
+        case deferred
+        case immediate
+    }
 
     /// Shared app-wide database instance. Must be opened during app launch.
     static let shared = CiderDatabase()
@@ -22,6 +26,7 @@ final class CiderDatabase {
     private var db: OpaquePointer?
     private(set) var databaseURL: URL?
     private var transactionDepth = 0
+    private var rootTransactionMode: TransactionMode?
 
     /// Whether the database connection is currently open.
     var isOpen: Bool { db != nil }
@@ -79,6 +84,7 @@ final class CiderDatabase {
         self.db = nil
         self.databaseURL = nil
         self.transactionDepth = 0
+        self.rootTransactionMode = nil
         logger.info("Database closed")
     }
 
@@ -95,6 +101,9 @@ final class CiderDatabase {
         let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
         if rc != SQLITE_OK {
             let message = errorMessage.map { String(cString: $0) } ?? "unknown error"
+            if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+                throw CiderDatabaseError.busy(message)
+            }
             throw CiderDatabaseError.runExec(message)
         }
     }
@@ -114,16 +123,53 @@ final class CiderDatabase {
     /// Run a block inside a SQLite transaction.
     /// Commits on success, rolls back on throw.
     func withTransaction<T>(_ body: @MainActor () throws -> T) throws -> T {
+        try withTransaction(mode: .deferred, body)
+    }
+
+    /// Acquires SQLite's single-writer reservation before the body performs any
+    /// authoritative reads. This prevents a deferred read snapshot from becoming
+    /// stale before its first write on another physical WAL connection.
+    func withImmediateTransaction<T>(_ body: @MainActor () throws -> T) throws -> T {
+        try withTransaction(mode: .immediate, body)
+    }
+
+    private func withTransaction<T>(
+        mode: TransactionMode,
+        _ body: @MainActor () throws -> T
+    ) throws -> T {
         let isNested = transactionDepth > 0
         let savepointName = "cider_transaction_\(transactionDepth + 1)"
         if isNested {
+            guard let rootTransactionMode else {
+                throw CiderDatabaseError.transactionState(
+                    "Nested transaction depth has no root transaction mode."
+                )
+            }
+            if mode == .immediate, rootTransactionMode == .deferred {
+                throw CiderDatabaseError.immediateTransactionRequiresImmediateRoot
+            }
             try runSQL("SAVEPOINT \(savepointName);")
         } else {
-            try runSQL("BEGIN TRANSACTION;")
+            guard rootTransactionMode == nil else {
+                throw CiderDatabaseError.transactionState(
+                    "Root transaction mode remained set after the previous transaction."
+                )
+            }
+            let beginStatement = switch mode {
+            case .deferred: "BEGIN TRANSACTION;"
+            case .immediate: "BEGIN IMMEDIATE TRANSACTION;"
+            }
+            try runSQL(beginStatement)
+            rootTransactionMode = mode
         }
 
         transactionDepth += 1
-        defer { transactionDepth -= 1 }
+        defer {
+            transactionDepth -= 1
+            if !isNested {
+                rootTransactionMode = nil
+            }
+        }
 
         do {
             let result = try body()

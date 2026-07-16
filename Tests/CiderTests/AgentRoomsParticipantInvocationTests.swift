@@ -5,6 +5,345 @@ import Testing
 @Suite("Agent Rooms Participant Invocation Tests")
 @MainActor
 struct AgentRoomsParticipantInvocationTests {
+    @Test("participant acceptance uses the transaction-current sequence and parent across connections")
+    func participantAcceptanceUsesCurrentSequenceAndParent() async throws {
+        let fixture = try makeAcceptanceFixture(title: "Participant append race")
+        defer { fixture.cleanup() }
+        let runtime = ParticipantProbeRuntime(
+            binding: fixture.advisor.runtimeBinding,
+            response: "Current-sequence participant answer",
+            update: "Accepted after ordinary append"
+        )
+        let persistenceB = AgentRoomsConversationPersistence(
+            database: fixture.secondaryDatabase,
+            repository: fixture.secondaryRepository,
+            defaultAgentProfile: fixture.headA,
+            participantProfiles: fixture.catalog.profiles
+        )
+        let attempt = try persistenceB.beginAttempt(
+            roomID: fixture.room.id,
+            roomTitle: fixture.room.title,
+            isReservedTestChat: false,
+            attemptID: UUID(),
+            clientMessageID: "cider-room-client:participant-append-race",
+            userMessageID: UUID(),
+            assistantMessageID: UUID(),
+            text: "Ordinary message committed on connection B",
+            at: Date(timeIntervalSince1970: 1_800_100_001)
+        )
+        let service = AgentRoomsParticipantInvocationService(
+            repository: fixture.primaryRepository,
+            participants: fixture.primaryParticipants,
+            runtimes: try ConversationParticipantRuntimeRegistry(executors: [runtime])
+        )
+        let result = try await service.invoke(.init(
+            roomID: fixture.room.id,
+            prompt: "Participant must follow current sequence",
+            selectedParticipantIDs: [fixture.advisorParticipantID],
+            origin: .user,
+            limits: .checkpoint
+        ))
+
+        #expect(result.runs.map(\.status) == [.completed])
+        #expect(await runtime.executionCount() == 1)
+        let messages = try fixture.primaryRepository.messages(roomID: fixture.room.id)
+        let participantUser = try #require(messages.first {
+            $0.source?.namespace == AgentRoomsParticipantService.submissionSourceNamespace
+        })
+        let routing = try submissionRouting(participantUser)
+        let acceptance = try #require(
+            try fixture.primaryRepository.routingAcceptanceHistory(roomID: fixture.room.id)?
+                .records.first(where: { $0.userMessageID == participantUser.id })
+        )
+        let ancestry = try fixture.primaryRepository.messages(
+            roomID: fixture.room.id,
+            throughHead: participantUser.id
+        )
+
+        #expect(participantUser.sequence == 2)
+        #expect(participantUser.parentMessageID == attempt.userMessageID)
+        #expect(routing.observedRoomMessageSequence == participantUser.sequence - 1)
+        #expect(routing.observedRoomMessageSequence == 1)
+        #expect(acceptance.routing == routing)
+        #expect(ancestry.map(\.id) == [attempt.userMessageID, participantUser.id])
+        try assertPhysicalReopenSucceeds(fixture)
+    }
+
+    @Test("participant acceptance uses the transaction-current head epoch but keeps explicit recipient")
+    func participantAcceptanceUsesCurrentHeadEpoch() async throws {
+        let fixture = try makeAcceptanceFixture(title: "Participant head race")
+        defer { fixture.cleanup() }
+        let runtime = ParticipantProbeRuntime(
+            binding: fixture.advisor.runtimeBinding,
+            response: "Explicit advisor answer",
+            update: "Accepted after head change"
+        )
+        let assignmentsB = AgentRoomsAgentAssignmentService(
+            repository: fixture.secondaryRepository,
+            catalog: fixture.catalog,
+            now: { Date(timeIntervalSince1970: 1_800_100_010) }
+        )
+        let changedAssignment = try assignmentsB.assign(
+            profileID: fixture.headB.id,
+            roomID: fixture.room.id
+        )
+        let service = AgentRoomsParticipantInvocationService(
+            repository: fixture.primaryRepository,
+            participants: fixture.primaryParticipants,
+            runtimes: try ConversationParticipantRuntimeRegistry(executors: [runtime])
+        )
+        _ = try await service.invoke(.init(
+            roomID: fixture.room.id,
+            prompt: "Keep the advisor explicit after the head changes",
+            selectedParticipantIDs: [fixture.advisorParticipantID],
+            origin: .user,
+            limits: .checkpoint
+        ))
+
+        let messages = try fixture.primaryRepository.messages(roomID: fixture.room.id)
+        let event = try #require(messages.first(where: { $0.role == "system" }))
+        let participantUser = try #require(messages.first {
+            $0.source?.namespace == AgentRoomsParticipantService.submissionSourceNamespace
+        })
+        let participantTurn = try #require(
+            try fixture.primaryRepository.turns(roomID: fixture.room.id).last
+        )
+        let submission = try submissionRouting(participantUser)
+        let generated = try generatedRouting(participantTurn)
+
+        #expect(changedAssignment.headRoutingEpoch == 2)
+        #expect(participantUser.sequence == 2)
+        #expect(participantUser.parentMessageID == event.id)
+        #expect(
+            submission.observedHeadRoutingEpoch
+                == changedAssignment.headRoutingEpoch
+        )
+        #expect(submission.observedRoomMessageSequence == event.sequence)
+        #expect(submission.recipients == [
+            ConversationRoutingRecipient(profile: fixture.advisor),
+        ])
+        #expect(generated.recipient == ConversationRoutingRecipient(profile: fixture.advisor))
+        #expect(
+            generated.observedHeadRoutingEpoch
+                == changedAssignment.headRoutingEpoch
+        )
+        #expect(generated.observedRoomMessageSequence == event.sequence)
+        try assertPhysicalReopenSucceeds(fixture)
+    }
+
+    @Test("participant acceptance rejects a roster removed on another connection without stale writes")
+    func participantAcceptanceRejectsCurrentRosterMismatch() async throws {
+        let fixture = try makeAcceptanceFixture(title: "Participant roster race")
+        defer { fixture.cleanup() }
+        let runtime = ParticipantProbeRuntime(
+            binding: fixture.advisor.runtimeBinding,
+            response: "Must not run",
+            update: "Must not persist"
+        )
+        _ = try fixture.secondaryParticipants.configureRoster(
+            roomID: fixture.room.id,
+            members: [
+                .init(profileID: fixture.headA.id, role: .actingAgent),
+                .init(profileID: fixture.headB.id, role: .advisor),
+            ]
+        )
+        let service = AgentRoomsParticipantInvocationService(
+            repository: fixture.primaryRepository,
+            participants: fixture.primaryParticipants,
+            runtimes: try ConversationParticipantRuntimeRegistry(executors: [runtime])
+        )
+        do {
+            _ = try await service.invoke(.init(
+                roomID: fixture.room.id,
+                prompt: "Removed advisor must not be accepted",
+                selectedParticipantIDs: [fixture.advisorParticipantID],
+                origin: .user,
+                limits: .checkpoint
+            ))
+            Issue.record("Expected transaction-current roster rejection")
+        } catch let error as ConversationParticipantInvocationError {
+            guard case .invalid = error else {
+                Issue.record("Expected invalid roster conflict, got \(error)")
+                return
+            }
+        }
+
+        #expect(await runtime.executionCount() == 0)
+        #expect(try fixture.primaryRepository.messages(roomID: fixture.room.id).isEmpty)
+        #expect(try fixture.primaryRepository.turns(roomID: fixture.room.id).isEmpty)
+        #expect(
+            try fixture.primaryRepository.routingAcceptanceHistory(roomID: fixture.room.id) == nil
+        )
+        #expect(
+            try fixture.primaryRepository.participantRoster(roomID: fixture.room.id)?
+                .members.map(\.profile.id) == [fixture.headA.id, fixture.headB.id]
+        )
+        try assertPhysicalReopenSucceeds(fixture)
+    }
+
+    @Test("participant writer contention is a typed bounded conflict with zero mutation")
+    func participantAcceptanceWriterContentionIsTyped() async throws {
+        let fixture = try makeAcceptanceFixture(title: "Participant writer contention")
+        defer { fixture.cleanup() }
+        let runtime = ParticipantProbeRuntime(
+            binding: fixture.advisor.runtimeBinding,
+            response: "Must not run",
+            update: "Must not persist"
+        )
+        try fixture.primaryDatabase.runSQL("PRAGMA busy_timeout=1;")
+        try fixture.secondaryDatabase.runSQL("BEGIN IMMEDIATE TRANSACTION;")
+        defer { try? fixture.secondaryDatabase.runSQL("ROLLBACK;") }
+        let service = AgentRoomsParticipantInvocationService(
+            repository: fixture.primaryRepository,
+            participants: fixture.primaryParticipants,
+            runtimes: try ConversationParticipantRuntimeRegistry(executors: [runtime])
+        )
+
+        do {
+            _ = try await service.invoke(.init(
+                roomID: fixture.room.id,
+                prompt: "Fail closed behind another physical writer",
+                selectedParticipantIDs: [fixture.advisorParticipantID],
+                origin: .user,
+                limits: .checkpoint
+            ))
+            Issue.record("Expected a bounded participant acceptance conflict")
+        } catch let error as ConversationParticipantInvocationError {
+            #expect(error == .conflict(
+                "Participant acceptance conflicted with another room update. Nothing was sent."
+            ))
+        }
+
+        try fixture.secondaryDatabase.runSQL("ROLLBACK;")
+        #expect(await runtime.executionCount() == 0)
+        #expect(try fixture.primaryRepository.messages(roomID: fixture.room.id).isEmpty)
+        #expect(try fixture.primaryRepository.turns(roomID: fixture.room.id).isEmpty)
+        #expect(
+            try fixture.primaryRepository.routingAcceptanceHistory(roomID: fixture.room.id) == nil
+        )
+        try assertPhysicalReopenSucceeds(fixture)
+    }
+
+    @Test("every participant acceptance write checkpoint rolls back the whole unit")
+    func participantAcceptanceWriteCheckpointsRollbackAtomically() async throws {
+        for checkpoint in ParticipantAcceptanceFailureCheckpoint.allCases {
+            let fixture = try makeAcceptanceFixture(title: "Rollback \(checkpoint)")
+            defer { fixture.cleanup() }
+            let runtime = ParticipantProbeRuntime(
+                binding: fixture.advisor.runtimeBinding,
+                response: "Must not run",
+                update: "Must not persist"
+            )
+            try installAcceptanceFailureTrigger(
+                checkpoint,
+                database: fixture.primaryDatabase
+            )
+            let service = AgentRoomsParticipantInvocationService(
+                repository: fixture.primaryRepository,
+                participants: fixture.primaryParticipants,
+                runtimes: try ConversationParticipantRuntimeRegistry(executors: [runtime])
+            )
+
+            await #expect(throws: CiderDatabaseError.self) {
+                try await service.invoke(.init(
+                    roomID: fixture.room.id,
+                    prompt: "Rollback after \(checkpoint)",
+                    selectedParticipantIDs: [fixture.advisorParticipantID],
+                    origin: .user,
+                    limits: .checkpoint
+                ))
+            }
+
+            #expect(await runtime.executionCount() == 0)
+            #expect(try fixture.primaryRepository.messages(roomID: fixture.room.id).isEmpty)
+            #expect(try fixture.primaryRepository.turns(roomID: fixture.room.id).isEmpty)
+            #expect(
+                try fixture.primaryRepository.routingAcceptanceHistory(roomID: fixture.room.id)
+                    == nil
+            )
+            try assertPhysicalReopenSucceeds(fixture)
+        }
+    }
+
+    @Test("production participant source contains no acceptance callback seams")
+    func productionParticipantSourceContainsNoAcceptanceHooks() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = repositoryRoot.appendingPathComponent(
+            "Sources/Cider/Services/Conversation/AgentRoomsParticipantService.swift"
+        )
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let modelsURL = repositoryRoot.appendingPathComponent(
+            "Sources/Cider/Models/ConversationParticipantModels.swift"
+        )
+        let models = try String(contentsOf: modelsURL, encoding: .utf8)
+
+        #expect(!source.contains("acceptanceBoundaryHook"))
+        #expect(!source.contains("acceptanceWriteHook"))
+        #expect(!source.contains("AgentRoomsParticipantAcceptanceWriteCheckpoint"))
+        #expect(!source.lowercased().contains("hook"))
+        #expect(!source.contains("@MainActor () throws -> Void"))
+        #expect(!source.contains("ConversationParticipantRuntimeResolving"))
+        #expect(!source.contains("await runtimes.executor"))
+        #expect(!models.contains("ConversationParticipantRuntimeResolving"))
+    }
+
+    @Test("single-connection participant acceptance stays exact and duplicate invocation is immutable")
+    func participantAcceptanceSingleConnectionAndDuplicateStayExact() async throws {
+        let fixture = try makeAcceptanceFixture(title: "Participant exact retry")
+        defer { fixture.cleanup() }
+        fixture.secondaryDatabase.close()
+        let runtime = ParticipantProbeRuntime(
+            binding: fixture.advisor.runtimeBinding,
+            response: "One exact participant answer",
+            update: "Executed once"
+        )
+        let service = AgentRoomsParticipantInvocationService(
+            repository: fixture.primaryRepository,
+            participants: fixture.primaryParticipants,
+            runtimes: try ConversationParticipantRuntimeRegistry(executors: [runtime])
+        )
+        let request = ConversationParticipantInvocationRequest(
+            id: UUID(),
+            roomID: fixture.room.id,
+            prompt: "Accept exactly once",
+            selectedParticipantIDs: [fixture.advisorParticipantID],
+            origin: .user,
+            limits: .checkpoint
+        )
+
+        let result = try await service.invoke(request)
+        let canonicalMessages = try fixture.primaryRepository.messages(roomID: fixture.room.id)
+        let canonicalTurns = try fixture.primaryRepository.turns(roomID: fixture.room.id)
+        let canonicalHistory = try fixture.primaryRepository.routingAcceptanceHistory(
+            roomID: fixture.room.id
+        )
+
+        #expect(result.runs.map(\.status) == [.completed])
+        #expect(await runtime.executionCount() == 1)
+        #expect(canonicalMessages.map(\.contentText) == [
+            "Accept exactly once", "One exact participant answer",
+        ])
+        #expect(canonicalTurns.count == 1)
+        #expect(canonicalHistory?.records.count == 1)
+        await #expect(throws: ConversationParticipantInvocationError.self) {
+            try await service.invoke(request)
+        }
+        #expect(await runtime.executionCount() == 1)
+        #expect(
+            try fixture.primaryRepository.messages(roomID: fixture.room.id)
+                == canonicalMessages
+        )
+        #expect(try fixture.primaryRepository.turns(roomID: fixture.room.id) == canonicalTurns)
+        #expect(
+            try fixture.primaryRepository.routingAcceptanceHistory(roomID: fixture.room.id)
+                == canonicalHistory
+        )
+        try assertPhysicalReopenSucceeds(fixture)
+    }
+
     @Test("two explicitly selected named participants keep deterministic attribution across reopen")
     func explicitParticipantsPersistAcrossReopen() async throws {
         let url = disposableDatabaseURL()
@@ -145,7 +484,7 @@ struct AgentRoomsParticipantInvocationTests {
             AgentRoomsRoomExportManifest.self,
             from: exported.manifestData
         )
-        #expect(manifest.schemaVersion == 2)
+        #expect(manifest.schemaVersion == 3)
         #expect(manifest.participants.map(\.displayName) == ["Cider", "Research"])
         #expect(manifest.turns.compactMap(\.participantAttribution?.participantID) == [
             actorID, advisorID,
@@ -391,6 +730,7 @@ struct AgentRoomsParticipantInvocationTests {
             runID: invocationID,
             participantID: participantID,
             profileID: profile.id,
+            displayName: profile.displayName,
             participantRole: .actingAgent,
             selectionSequence: 1
         )
@@ -471,6 +811,160 @@ struct AgentRoomsParticipantInvocationTests {
         )
     }
 
+    private struct AcceptanceFixture {
+        let url: URL
+        let primaryDatabase: CiderDatabase
+        let secondaryDatabase: CiderDatabase
+        let primaryRepository: ConversationRepository
+        let secondaryRepository: ConversationRepository
+        let primaryParticipants: AgentRoomsParticipantService
+        let secondaryParticipants: AgentRoomsParticipantService
+        let catalog: ConversationAgentProfileCatalog
+        let headA: ConversationAgentProfile
+        let headB: ConversationAgentProfile
+        let advisor: ConversationAgentProfile
+        let room: ConversationRoom
+        let advisorParticipantID: UUID
+
+        @MainActor
+        func cleanup() {
+            primaryDatabase.close()
+            secondaryDatabase.close()
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(atPath: url.path + "-wal")
+            try? FileManager.default.removeItem(atPath: url.path + "-shm")
+        }
+    }
+
+    private func makeAcceptanceFixture(title: String) throws -> AcceptanceFixture {
+        let url = disposableDatabaseURL()
+        let headA = try profile(id: "hermes", displayName: "Hermes")
+        let headB = try profile(id: "codex", displayName: "Codex")
+        let advisor = try profile(id: "research", displayName: "Research")
+        let catalog = try ConversationAgentProfileCatalog(
+            profiles: [headA, headB, advisor],
+            defaultProfileID: headA.id
+        )
+        let primaryDatabase = CiderDatabase()
+        try primaryDatabase.open(at: url)
+        let primaryRepository = ConversationRepository(database: primaryDatabase)
+        let primaryAssignments = AgentRoomsAgentAssignmentService(
+            repository: primaryRepository,
+            catalog: catalog
+        )
+        let room = try AgentRoomsActionService(
+            repository: primaryRepository,
+            agentAssignments: primaryAssignments
+        ).createConversation(title: title)
+        let primaryParticipants = AgentRoomsParticipantService(
+            repository: primaryRepository,
+            catalog: catalog
+        )
+        let advisorParticipantID = try #require(
+            try primaryParticipants.roster(roomID: room.id)?
+                .members.first(where: { $0.profile.id == advisor.id })?.id
+        )
+        let secondaryDatabase = CiderDatabase()
+        try secondaryDatabase.open(at: url)
+        let secondaryRepository = ConversationRepository(database: secondaryDatabase)
+        return AcceptanceFixture(
+            url: url,
+            primaryDatabase: primaryDatabase,
+            secondaryDatabase: secondaryDatabase,
+            primaryRepository: primaryRepository,
+            secondaryRepository: secondaryRepository,
+            primaryParticipants: primaryParticipants,
+            secondaryParticipants: AgentRoomsParticipantService(
+                repository: secondaryRepository,
+                catalog: catalog
+            ),
+            catalog: catalog,
+            headA: headA,
+            headB: headB,
+            advisor: advisor,
+            room: room,
+            advisorParticipantID: advisorParticipantID
+        )
+    }
+
+    private func submissionRouting(
+        _ message: ConversationMessage
+    ) throws -> ConversationSubmissionRoutingContext {
+        try #require(DatabaseHelpers.decodeJSON(
+            ConversationSubmissionRoutingContext.self,
+            from: message.metadata[
+                AgentRoomsConversationPersistence.submissionRoutingMetadataKey
+            ]
+        ))
+    }
+
+    private func generatedRouting(
+        _ turn: ConversationTurn
+    ) throws -> ConversationGeneratedRoutingContext {
+        try #require(DatabaseHelpers.decodeJSON(
+            ConversationGeneratedRoutingContext.self,
+            from: turn.metadata[AgentRoomsConversationPersistence.generatedRoutingMetadataKey]
+        ))
+    }
+
+    private func installAcceptanceFailureTrigger(
+        _ checkpoint: ParticipantAcceptanceFailureCheckpoint,
+        database: CiderDatabase
+    ) throws {
+        let sql = switch checkpoint {
+        case .userMessage:
+            """
+            CREATE TEMP TRIGGER participant_acceptance_fail_user
+            AFTER INSERT ON conversation_messages
+            WHEN NEW.source_namespace = '\(AgentRoomsParticipantService.submissionSourceNamespace)'
+            BEGIN
+                SELECT RAISE(ABORT, 'participant acceptance user-message failure');
+            END;
+            """
+        case .routingAcceptance:
+            """
+            CREATE TEMP TRIGGER participant_acceptance_fail_routing
+            BEFORE UPDATE OF metadata_json ON conversation_rooms
+            WHEN instr(
+                NEW.metadata_json,
+                '\(ConversationRepository.routingAcceptanceHistoryMetadataKey)'
+            ) > 0
+            AND instr(
+                OLD.metadata_json,
+                '\(ConversationRepository.routingAcceptanceHistoryMetadataKey)'
+            ) = 0
+            BEGIN
+                SELECT RAISE(ABORT, 'participant acceptance routing failure');
+            END;
+            """
+        case .firstTurn:
+            """
+            CREATE TEMP TRIGGER participant_acceptance_fail_turn
+            AFTER INSERT ON conversation_turns
+            WHEN NEW.source_namespace = '\(AgentRoomsParticipantService.runSourceNamespace)'
+            BEGIN
+                SELECT RAISE(ABORT, 'participant acceptance first-turn failure');
+            END;
+            """
+        }
+        try database.runSQL(sql)
+    }
+
+    private func assertPhysicalReopenSucceeds(_ fixture: AcceptanceFixture) throws {
+        fixture.primaryDatabase.close()
+        fixture.secondaryDatabase.close()
+        let reopenedDatabase = CiderDatabase()
+        try reopenedDatabase.open(at: fixture.url)
+        defer { reopenedDatabase.close() }
+        let reopenedPersistence = AgentRoomsConversationPersistence(
+            database: reopenedDatabase,
+            repository: ConversationRepository(database: reopenedDatabase),
+            defaultAgentProfile: fixture.headA,
+            participantProfiles: fixture.catalog.profiles
+        )
+        #expect(try reopenedPersistence.restoreCanonicalRoom(id: fixture.room.id) != nil)
+    }
+
     private func withRepository<T>(
         _ body: (ConversationRepository) async throws -> T
     ) async throws -> T {
@@ -494,6 +988,12 @@ struct AgentRoomsParticipantInvocationTests {
         try? FileManager.default.removeItem(atPath: url.path + "-wal")
         try? FileManager.default.removeItem(atPath: url.path + "-shm")
     }
+}
+
+private enum ParticipantAcceptanceFailureCheckpoint: CaseIterable {
+    case userMessage
+    case routingAcceptance
+    case firstTurn
 }
 
 private actor ParticipantProbeRuntime: ConversationParticipantRuntimeExecuting {

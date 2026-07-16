@@ -16,8 +16,7 @@ final class ConversationShadowRuntimeComposition {
         diagnosticsDirectoryURL: URL,
         registry: CiderAgentChatRegistry,
         conversationStorage: AIConversationStorage,
-        runtimeLogger: ConversationShadowRuntimeLogger,
-        writerCheckpoint: @escaping (ConversationShadowWriterCheckpoint) throws -> Void = { _ in }
+        runtimeLogger: ConversationShadowRuntimeLogger
     ) throws {
         guard database.isOpen else {
             throw ConversationShadowRuntimeCompositionError.databaseClosed
@@ -30,8 +29,7 @@ final class ConversationShadowRuntimeComposition {
         let writer = ConversationShadowWriter(
             database: database,
             repository: repository,
-            mapper: mapper,
-            checkpoint: writerCheckpoint
+            mapper: mapper
         )
         let reconciler = ConversationShadowReconciler(
             writer: writer,

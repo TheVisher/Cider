@@ -21,10 +21,23 @@ final class ConversationRepository {
     private static let maximumBoundedReadLimit = 500
     static let agentAssignmentMetadataKey = "cider.rooms.acting-agent.v1"
     static let participantRosterMetadataKey = "cider.rooms.participant-roster.v1"
+    static let routingAcceptanceHistoryMetadataKey =
+        "cider.rooms.routing-acceptance-history.v1"
+    static let headChangeEventMetadataKey = "cider.rooms.head-change-event.v1"
+    static let headChangeEventAuthority = "cider.rooms.head-routing.v1"
+    static let headChangeEventSourceNamespace = "cider.rooms.head-routing.v1"
     private let database: CiderDatabase
 
     init(database: CiderDatabase = .shared) {
         self.database = database
+    }
+
+    func withTransaction<T>(_ body: @MainActor () throws -> T) throws -> T {
+        try database.withTransaction(body)
+    }
+
+    func withImmediateTransaction<T>(_ body: @MainActor () throws -> T) throws -> T {
+        try database.withImmediateTransaction(body)
     }
 
     func createRoom(_ draft: ConversationRoomDraft) throws -> ConversationRoom {
@@ -53,11 +66,6 @@ final class ConversationRepository {
             }
             if let roster = draft.participantRoster {
                 try roster.validate()
-                guard roster.actingAgent?.profile.id == draft.agentAssignment?.profile.id else {
-                    throw ConversationRepositoryError.invalidDraft(
-                        "The participant roster acting agent must match the room assignment."
-                    )
-                }
                 guard let encoded = DatabaseHelpers.encodeJSON(roster) else {
                     throw ConversationRepositoryError.invalidDraft(
                         "Conversation room participant roster could not be encoded."
@@ -152,54 +160,71 @@ final class ConversationRepository {
         return roster
     }
 
+    func routingAcceptanceHistory(
+        roomID: UUID
+    ) throws -> ConversationRoutingAcceptanceHistory? {
+        let room = try requiredRoom(id: roomID)
+        guard let encoded = room.metadata[Self.routingAcceptanceHistoryMetadataKey] else {
+            return nil
+        }
+        guard let history = DatabaseHelpers.decodeJSON(
+            ConversationRoutingAcceptanceHistory.self,
+            from: encoded
+        ) else {
+            throw ConversationRepositoryError.integrity(
+                "Conversation room contains invalid routing acceptance history."
+            )
+        }
+        do {
+            try history.validate()
+        } catch {
+            throw ConversationRepositoryError.integrity(
+                "Conversation room contains invalid routing acceptance history."
+            )
+        }
+        return history
+    }
+
     @discardableResult
-    func setAgentAssignment(
+    func recordRoutingAcceptance(
         roomID: UUID,
-        assignment: ConversationRoomAgentAssignment,
+        record: ConversationRoutingAcceptanceRecord,
         at date: Date
-    ) throws -> ConversationRoomAgentAssignment {
-        try database.withTransaction {
+    ) throws -> ConversationRoutingAcceptanceHistory {
+        try database.withImmediateTransaction {
             let room = try requiredRoom(id: roomID)
-            try assignment.validate()
-            guard let encoded = DatabaseHelpers.encodeJSON(assignment) else {
+            guard room.lifecycleState == .active,
+                  room.archivedAt == nil,
+                  room.trashedAt == nil
+            else {
                 throw ConversationRepositoryError.invalidDraft(
-                    "Conversation room agent assignment could not be encoded."
+                    "Archived or trashed conversations cannot accept new routing."
+                )
+            }
+            try record.validate()
+            let existing = try routingAcceptanceHistory(roomID: roomID)
+                ?? ConversationRoutingAcceptanceHistory(records: [])
+            if let persisted = existing.records.first(where: {
+                $0.userMessageID == record.userMessageID
+            }) {
+                guard persisted == record else {
+                    throw ConversationRepositoryError.integrity(
+                        "Conversation routing acceptance is immutable."
+                    )
+                }
+                return existing
+            }
+            let updated = ConversationRoutingAcceptanceHistory(
+                records: existing.records + [record]
+            )
+            try updated.validate()
+            guard let encoded = DatabaseHelpers.encodeJSON(updated) else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation routing acceptance history could not be encoded."
                 )
             }
             var metadata = room.metadata
-            metadata[Self.agentAssignmentMetadataKey] = encoded
-            if let roster = try participantRoster(roomID: roomID) {
-                var members = roster.members
-                if let selectedIndex = members.firstIndex(where: { $0.profile.id == assignment.profile.id }),
-                   let actingIndex = members.firstIndex(where: { $0.role == .actingAgent }) {
-                    members[actingIndex].role = .advisor
-                    members[selectedIndex].role = .actingAgent
-                    members[selectedIndex] = ConversationRoomParticipant(
-                        id: members[selectedIndex].id,
-                        profile: assignment.profile,
-                        role: .actingAgent,
-                        addedAt: members[selectedIndex].addedAt
-                    )
-                } else if let actingIndex = members.firstIndex(where: { $0.role == .actingAgent }) {
-                    members[actingIndex] = ConversationRoomParticipant(
-                        id: members[actingIndex].id,
-                        profile: assignment.profile,
-                        role: .actingAgent,
-                        addedAt: members[actingIndex].addedAt
-                    )
-                }
-                let synchronized = ConversationRoomParticipantRoster(
-                    members: members,
-                    updatedAt: date
-                )
-                try synchronized.validate()
-                guard let rosterJSON = DatabaseHelpers.encodeJSON(synchronized) else {
-                    throw ConversationRepositoryError.invalidDraft(
-                        "Conversation room participant roster could not be encoded."
-                    )
-                }
-                metadata[Self.participantRosterMetadataKey] = rosterJSON
-            }
+            metadata[Self.routingAcceptanceHistoryMetadataKey] = encoded
             let statement = try database.prepare("""
                 UPDATE conversation_rooms
                 SET metadata_json = ?, updated_at = MAX(updated_at, ?)
@@ -209,8 +234,198 @@ final class ConversationRepository {
                 .bind(DatabaseHelpers.encode(date), at: 2)
                 .bind(roomID.uuidString, at: 3)
             try statement.step()
-            return try agentAssignment(roomID: roomID) ?? assignment
+            return try routingAcceptanceHistory(roomID: roomID) ?? updated
         }
+    }
+
+    @discardableResult
+    func setAgentAssignment(
+        roomID: UUID,
+        assignment: ConversationRoomAgentAssignment,
+        actor: ConversationHeadRoutingChangeActor,
+        at date: Date
+    ) throws -> ConversationRoomAgentAssignment {
+        try database.withImmediateTransaction {
+            let room = try requiredRoom(id: roomID)
+            guard isCanonicalAgentConfigurationRoom(room) else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Only Cider-owned canonical rooms can change acting agent."
+                )
+            }
+            guard room.lifecycleState == .active,
+                  room.archivedAt == nil,
+                  room.trashedAt == nil
+            else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Archived or trashed conversations cannot change acting agent."
+                )
+            }
+            try assignment.validate()
+            let previous = try agentAssignment(roomID: roomID)
+            if let previous, previous.profile.id == assignment.profile.id {
+                let refreshed = ConversationRoomAgentAssignment(
+                    profile: assignment.profile,
+                    assignedAt: date,
+                    headRoutingEpoch: previous.headRoutingEpoch,
+                    schemaVersion: previous.schemaVersion
+                )
+                try refreshed.validate()
+                guard let encoded = DatabaseHelpers.encodeJSON(refreshed) else {
+                    throw ConversationRepositoryError.invalidDraft(
+                        "Conversation room agent assignment could not be encoded."
+                    )
+                }
+                var metadata = room.metadata
+                metadata[Self.agentAssignmentMetadataKey] = encoded
+                let statement = try database.prepare("""
+                    UPDATE conversation_rooms
+                    SET metadata_json = ?, updated_at = MAX(updated_at, ?)
+                    WHERE id = ?;
+                    """)
+                statement.bind(DatabaseHelpers.encodeJSON(metadata) ?? "{}", at: 1)
+                    .bind(DatabaseHelpers.encode(date), at: 2)
+                    .bind(roomID.uuidString, at: 3)
+                try statement.step()
+                return try agentAssignment(roomID: roomID) ?? refreshed
+            }
+            let previousEpoch = previous?.headRoutingEpoch ?? 0
+            guard previousEpoch < Int64.max else {
+                throw ConversationRepositoryError.integrity(
+                    "Conversation head-routing epoch is exhausted."
+                )
+            }
+            let next = ConversationRoomAgentAssignment(
+                profile: assignment.profile,
+                assignedAt: date,
+                headRoutingEpoch: previousEpoch + 1
+            )
+            try next.validate()
+            guard let encoded = DatabaseHelpers.encodeJSON(next) else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation room agent assignment could not be encoded."
+                )
+            }
+            var metadata = room.metadata
+            metadata[Self.agentAssignmentMetadataKey] = encoded
+            let statement = try database.prepare("""
+                UPDATE conversation_rooms
+                SET metadata_json = ?, updated_at = MAX(updated_at, ?)
+                WHERE id = ?;
+                """)
+            statement.bind(DatabaseHelpers.encodeJSON(metadata) ?? "{}", at: 1)
+                .bind(DatabaseHelpers.encode(date), at: 2)
+                .bind(roomID.uuidString, at: 3)
+            try statement.step()
+
+            let event = ConversationHeadRoutingChangeEvent(
+                actor: actor,
+                oldHead: previous.map { ConversationRoutingRecipient(profile: $0.profile) },
+                newHead: ConversationRoutingRecipient(profile: next.profile),
+                oldHeadRoutingEpoch: previousEpoch,
+                newHeadRoutingEpoch: next.headRoutingEpoch,
+                changedAt: date
+            )
+            try event.validate()
+            guard let eventJSON = DatabaseHelpers.encodeJSON(event) else {
+                throw ConversationRepositoryError.invalidDraft(
+                    "Conversation head-change event could not be encoded."
+                )
+            }
+            let previousMessageID = try continuationParentMessageID(
+                roomID: roomID,
+                assignment: previous
+            )
+            _ = try upsertMessage(.init(
+                id: event.id,
+                roomID: roomID,
+                parentMessageID: previousMessageID,
+                role: "system",
+                contentText: "Head changed from \(event.oldHead?.displayName ?? "Unassigned") to \(event.newHead.displayName) (routing version \(event.newHeadRoutingEpoch)).",
+                status: .complete,
+                finishReason: .stop,
+                source: .init(
+                    namespace: Self.headChangeEventSourceNamespace,
+                    id: event.id.uuidString
+                ),
+                sourceCreatedAt: date,
+                metadata: [
+                    "authority": Self.headChangeEventAuthority,
+                    "schema_version": "1",
+                    Self.headChangeEventMetadataKey: eventJSON,
+                ],
+                createdAt: date
+            ), intent: .historicalReplay)
+            return try agentAssignment(roomID: roomID) ?? next
+        }
+    }
+
+    func continuationParentMessageID(
+        roomID: UUID,
+        assignment: ConversationRoomAgentAssignment?
+    ) throws -> UUID? {
+        for message in try messages(roomID: roomID).reversed() {
+            if message.metadata[AgentRoomsConversationPersistence.publicationStateMetadataKey]
+                == ConversationPublicationState.heldStale.rawValue {
+                continue
+            }
+            switch message.role.lowercased() {
+            case "system":
+                guard let raw = message.metadata[Self.headChangeEventMetadataKey],
+                      let event = DatabaseHelpers.decodeJSON(
+                          ConversationHeadRoutingChangeEvent.self,
+                          from: raw
+                      )
+                else { continue }
+                try event.validate()
+                if let assignment,
+                   event.newHead.profileID == assignment.profile.id,
+                   event.newHeadRoutingEpoch == assignment.headRoutingEpoch {
+                    return message.id
+                }
+            case "assistant":
+                guard message.status == .complete,
+                      message.finishReason == .stop,
+                      message.metadata[AgentRoomsParticipantService.messageAttributionMetadataKey] == nil
+                else { continue }
+                guard let raw = message.metadata[
+                    AgentRoomsConversationPersistence.generatedRoutingMetadataKey
+                ],
+                      let routing = DatabaseHelpers.decodeJSON(
+                          ConversationGeneratedRoutingContext.self,
+                          from: raw
+                      )
+                else {
+                    if assignment == nil { return message.id }
+                    continue
+                }
+                try routing.validate()
+                if routing.observedHeadRoutingEpoch == (assignment?.headRoutingEpoch ?? 0),
+                   assignment.map({ routing.recipient.profileID == $0.profile.id }) ?? true {
+                    return message.id
+                }
+            case "user":
+                guard let raw = message.metadata[
+                    AgentRoomsConversationPersistence.submissionRoutingMetadataKey
+                ],
+                      let routing = DatabaseHelpers.decodeJSON(
+                          ConversationSubmissionRoutingContext.self,
+                          from: raw
+                      )
+                else {
+                    return message.id
+                }
+                try routing.validate()
+                if routing.observedHeadRoutingEpoch == (assignment?.headRoutingEpoch ?? 0),
+                   assignment.map({ assignment in
+                       routing.recipients.contains { $0.profileID == assignment.profile.id }
+                   }) ?? true {
+                    return message.id
+                }
+            default:
+                continue
+            }
+        }
+        return nil
     }
 
     static func metadataWithoutAgentAssignment(_ metadata: [String: String]) -> [String: String] {
@@ -221,7 +436,25 @@ final class ConversationRepository {
         var result = metadata
         result.removeValue(forKey: agentAssignmentMetadataKey)
         result.removeValue(forKey: participantRosterMetadataKey)
+        result.removeValue(forKey: routingAcceptanceHistoryMetadataKey)
         return result
+    }
+
+    private func isCanonicalAgentConfigurationRoom(_ room: ConversationRoom) -> Bool {
+        let metadata = Self.metadataWithoutAgentConfiguration(room.metadata)
+        let isNative = room.stableKey == nil
+            && room.kind == "chat"
+            && metadata["authority"] == AgentRoomsConversationPersistence.nativeRoomAuthority
+            && metadata["schema_version"] == "1"
+            && metadata.count == 2
+        let isReservedTestChat =
+            room.stableKey == AgentRoomsTestChatPersistence.stableRoomKey
+            && room.kind == "cider-test-chat"
+            && metadata["authority"] == AgentRoomsConversationPersistence.testRoomAuthority
+            && metadata["schema_version"] == "1"
+            && metadata["source"] == "cider-rooms-live-continuation"
+            && metadata.count == 3
+        return isNative || isReservedTestChat
     }
 
     @discardableResult
@@ -230,15 +463,41 @@ final class ConversationRepository {
         roster: ConversationRoomParticipantRoster,
         at date: Date
     ) throws -> ConversationRoomParticipantRoster {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             let room = try requiredRoom(id: roomID)
-            try roster.validate()
-            guard roster.actingAgent?.profile.id == (try agentAssignment(roomID: roomID))?.profile.id else {
-                throw ConversationRepositoryError.invalidDraft(
-                    "The participant roster acting agent must match the room assignment."
+            guard isCanonicalAgentConfigurationRoom(room) else {
+                throw ConversationParticipantInvocationError.invalid(
+                    "Only Cider-owned canonical rooms can manage participants."
                 )
             }
-            guard let encoded = DatabaseHelpers.encodeJSON(roster) else {
+            guard room.lifecycleState == .active,
+                  room.archivedAt == nil,
+                  room.trashedAt == nil
+            else {
+                throw ConversationParticipantInvocationError.invalid(
+                    "Archived or trashed conversations cannot change participants."
+                )
+            }
+            try roster.validate()
+            let current = try participantRoster(roomID: roomID)
+            let canonicalRoster = ConversationRoomParticipantRoster(
+                members: roster.members.map { proposed in
+                    guard let existing = current?.members.first(where: {
+                        $0.profile.id == proposed.profile.id
+                    }) else {
+                        return proposed
+                    }
+                    return ConversationRoomParticipant(
+                        id: existing.id,
+                        profile: proposed.profile,
+                        role: proposed.role,
+                        addedAt: existing.addedAt
+                    )
+                },
+                updatedAt: roster.updatedAt
+            )
+            try canonicalRoster.validate()
+            guard let encoded = DatabaseHelpers.encodeJSON(canonicalRoster) else {
                 throw ConversationRepositoryError.invalidDraft(
                     "Conversation room participant roster could not be encoded."
                 )
@@ -254,7 +513,7 @@ final class ConversationRepository {
                 .bind(DatabaseHelpers.encode(date), at: 2)
                 .bind(roomID.uuidString, at: 3)
             try statement.step()
-            return try participantRoster(roomID: roomID) ?? roster
+            return try participantRoster(roomID: roomID) ?? canonicalRoster
         }
     }
 
@@ -323,7 +582,7 @@ final class ConversationRepository {
 
     @discardableResult
     func renameRoom(roomID: UUID, title: String, at date: Date) throws -> ConversationRoom {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             try requireNonempty(title, field: "room title")
             _ = try requiredRoom(id: roomID)
             let statement = try database.prepare("""
@@ -340,7 +599,7 @@ final class ConversationRepository {
     }
 
     func setLifecycle(roomID: UUID, state: ConversationRoomLifecycle, at date: Date) throws {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             _ = try requiredRoom(id: roomID)
             let archivedAt: Double? = state == .archived ? DatabaseHelpers.encode(date) : nil
             let trashedAt: Double? = state == .trashed ? DatabaseHelpers.encode(date) : nil
@@ -359,7 +618,7 @@ final class ConversationRepository {
     }
 
     func advanceRoomActivity(roomID: UUID, at date: Date) throws {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             _ = try requiredRoom(id: roomID)
             let statement = try database.prepare("""
                 UPDATE conversation_rooms
@@ -378,7 +637,7 @@ final class ConversationRepository {
         nextMessageSequence: Int64,
         updatedAt: Date
     ) throws {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             let statement = try database.prepare("""
                 UPDATE conversation_rooms
                 SET updated_at = ?
@@ -424,7 +683,7 @@ final class ConversationRepository {
     }
 
     func upsertRuntimeBinding(_ draft: ConversationRuntimeBindingDraft) throws -> ConversationRuntimeBinding {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             _ = try requiredRoom(id: draft.roomID)
             try requireNonempty(draft.runtimeID, field: "runtime id")
             try requireNonempty(draft.transportID, field: "transport id")
@@ -509,7 +768,7 @@ final class ConversationRepository {
     }
 
     func beginTurn(_ draft: ConversationTurnDraft) throws -> ConversationTurn {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             _ = try requiredRoom(id: draft.roomID)
             if let bindingID = draft.runtimeBindingID {
                 let binding = try requiredBinding(id: bindingID)
@@ -582,7 +841,7 @@ final class ConversationRepository {
         metadata: [String: String],
         at date: Date
     ) throws -> ConversationTurn {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             let current = try requiredTurn(id: id)
             guard !current.status.isTerminal else {
                 throw ConversationRepositoryError.integrity("Terminal conversation turn execution identity is immutable.")
@@ -664,7 +923,7 @@ final class ConversationRepository {
         error: ConversationTurnError? = nil,
         at date: Date
     ) throws -> ConversationTurn {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             let current = try requiredTurn(id: id)
             guard isValidTransition(from: current.status, to: status) else {
                 throw ConversationRepositoryError.invalidTransition(from: current.status, to: status)
@@ -693,7 +952,7 @@ final class ConversationRepository {
         _ draft: ConversationMessageDraft,
         intent: ConversationMessageWriteIntent
     ) throws -> ConversationMessageUpsertResult {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             try requireNonempty(draft.role, field: "message role")
             try validateSource(draft.source)
             _ = try requiredRoom(id: draft.roomID)
@@ -782,7 +1041,7 @@ final class ConversationRepository {
         turn draft: ConversationTurnDraft,
         messages drafts: [ConversationMessageDraft]
     ) throws -> ConversationTurnSnapshot {
-        try database.withTransaction {
+        try database.withImmediateTransaction {
             let turn = try beginTurn(draft)
             var messages: [ConversationMessage] = []
             for draft in drafts {

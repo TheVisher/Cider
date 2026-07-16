@@ -1216,6 +1216,7 @@ struct AgentRoomsWorkspaceView: View {
         case .pending: "Sending…"
         case .sent: "Sent"
         case .failed: "Failed"
+        case .held: "Held for review"
         }
     }
 

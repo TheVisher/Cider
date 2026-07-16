@@ -297,9 +297,9 @@ struct LegacyConversationEligiblePreviewServiceTests {
         try withEligibleFixture { fixture in
             try fixture.writeRoom(index: 1, stableIDOverride: "temporary.shared")
             try fixture.writeRoom(index: 2, stableIDOverride: "temporary.shared")
-            let service = fixture.makeService(beforeRevalidation: {
-                try? Data("changed".utf8).write(to: fixture.registryURL(index: 1), options: .atomic)
-            })
+            let service = fixture.makeService(fileManager: RevalidationMutatingFileManager(
+                targetURL: fixture.registryURL(index: 1)
+            ))
             let result = service.preview()
             #expect(result == .sanitized(.failed))
             #expect(result.registryMappingDiagnosis == nil)
@@ -341,15 +341,9 @@ struct LegacyConversationEligiblePreviewServiceTests {
     func concurrentChangeIsDiscarded() throws {
         try withEligibleFixture { fixture in
             try fixture.writeRoom(index: 1)
-            var changed = false
-            let service = fixture.makeService(beforeRevalidation: {
-                guard !changed else { return }
-                changed = true
-                try? Data("changed".utf8).write(
-                    to: fixture.registryURL(index: 1),
-                    options: .atomic
-                )
-            })
+            let service = fixture.makeService(fileManager: RevalidationMutatingFileManager(
+                targetURL: fixture.registryURL(index: 1)
+            ))
             let result = service.preview()
             #expect(result == .sanitized(.failed))
             #expect(result.conflictDiagnosis == nil)
@@ -362,12 +356,9 @@ struct LegacyConversationEligiblePreviewServiceTests {
             let shared = UUID(uuidString: "abababab-abab-4bab-8bab-abababababab")!
             try fixture.writeRoom(index: 1, messageID: shared)
             try fixture.writeRoom(index: 2, messageID: shared)
-            var changed = false
-            let service = fixture.makeService(beforeRevalidation: {
-                guard !changed else { return }
-                changed = true
-                try? Data("changed".utf8).write(to: fixture.registryURL(index: 1), options: .atomic)
-            })
+            let service = fixture.makeService(fileManager: RevalidationMutatingFileManager(
+                targetURL: fixture.registryURL(index: 1)
+            ))
             let result = service.preview()
             #expect(result == .sanitized(.failed))
             #expect(result.conflictDiagnosis == nil)
@@ -660,6 +651,42 @@ private struct PlannedParityReader: ConversationCoreParityReading {
     func messages(roomID: UUID) throws -> [ConversationMessage] { [] }
 }
 
+private final class RevalidationMutatingFileManager:
+    FileManager,
+    @unchecked Sendable
+{
+    private let targetDirectoryPath: String
+    private let targetPath: String
+    private var targetDirectoryReads = 0
+
+    init(targetURL: URL) {
+        targetDirectoryPath = targetURL.deletingLastPathComponent().path
+        targetPath = targetURL.path
+        super.init()
+    }
+
+    override func contentsOfDirectory(
+        at url: URL,
+        includingPropertiesForKeys keys: [URLResourceKey]?,
+        options mask: DirectoryEnumerationOptions = []
+    ) throws -> [URL] {
+        if url.path == targetDirectoryPath {
+            targetDirectoryReads += 1
+            if targetDirectoryReads == 2 {
+                try Data("changed during revalidation".utf8).write(
+                    to: URL(fileURLWithPath: targetPath),
+                    options: .atomic
+                )
+            }
+        }
+        return try super.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: keys,
+            options: mask
+        )
+    }
+}
+
 @MainActor
 private func withEligibleFixture(_ body: (EligibleFixture) throws -> Void) throws {
     let fixture = try EligibleFixture()
@@ -791,7 +818,7 @@ private final class EligibleFixture {
         parityReader: (any ConversationCoreParityReading)? = nil,
         canonicalIsHonestlyEmpty: @escaping () throws -> Bool = { true },
         limits: LegacyConversationEligiblePreviewService.Limits = .init(),
-        beforeRevalidation: @escaping () -> Void = {}
+        fileManager: FileManager = .default
     ) -> LegacyConversationEligiblePreviewService {
         LegacyConversationEligiblePreviewService(
             registryDirectory: registryDirectory,
@@ -799,7 +826,7 @@ private final class EligibleFixture {
             parityReader: parityReader ?? ConversationRepositoryParityReader(repository: repository),
             canonicalIsHonestlyEmpty: canonicalIsHonestlyEmpty,
             limits: limits,
-            beforeRevalidation: beforeRevalidation
+            fileManager: fileManager
         )
     }
 

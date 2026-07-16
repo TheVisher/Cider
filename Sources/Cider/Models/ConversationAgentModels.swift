@@ -155,29 +155,66 @@ struct ConversationAgentProfile: Codable, Equatable, Hashable, Sendable {
 }
 
 struct ConversationRoomAgentAssignment: Codable, Equatable, Sendable {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
+    private static let legacySchemaVersion = 1
 
     let schemaVersion: Int
     let profile: ConversationAgentProfile
     let assignedAt: Date
+    let headRoutingEpoch: Int64
 
     init(
         profile: ConversationAgentProfile,
         assignedAt: Date,
+        headRoutingEpoch: Int64 = 1,
         schemaVersion: Int = ConversationRoomAgentAssignment.schemaVersion
     ) {
         self.schemaVersion = schemaVersion
         self.profile = profile
         self.assignedAt = assignedAt
+        self.headRoutingEpoch = headRoutingEpoch
     }
 
     func validate() throws {
-        guard schemaVersion == Self.schemaVersion else {
+        guard schemaVersion == Self.schemaVersion || schemaVersion == Self.legacySchemaVersion else {
             throw ConversationAgentProfileValidationError.invalid(
                 "The room agent assignment uses an unsupported schema version."
             )
         }
+        guard (schemaVersion == Self.legacySchemaVersion && headRoutingEpoch == 0)
+                || (schemaVersion == Self.schemaVersion && headRoutingEpoch > 0)
+        else {
+            throw ConversationAgentProfileValidationError.invalid(
+                "The room agent assignment contains an invalid head-routing epoch."
+            )
+        }
         try ConversationAgentProfile.validate(profile)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case profile
+        case assignedAt
+        case headRoutingEpoch
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        profile = try container.decode(ConversationAgentProfile.self, forKey: .profile)
+        assignedAt = try container.decode(Date.self, forKey: .assignedAt)
+        headRoutingEpoch = try container.decodeIfPresent(
+            Int64.self,
+            forKey: .headRoutingEpoch
+        ) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(profile, forKey: .profile)
+        try container.encode(assignedAt, forKey: .assignedAt)
+        try container.encode(headRoutingEpoch, forKey: .headRoutingEpoch)
     }
 }
 

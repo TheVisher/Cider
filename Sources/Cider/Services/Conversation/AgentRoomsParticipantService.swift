@@ -29,6 +29,10 @@ final class AgentRoomsParticipantService: AgentRoomsParticipantActing {
     static let runAttributionMetadataKey = "cider.rooms.participant-run.v1"
     static let messageAttributionMetadataKey = "cider.rooms.participant-message.v1"
     static let activityMetadataKey = "cider.rooms.participant-activity.v1"
+    static let participantAuthority = "cider.rooms.participant-execution.v1"
+    static let submissionSourceNamespace = "cider.rooms.participant-submissions.v1"
+    static let runSourceNamespace = "cider.rooms.participant-runs.v1"
+    static let runtimeSourceMetadataKey = "cider.rooms.participant-runtime-source.v1"
     static let maximumPromptLength = 12_000
 
     private let repository: ConversationRepository
@@ -65,16 +69,6 @@ final class AgentRoomsParticipantService: AgentRoomsParticipantActing {
         else {
             throw ConversationParticipantInvocationError.invalid("The participant roster is out of bounds.")
         }
-        let assignment = try repository.agentAssignment(roomID: roomID)
-        guard let actingDraft = drafts.first(where: { $0.role == .actingAgent }),
-              drafts.filter({ $0.role == .actingAgent }).count == 1,
-              actingDraft.profileID == assignment?.profile.id
-        else {
-            throw ConversationParticipantInvocationError.invalid(
-                "The roster acting agent must match the room acting-agent assignment."
-            )
-        }
-        let existing = try repository.participantRoster(roomID: roomID)
         let timestamp = now()
         var seen = Set<String>()
         let members = try drafts.map { draft -> ConversationRoomParticipant in
@@ -86,10 +80,10 @@ final class AgentRoomsParticipantService: AgentRoomsParticipantActing {
                 )
             }
             return ConversationRoomParticipant(
-                id: existing?.members.first(where: { $0.profile.id == profile.id })?.id ?? UUID(),
+                id: UUID(),
                 profile: profile,
                 role: draft.role,
-                addedAt: existing?.members.first(where: { $0.profile.id == profile.id })?.addedAt ?? timestamp
+                addedAt: timestamp
             )
         }
         let roster = ConversationRoomParticipantRoster(members: members, updatedAt: timestamp)
@@ -327,6 +321,20 @@ final class AgentRoomsParticipantInvocationService {
         let executor: any ConversationParticipantRuntimeExecuting
     }
 
+    private struct PlannedExecution {
+        let participant: ConversationRoomParticipant
+        let executor: any ConversationParticipantRuntimeExecuting
+        let runID: UUID
+        let attribution: ConversationParticipantRunAttribution
+    }
+
+    private struct AcceptedInvocation {
+        let userMessage: ConversationMessage
+        let firstTurn: ConversationTurn
+        let submissionRouting: ConversationSubmissionRoutingContext
+        let executions: [PlannedExecution]
+    }
+
     private let repository: ConversationRepository
     private let participants: AgentRoomsParticipantService
     private let runtimes: ConversationParticipantRuntimeRegistry
@@ -367,68 +375,178 @@ final class AgentRoomsParticipantInvocationService {
                 "This participant invocation is already recorded."
             )
         }
-        let plan = try participants.invocationPlan(request)
-        let executionPlan = try plan.map { participant -> (
-            ConversationRoomParticipant,
-            any ConversationParticipantRuntimeExecuting
-        ) in
-            guard let executor = runtimes.executor(for: participant.profile.runtimeBinding) else {
+        let preflightPlan = try participants.invocationPlan(request)
+        var preflightExecutors: [UUID: any ConversationParticipantRuntimeExecuting] = [:]
+        for participant in preflightPlan {
+            guard let executor = runtimes.executor(
+                for: participant.profile.runtimeBinding
+            ) else {
                 throw ConversationParticipantInvocationError.unavailable(
                     "\(participant.profile.displayName) has no connected production runtime. Nothing was sent."
                 )
             }
-            return (participant, executor)
+            preflightExecutors[participant.id] = executor
         }
 
         let acceptedAt = now()
-        let previousMessageID = try repository.messages(roomID: request.roomID).last?.id
-        _ = try repository.upsertMessage(.init(
-            roomID: request.roomID,
-            parentMessageID: previousMessageID,
-            role: "user",
-            contentText: request.prompt.trimmingCharacters(in: .whitespacesAndNewlines),
-            status: .complete,
-            finishReason: .stop,
-            metadata: [
-                AgentRoomsParticipantService.messageAttributionMetadataKey:
-                    try AgentRoomsParticipantService.encoded(
-                        ConversationParticipantMessageAttribution(
-                            invocationID: request.id,
-                            runID: nil,
-                            participantID: nil,
-                            profileID: nil,
-                            participantRole: nil
+        let accepted: AcceptedInvocation
+        do {
+            accepted = try repository.withImmediateTransaction {
+                let existingInvocation = try repository.turns(roomID: request.roomID).contains {
+                    turn in
+                    try participants.turnAttribution(turn)?.invocationID == request.id
+                }
+                guard !existingInvocation else {
+                    throw ConversationParticipantInvocationError.invalid(
+                        "This participant invocation is already recorded."
+                    )
+                }
+                let authoritativePlan = try participants.invocationPlan(request)
+                guard let room = try repository.room(id: request.roomID),
+                      let assignment = try repository.agentAssignment(roomID: request.roomID)
+                else {
+                    throw ConversationParticipantInvocationError.invalid(
+                        "The room has no durable head-routing assignment."
+                    )
+                }
+                let submissionRouting = ConversationSubmissionRoutingContext(
+                    recipients: authoritativePlan.map {
+                        ConversationRoutingRecipient(profile: $0.profile)
+                    },
+                    observedHeadRoutingEpoch: assignment.headRoutingEpoch,
+                    observedRoomMessageSequence: max(0, room.nextMessageSequence - 1)
+                )
+                try submissionRouting.validate()
+                let planned = try authoritativePlan.enumerated().map {
+                    selectionIndex, participant -> PlannedExecution in
+                    guard let executor = preflightExecutors[participant.id],
+                          executor.binding == participant.profile.runtimeBinding
+                    else {
+                        throw ConversationParticipantInvocationError.unavailable(
+                            "\(participant.profile.displayName)’s runtime changed before acceptance. Nothing was sent."
                         )
+                    }
+                    let runID = UUID()
+                    return PlannedExecution(
+                        participant: participant,
+                        executor: executor,
+                        runID: runID,
+                        attribution: ConversationParticipantRunAttribution(
+                            invocationID: request.id,
+                            runID: runID,
+                            participantID: participant.id,
+                            profileID: participant.profile.id,
+                            displayName: participant.profile.displayName,
+                            participantRole: participant.role,
+                            selectionSequence: selectionIndex + 1
+                        )
+                    )
+                }
+                guard let first = planned.first else {
+                    throw ConversationParticipantInvocationError.invalid(
+                        "At least one participant execution is required."
+                    )
+                }
+                let previousMessageID = try repository.continuationParentMessageID(
+                    roomID: request.roomID,
+                    assignment: assignment
+                )
+                let userMessage = try repository.upsertMessage(.init(
+                    roomID: request.roomID,
+                    parentMessageID: previousMessageID,
+                    role: "user",
+                    contentText: request.prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+                    status: .complete,
+                    finishReason: .stop,
+                    source: .init(
+                        namespace: AgentRoomsParticipantService.submissionSourceNamespace,
+                        id: request.id.uuidString
                     ),
-            ],
-            createdAt: acceptedAt
-        ), intent: .historicalReplay)
+                    sourceCreatedAt: acceptedAt,
+                    metadata: [
+                        "authority": AgentRoomsParticipantService.participantAuthority,
+                        "schema_version": "1",
+                        AgentRoomsConversationPersistence.submissionRoutingMetadataKey:
+                            try AgentRoomsParticipantService.encoded(submissionRouting),
+                        AgentRoomsParticipantService.messageAttributionMetadataKey:
+                            try AgentRoomsParticipantService.encoded(
+                                ConversationParticipantMessageAttribution(
+                                    invocationID: request.id,
+                                    runID: nil,
+                                    participantID: nil,
+                                    profileID: nil,
+                                    participantRole: nil
+                                )
+                            ),
+                    ],
+                    createdAt: acceptedAt
+                ), intent: .historicalReplay).message
+                _ = try repository.recordRoutingAcceptance(
+                    roomID: request.roomID,
+                    record: ConversationRoutingAcceptanceRecord(
+                        userMessageID: userMessage.id,
+                        sourceNamespace: AgentRoomsParticipantService.submissionSourceNamespace,
+                        routing: submissionRouting
+                    ),
+                    at: acceptedAt
+                )
+                let routing = ConversationGeneratedRoutingContext(
+                    recipient: ConversationRoutingRecipient(profile: first.participant.profile),
+                    observedHeadRoutingEpoch: submissionRouting.observedHeadRoutingEpoch,
+                    observedRoomMessageSequence: submissionRouting.observedRoomMessageSequence,
+                    originatingUserMessageID: userMessage.id
+                )
+                try routing.validate()
+                let turn = try beginParticipantTurn(
+                    roomID: request.roomID,
+                    runID: first.runID,
+                    attribution: first.attribution,
+                    routing: routing,
+                    at: acceptedAt
+                )
+                return AcceptedInvocation(
+                    userMessage: userMessage,
+                    firstTurn: turn,
+                    submissionRouting: submissionRouting,
+                    executions: planned
+                )
+            }
+        } catch let error as CiderDatabaseError where error.isBusyConflict {
+            throw ConversationParticipantInvocationError.conflict(
+                "Participant acceptance conflicted with another room update. Nothing was sent."
+            )
+        }
 
+        let userMessage = accepted.userMessage
+        let firstTurn = accepted.firstTurn
+        let submissionRouting = accepted.submissionRouting
+        let planned = accepted.executions
         var results: [ConversationParticipantRunResult] = []
         var activitySequence = 0
-        for (selectionIndex, entry) in executionPlan.enumerated() {
+        for (selectionIndex, entry) in planned.enumerated() {
             if cancellationRequested.contains(request.id) { break }
-            let (participant, executor) = entry
-            let runID = UUID()
-            let attribution = ConversationParticipantRunAttribution(
-                invocationID: request.id,
-                runID: runID,
-                participantID: participant.id,
-                profileID: participant.profile.id,
-                participantRole: participant.role,
-                selectionSequence: selectionIndex + 1
+            let participant = entry.participant
+            let executor = entry.executor
+            let runID = entry.runID
+            let attribution = entry.attribution
+            let generatedRouting = ConversationGeneratedRoutingContext(
+                recipient: ConversationRoutingRecipient(profile: participant.profile),
+                observedHeadRoutingEpoch: submissionRouting.observedHeadRoutingEpoch,
+                observedRoomMessageSequence: submissionRouting.observedRoomMessageSequence,
+                originatingUserMessageID: userMessage.id
             )
-            let turn = try repository.beginTurn(.init(
-                id: runID,
-                roomID: request.roomID,
-                status: .pending,
-                metadata: [
-                    AgentRoomsParticipantService.runAttributionMetadataKey:
-                        try AgentRoomsParticipantService.encoded(attribution),
-                ],
-                createdAt: now()
-            ))
-            _ = try repository.transitionTurn(id: turn.id, to: .running, at: now())
+            try generatedRouting.validate()
+            let turn = selectionIndex == 0
+                ? firstTurn
+                : try repository.withImmediateTransaction {
+                    try beginParticipantTurn(
+                        roomID: request.roomID,
+                        runID: runID,
+                        attribution: attribution,
+                        routing: generatedRouting,
+                        at: now()
+                    )
+                }
             active[request.id] = ActiveExecution(
                 executionID: runID,
                 roomID: request.roomID,
@@ -444,7 +562,9 @@ final class AgentRoomsParticipantInvocationService {
                     limits: request.limits
                 ))
                 if cancellationRequested.contains(request.id) {
-                    _ = try repository.transitionTurn(id: turn.id, to: .cancelled, at: now())
+                    try repository.withImmediateTransaction {
+                        _ = try repository.transitionTurn(id: turn.id, to: .cancelled, at: now())
+                    }
                     results.append(.init(runID: runID, participantID: participant.id, status: .cancelled))
                     active.removeValue(forKey: request.id)
                     break
@@ -463,61 +583,97 @@ final class AgentRoomsParticipantInvocationService {
                         summary: update.summary
                     ))
                 }
-                let turnMetadata = [
-                    AgentRoomsParticipantService.runAttributionMetadataKey:
-                        try AgentRoomsParticipantService.encoded(attribution),
-                    AgentRoomsParticipantService.activityMetadataKey:
-                        try AgentRoomsParticipantService.encoded(activities),
-                ]
-                _ = try repository.bindActiveTurnExecution(
-                    id: turn.id,
-                    runtimeBindingID: nil,
-                    source: normalized.source,
-                    metadata: turnMetadata,
-                    at: now()
-                )
-                let parentMessageID = try repository.messages(roomID: request.roomID).last?.id
-                _ = try repository.upsertMessage(.init(
-                    roomID: request.roomID,
-                    turnID: turn.id,
-                    parentMessageID: parentMessageID,
-                    role: "assistant",
-                    contentText: normalized.text,
-                    status: .complete,
-                    finishReason: .stop,
-                    source: normalized.source,
-                    metadata: [
-                        AgentRoomsParticipantService.messageAttributionMetadataKey:
-                            try AgentRoomsParticipantService.encoded(
-                                ConversationParticipantMessageAttribution(
-                                    invocationID: request.id,
-                                    runID: runID,
-                                    participantID: participant.id,
-                                    profileID: participant.profile.id,
-                                    participantRole: participant.role
-                                )
-                            ),
-                    ],
-                    createdAt: now()
-                ), intent: .historicalReplay)
-                _ = try repository.transitionTurn(id: turn.id, to: .completed, at: now())
+                let completedAt = now()
+                try repository.withImmediateTransaction {
+                    var turnMetadata = try participantTurnMetadata(
+                        attribution: attribution,
+                        routing: generatedRouting,
+                        sourceCreatedAt: turn.createdAt
+                    )
+                    turnMetadata[AgentRoomsParticipantService.activityMetadataKey] =
+                        try AgentRoomsParticipantService.encoded(activities)
+                    turnMetadata[AgentRoomsParticipantService.runtimeSourceMetadataKey] =
+                        try AgentRoomsParticipantService.encoded(normalized.source)
+                    _ = try repository.bindActiveTurnExecution(
+                        id: turn.id,
+                        runtimeBindingID: nil,
+                        source: .init(
+                            namespace: AgentRoomsParticipantService.runSourceNamespace,
+                            id: runID.uuidString
+                        ),
+                        metadata: turnMetadata,
+                        at: completedAt
+                    )
+                    _ = try repository.upsertMessage(.init(
+                        roomID: request.roomID,
+                        turnID: turn.id,
+                        parentMessageID: userMessage.id,
+                        role: "assistant",
+                        contentText: normalized.text,
+                        status: .complete,
+                        finishReason: .stop,
+                        source: .init(
+                            namespace: AgentRoomsParticipantService.runSourceNamespace,
+                            id: "\(runID.uuidString):assistant"
+                        ),
+                        sourceCreatedAt: completedAt,
+                        metadata: [
+                            "authority": AgentRoomsParticipantService.participantAuthority,
+                            "schema_version": "1",
+                            AgentRoomsConversationPersistence.generatedRoutingMetadataKey:
+                                try AgentRoomsParticipantService.encoded(generatedRouting),
+                            AgentRoomsParticipantService.runtimeSourceMetadataKey:
+                                try AgentRoomsParticipantService.encoded(normalized.source),
+                            AgentRoomsParticipantService.messageAttributionMetadataKey:
+                                try AgentRoomsParticipantService.encoded(
+                                    ConversationParticipantMessageAttribution(
+                                        invocationID: request.id,
+                                        runID: runID,
+                                        participantID: participant.id,
+                                        profileID: participant.profile.id,
+                                        displayName: participant.profile.displayName,
+                                        participantRole: participant.role
+                                    )
+                                ),
+                        ],
+                        createdAt: completedAt
+                    ), intent: .historicalReplay)
+                    _ = try repository.transitionTurn(
+                        id: turn.id,
+                        to: .completed,
+                        at: completedAt
+                    )
+                    try repository.advanceRoomActivity(
+                        roomID: request.roomID,
+                        at: completedAt
+                    )
+                }
                 results.append(.init(runID: runID, participantID: participant.id, status: .completed))
             } catch is CancellationError {
-                _ = try repository.transitionTurn(id: turn.id, to: .cancelled, at: now())
+                try repository.withImmediateTransaction {
+                    _ = try repository.transitionTurn(id: turn.id, to: .cancelled, at: now())
+                }
                 results.append(.init(runID: runID, participantID: participant.id, status: .cancelled))
                 active.removeValue(forKey: request.id)
                 break
             } catch {
                 if cancellationRequested.contains(request.id) {
-                    _ = try repository.transitionTurn(id: turn.id, to: .cancelled, at: now())
+                    try repository.withImmediateTransaction {
+                        _ = try repository.transitionTurn(id: turn.id, to: .cancelled, at: now())
+                    }
                     results.append(.init(runID: runID, participantID: participant.id, status: .cancelled))
                 } else {
-                    _ = try repository.transitionTurn(
-                        id: turn.id,
-                        to: .failed,
-                        error: .init(code: "participant_execution_failed", detail: boundedError(error)),
-                        at: now()
-                    )
+                    try repository.withImmediateTransaction {
+                        _ = try repository.transitionTurn(
+                            id: turn.id,
+                            to: .failed,
+                            error: .init(
+                                code: "participant_execution_failed",
+                                detail: boundedError(error)
+                            ),
+                            at: now()
+                        )
+                    }
                     results.append(.init(runID: runID, participantID: participant.id, status: .failed))
                 }
                 active.removeValue(forKey: request.id)
@@ -535,6 +691,46 @@ final class AgentRoomsParticipantInvocationService {
         guard let execution = active[invocationID] else { return }
         cancellationRequested.insert(invocationID)
         await execution.executor.cancel(executionID: execution.executionID)
+    }
+
+    private func beginParticipantTurn(
+        roomID: UUID,
+        runID: UUID,
+        attribution: ConversationParticipantRunAttribution,
+        routing: ConversationGeneratedRoutingContext,
+        at date: Date
+    ) throws -> ConversationTurn {
+        try repository.beginTurn(.init(
+            id: runID,
+            roomID: roomID,
+            source: .init(
+                namespace: AgentRoomsParticipantService.runSourceNamespace,
+                id: runID.uuidString
+            ),
+            status: .running,
+            metadata: try participantTurnMetadata(
+                attribution: attribution,
+                routing: routing,
+                sourceCreatedAt: date
+            ),
+            createdAt: date
+        ))
+    }
+
+    private func participantTurnMetadata(
+        attribution: ConversationParticipantRunAttribution,
+        routing: ConversationGeneratedRoutingContext,
+        sourceCreatedAt: Date
+    ) throws -> [String: String] {
+        [
+            "authority": AgentRoomsParticipantService.participantAuthority,
+            "schema_version": "1",
+            "source_created_at": String(sourceCreatedAt.timeIntervalSince1970),
+            AgentRoomsParticipantService.runAttributionMetadataKey:
+                try AgentRoomsParticipantService.encoded(attribution),
+            AgentRoomsConversationPersistence.generatedRoutingMetadataKey:
+                try AgentRoomsParticipantService.encoded(routing),
+        ]
     }
 
     private func validatedOutput(

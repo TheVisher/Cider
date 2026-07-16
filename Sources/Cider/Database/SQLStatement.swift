@@ -88,6 +88,9 @@ final class SQLStatement {
         default:
             let db = sqlite3_db_handle(stmt)
             let message = String(cString: sqlite3_errmsg(db))
+            if result == SQLITE_BUSY || result == SQLITE_LOCKED {
+                throw CiderDatabaseError.busy(message)
+            }
             throw CiderDatabaseError.step(message)
         }
     }
