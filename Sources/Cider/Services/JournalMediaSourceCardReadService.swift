@@ -60,7 +60,8 @@ final class JournalMediaSourceCardReadService {
                 mediaItemID: mediaItemID,
                 relativePath: relativePath,
                 isOriginalAvailable: Self.isContained(url, in: vaultRoot)
-                    && fileManager.fileExists(atPath: url.path)
+                    && fileManager.fileExists(atPath: url.path),
+                transcription: JournalVoiceTranscription.read(from: metadata)
             ))
         }
         return cards

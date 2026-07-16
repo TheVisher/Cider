@@ -2530,6 +2530,38 @@ struct CiderCLI {
                         print("  Next safe action: \(payload["nextSafeAction"] as? String ?? "inspect_item")")
                     }
                     return
+                case .journalVoice:
+                    var payload = try await captureAddJournalStoredVoicePayload(
+                        args: args,
+                        storage: NotesStorage.shared
+                    )
+                    if let testRunID,
+                       let item = payload["item"] as? [String: Any],
+                       let id = item["id"] as? String,
+                       let title = item["title"] as? String {
+                        let testRun = try CiderCLITestRunManifestStore.recordItem(
+                            runID: testRunID,
+                            marker: testMarker,
+                            type: item["type"] as? String ?? "note",
+                            id: id,
+                            title: title,
+                            relativePath: item["relativePath"] as? String,
+                            captureEventID: payload["captureEventID"] as? String,
+                            sourceKind: "journal"
+                        )
+                        payload["testRun"] = testRun
+                        var commands = (payload["safeNextCommands"] as? [String]) ?? []
+                        let cleanupCommand = "cider-cli test-run cleanup \(testRunID) --dry-run --json"
+                        if !commands.contains(cleanupCommand) { commands.append(cleanupCommand) }
+                        payload["safeNextCommands"] = commands
+                    }
+                    if jsonOutput {
+                        outputJSON(payload)
+                    } else {
+                        print("Captured Journal voice entry: \(payload["date"] as? String ?? "")")
+                        print("  Next safe action: \(payload["nextSafeAction"] as? String ?? "inspect_item")")
+                    }
+                    return
                 }
                 let waitResult: BookmarkNativeCaptureWaitResult?
                 if result.item.type == "bookmark", let timeout = bookmarkNativeCaptureWaitTimeout(from: args) {
@@ -2820,7 +2852,7 @@ struct CiderCLI {
     }
 
     static func printCaptureUsage() {
-        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--media <local-path> --media-title <friendly-title> --media-id <source-id> --media-kind photo|audio|media ...] [--idempotency-key <key>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
+        print("Usage: cider-cli capture add [--kind note|todo|bookmark|file|event|contact|journal] (--stdin|--text-file <text-file-path>|--content <text>|--url <url>|--path <source-file-path>|<url|text|file-path>) [--title <title>] [--date yyyy-MM-dd|today] [--time <time>] [--media <local-path> --media-title <friendly-title> --media-id <source-id> --media-kind photo|audio|media ...] [--idempotency-key <key>] [--transcription-provider apple-speech-on-device|local-faster-whisper|shared-default] [--transcription-locale <locale>] [--transcription-executable <path> --transcription-model-path <path> --transcription-model-id <identity>] [--all-day] [--location <place>] [--details <text>] [--name <name>] [--relationship <text>] [--email <email>] [--phone <phone>] [--folder <target-folder-path>] [--surface <surface>] [--channel <channel>] [--message-id <id>] [--sender-id <id>] [--test-run <run-id>] [--test-marker <text>] [--timeout <seconds>|--no-wait] [--json]")
         print("       cider-cli capture review-queue [--limit <n>] [--include-deferred] [--json]")
         print("       cider-cli capture provenance-gaps [--limit <1-100>] [--json]  # read-only; no repair/backfill")
         print("       cider-cli capture provenance-gap <capture_event:UUID> [--duplicate-audit-limit <1-500>] [--duplicate-audit-cursor <token>] [--json]  # read-only resumable evidence drilldown")
@@ -2828,6 +2860,7 @@ struct CiderCLI {
         print("       cider-cli capture journal-cleanup --capture-event <capture-event-id> [--json]")
         print("       Journal capture: use `cider-cli capture add --kind journal --date today --stdin --json` so readable Markdown, metadata, provenance, indexing, and reviewable candidates stay connected.")
         print("       Atomic Journal media: repeat --media once per local source; repeat --media-title/--media-id/--media-kind once per source when supplied.")
+        print("       Stored Journal voice: supply exactly one audio --media, explicit --media-id, --idempotency-key, and --transcription-provider. Do not also supply transcript text; Cider commits only the provider's final transcript.")
         print("       Example destination: --folder \"Inbox/Notes\". In capture add, --path is always a source file, not a destination.")
         print("       cider-cli capture archive-artifacts <path> [--title <title>] [--card <id>] [--commit <sha>] [--cleanup none|trash] [--large-threshold-bytes <bytes>] [--json]")
     }
@@ -4539,36 +4572,7 @@ struct CiderCLI {
         guard isValidClockTimeString(time) else {
             throw CaptureAddArgumentError.message("--time must be HH:mm")
         }
-        let mediaPaths = parseFlagAll("--media", from: args)
-        let mediaTitles = parseFlagAll("--media-title", from: args)
-        let mediaIDs = parseFlagAll("--media-id", from: args)
-        let mediaKinds = parseFlagAll("--media-kind", from: args)
-        for (values, flag) in [(mediaTitles, "--media-title"), (mediaIDs, "--media-id"), (mediaKinds, "--media-kind")]
-            where !values.isEmpty && values.count != mediaPaths.count {
-            throw CaptureAddArgumentError.message("\(flag) must be supplied once per --media source, or omitted.")
-        }
-
-        let media: [JournalAtomicMediaSource] = try mediaPaths.enumerated().map { index, rawPath in
-            let path = NSString(string: rawPath).expandingTildeInPath
-            let url = URL(fileURLWithPath: path)
-            let kind: JournalMediaKind
-            if mediaKinds.isEmpty {
-                kind = journalMediaKind(forPathExtension: url.pathExtension)
-            } else {
-                guard let parsed = JournalMediaKind(rawValue: mediaKinds[index].localizedLowercase) else {
-                    throw CaptureAddArgumentError.message("--media-kind must be photo, audio, or media.")
-                }
-                kind = parsed
-            }
-            let stablePathDigest = LocalFileIntakeValidator.sha256(Data(url.standardizedFileURL.path.utf8))
-            return JournalAtomicMediaSource(
-                sourceURL: url,
-                sourceID: mediaIDs.isEmpty ? "cli-local-sha256-\(stablePathDigest)" : mediaIDs[index],
-                kind: kind,
-                displayTitle: mediaTitles.isEmpty ? nil : mediaTitles[index],
-                mimeType: nil
-            )
-        }
+        let media = try journalAtomicMediaSources(from: args)
         let sourceContext = captureSourceContext(from: args, originalText: rawContent)
         let source = journalAppendSource(commandSource: "capture.add", sourceContext: sourceContext)
         let requestIdentity = parseFlag("--idempotency-key", from: args)
@@ -4598,6 +4602,172 @@ struct CiderCLI {
             sourceContext: sourceContext,
             graphCandidates: graphCandidates
         )
+    }
+
+    static func captureAddJournalStoredVoicePayload(
+        args: [String],
+        storage: NotesStorage
+    ) async throws -> [String: Any] {
+        guard CiderDatabase.shared.isOpen else {
+            throw CaptureAddArgumentError.message("Journal voice capture requires the Cider database; nothing was changed.")
+        }
+        let media = try journalAtomicMediaSources(from: args, requireExplicitIDs: true)
+        guard media.count == 1, let audio = media.first, audio.kind == .audio else {
+            throw CaptureAddArgumentError.message("Stored Journal voice capture requires exactly one audio --media source.")
+        }
+        guard let idempotencyKey = parseFlag("--idempotency-key", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !idempotencyKey.isEmpty else {
+            throw CaptureAddArgumentError.message("Stored Journal voice capture requires an explicit --idempotency-key.")
+        }
+        let date = try resolveDailyNoteDateString(parseFlag("--date", from: args))
+        let time = parseFlag("--time", from: args) ?? twentyFourHourTimeFormatter.string(from: Date())
+        guard isValidClockTimeString(time) else {
+            throw CaptureAddArgumentError.message("--time must be HH:mm")
+        }
+        let provider = try journalStoredAudioProviderRequest(from: args)
+        let sourceContext = captureSourceContext(from: args, originalText: "")
+        let receipt = try await JournalStoredVoiceCaptureCoordinator(
+            database: CiderDatabase.shared,
+            notesStorage: storage,
+            vaultRoot: StoragePaths.cachedVaultDirectoryURL
+        ).capture(.init(
+            journalDate: date,
+            time: time,
+            audioURL: audio.sourceURL,
+            sourceID: audio.sourceID,
+            displayTitle: audio.displayTitle,
+            mimeType: audio.mimeType,
+            source: journalAppendSource(commandSource: "capture.add.voice", sourceContext: sourceContext),
+            capturedAt: try journalCapturedAt(date: date, time: time),
+            idempotencyKey: idempotencyKey,
+            sourceContext: sourceContext,
+            provider: provider
+        ))
+        let graphCandidates = recordJournalGraphCandidates(
+            captureEventID: receipt.atomicReceipt.receiptID,
+            journalOwner: SecondBrainOwnerRef(ownerType: "note", ownerID: receipt.atomicReceipt.item.id)
+        )
+        var payload = journalAtomicCapturePayload(
+            receipt.atomicReceipt,
+            sourceContext: sourceContext,
+            graphCandidates: graphCandidates
+        )
+        let transcription = journalVoiceTranscriptionPayload(receipt.transcription)
+        payload["writer"] = "journal_stored_voice_v1"
+        payload["voiceCapture"] = true
+        payload["transcription"] = transcription
+        payload["provider"] = [
+            "requestedID": provider.providerID,
+            "selectedID": receipt.transcription.providerID,
+            "usedFallback": false,
+        ]
+        if var atomicReceiptPayload = payload["receipt"] as? [String: Any] {
+            atomicReceiptPayload["transcription"] = transcription
+            payload["receipt"] = atomicReceiptPayload
+        }
+        return payload
+    }
+
+    static func journalAtomicMediaSources(
+        from args: [String],
+        requireExplicitIDs: Bool = false
+    ) throws -> [JournalAtomicMediaSource] {
+        let mediaPaths = parseFlagAll("--media", from: args)
+        let mediaTitles = parseFlagAll("--media-title", from: args)
+        let mediaIDs = parseFlagAll("--media-id", from: args)
+        let mediaKinds = parseFlagAll("--media-kind", from: args)
+        for (values, flag) in [(mediaTitles, "--media-title"), (mediaIDs, "--media-id"), (mediaKinds, "--media-kind")]
+            where !values.isEmpty && values.count != mediaPaths.count {
+            throw CaptureAddArgumentError.message("\(flag) must be supplied once per --media source, or omitted.")
+        }
+        if requireExplicitIDs, mediaIDs.count != mediaPaths.count {
+            throw CaptureAddArgumentError.message("Stored Journal voice capture requires one explicit --media-id for its audio source.")
+        }
+        return try mediaPaths.enumerated().map { index, rawPath in
+            let path = NSString(string: rawPath).expandingTildeInPath
+            let url = URL(fileURLWithPath: path)
+            let kind: JournalMediaKind
+            if mediaKinds.isEmpty {
+                kind = journalMediaKind(forPathExtension: url.pathExtension)
+            } else {
+                guard let parsed = JournalMediaKind(rawValue: mediaKinds[index].localizedLowercase) else {
+                    throw CaptureAddArgumentError.message("--media-kind must be photo, audio, or media.")
+                }
+                kind = parsed
+            }
+            let stablePathDigest = LocalFileIntakeValidator.sha256(Data(url.standardizedFileURL.path.utf8))
+            return JournalAtomicMediaSource(
+                sourceURL: url,
+                sourceID: mediaIDs.isEmpty ? "cli-local-sha256-\(stablePathDigest)" : mediaIDs[index],
+                kind: kind,
+                displayTitle: mediaTitles.isEmpty ? nil : mediaTitles[index],
+                mimeType: nil
+            )
+        }
+    }
+
+    static func journalStoredAudioProviderRequest(
+        from args: [String]
+    ) throws -> CiderStoredAudioTranscriptionProviderRequest {
+        guard let providerID = parseFlag("--transcription-provider", from: args)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !providerID.isEmpty else {
+            throw CaptureAddArgumentError.message("Stored Journal voice capture requires an explicit --transcription-provider.")
+        }
+        let locale = parseFlag("--transcription-locale", from: args)
+        if providerID == CiderTranscriptionProviderSelection.localFasterWhisperProviderID {
+            guard let executable = parseFlag("--transcription-executable", from: args),
+                  let modelPath = parseFlag("--transcription-model-path", from: args),
+                  let modelID = parseFlag("--transcription-model-id", from: args),
+                  !executable.isEmpty, !modelPath.isEmpty, !modelID.isEmpty else {
+                throw CaptureAddArgumentError.message("The local faster-whisper provider requires explicit executable, model cache, and model identity configuration.")
+            }
+            let timeout: TimeInterval
+            if let rawTimeout = parseFlag("--transcription-timeout", from: args) {
+                guard let parsed = TimeInterval(rawTimeout), (1...600).contains(parsed) else {
+                    throw CaptureAddArgumentError.message("--transcription-timeout must be between 1 and 600 seconds.")
+                }
+                timeout = parsed
+            } else {
+                timeout = 120
+            }
+            return .init(
+                providerID: providerID,
+                localeIdentifier: locale,
+                localFasterWhisperConfiguration: .init(
+                    executableURL: URL(fileURLWithPath: NSString(string: executable).expandingTildeInPath),
+                    modelDirectoryURL: URL(fileURLWithPath: NSString(string: modelPath).expandingTildeInPath, isDirectory: true),
+                    modelIdentity: modelID,
+                    language: locale,
+                    timeout: timeout,
+                    maximumOutputBytes: 2_000_000
+                )
+            )
+        }
+        return .init(providerID: providerID, localeIdentifier: locale)
+    }
+
+    static func journalVoiceTranscriptionPayload(_ value: JournalVoiceTranscription) -> [String: Any] {
+        [
+            "status": value.status.rawValue,
+            "text": value.text,
+            "providerID": value.providerID,
+            "adapterVersion": value.adapterVersion,
+            "modelIdentity": value.modelIdentity ?? NSNull(),
+            "execution": value.execution.rawValue,
+            "locale": value.localeIdentifier,
+            "startedAt": DatabaseHelpers.encode(value.startedAt),
+            "completedAt": value.completedAt.map(DatabaseHelpers.encode) ?? NSNull(),
+            "audioDuration": value.audioDuration ?? NSNull(),
+            "segments": value.segments.map {
+                ["text": $0.text, "timestamp": $0.timestamp, "duration": $0.duration]
+            },
+            "sourceAudio": [
+                "id": value.sourceAudioID,
+                "sha256": value.sourceAudioSHA256,
+                "retentionPolicy": value.retention.rawValue,
+            ],
+            "usedNetworkFallback": value.usedNetworkFallback,
+        ]
     }
 
     static func journalMediaKind(forPathExtension pathExtension: String) -> JournalMediaKind {
@@ -14112,6 +14282,7 @@ struct CiderCLI {
         case event(CaptureAddEventInput)
         case contact(CaptureAddContactInput)
         case journal(String)
+        case journalVoice
 
         var originalText: String {
             switch self {
@@ -14123,6 +14294,8 @@ struct CiderCLI {
                 contact.sourceText
             case .journal(let raw):
                 raw
+            case .journalVoice:
+                ""
             }
         }
 
@@ -14451,6 +14624,12 @@ struct CiderCLI {
         case "contact":
             return try .contact(resolveCaptureAddContactInput(from: args, rawText: rawText))
         case "journal", "daily", "daily-journal":
+            if parseFlag("--transcription-provider", from: args) != nil {
+                guard rawText == nil, positionalText == nil else {
+                    throw CaptureAddArgumentError.message("Stored Journal voice capture derives its exact text from audio; do not also supply --stdin, --content, --text-file, or positional transcript text.")
+                }
+                return .journalVoice
+            }
             if let rawText { return .journal(rawText) }
             if let content = parseFlag("--content", from: args) {
                 return .journal(content
@@ -14473,6 +14652,8 @@ struct CiderCLI {
             "--source-meta", "--date", "--time", "--location", "--details", "--name",
             "--relationship", "--email", "--phone", "--test-run", "--test-marker",
             "--media", "--media-title", "--media-id", "--media-kind", "--idempotency-key",
+            "--transcription-provider", "--transcription-locale", "--transcription-executable",
+            "--transcription-model-path", "--transcription-model-id", "--transcription-timeout",
         ]
         let booleanFlags: Set<String> = [
             "--stdin", "--json", "--no-wait", "--all-day", "--help", "-h",
@@ -32142,7 +32323,7 @@ struct CiderCLI {
             return "Inbox/Date Cards"
         case .contact:
             return "Inbox/Contacts"
-        case .journal:
+        case .journal, .journalVoice:
             return "Inbox/Notes"
         }
     }

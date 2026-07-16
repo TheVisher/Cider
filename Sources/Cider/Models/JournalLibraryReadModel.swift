@@ -88,6 +88,7 @@ struct JournalMediaSourceCard: Identifiable, Hashable {
     let mediaItemID: UUID
     let relativePath: String
     let isOriginalAvailable: Bool
+    var transcription: JournalVoiceTranscription? = nil
 
     var canonicalItemRef: LibraryEntityRef {
         LibraryEntityRef(type: .vaultFile, entityID: mediaItemID)

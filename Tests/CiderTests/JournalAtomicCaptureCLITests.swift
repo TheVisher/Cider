@@ -167,6 +167,50 @@ struct JournalAtomicCaptureCLITests {
         ) == durableDigestBefore)
     }
 
+    @Test("stored voice CLI uses capture add and fails closed for unsupported or misconfigured explicit providers")
+    func storedVoiceProviderFailuresDoNotMutateDisposableVault() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-journal-cli-voice-failure-\(UUID().uuidString)", isDirectory: true)
+        let vault = root.appendingPathComponent("vault", isDirectory: true)
+        let sources = root.appendingPathComponent("sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = sources.appendingPathComponent("generated-fixture.m4a")
+        try Data("generated disposable audio bytes".utf8).write(to: audio, options: .atomic)
+        let base = [
+            "capture", "add", "--kind", "journal", "--date", "2026-07-15", "--time", "18:24",
+            "--media", audio.path, "--media-id", "cli:voice:fixture:1", "--media-kind", "audio",
+            "--idempotency-key", "cli:voice:retry:1", "--json",
+        ]
+
+        let unsupported = try runCLI(
+            args: base + ["--transcription-provider", "unsupported-provider"],
+            vault: vault
+        )
+        #expect(unsupported.status != 0)
+        let unsupportedJSON = try parseAnyJSONObject(unsupported.stdout)
+        #expect(unsupportedJSON["ok"] as? Bool == false)
+        #expect(!(unsupportedJSON["error"] as? String ?? "").contains(audio.path))
+
+        let misconfigured = try runCLI(
+            args: base + ["--transcription-provider", "local-faster-whisper"],
+            vault: vault
+        )
+        #expect(misconfigured.status != 0)
+        let misconfiguredJSON = try parseAnyJSONObject(misconfigured.stdout)
+        #expect(misconfiguredJSON["ok"] as? Bool == false)
+        #expect(!(misconfiguredJSON["error"] as? String ?? "").contains(audio.path))
+
+        let database = CiderDatabase()
+        try database.open(at: vault.appendingPathComponent(".cider/cider.db"))
+        defer { database.close() }
+        #expect(try count("items", database: database) == 0)
+        #expect(try count("capture_events", database: database) == 0)
+        #expect(try count("capture_attachments", database: database) == 0)
+        #expect(FileManager.default.fileExists(atPath: audio.path))
+    }
+
     private func runCLI(
         args: [String],
         vault: URL,

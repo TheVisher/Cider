@@ -37,7 +37,14 @@ struct JournalMediaIntakeRequest: Equatable, Sendable {
     ) {
         self.sourceURL = sourceURL
         let completeDigest = LocalFileIntakeValidator.sha256(Data(sourceID.utf8))
-        self.sourceID = sourceID.count <= 256
+        let normalizedSourceID = sourceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercasedSourceID = normalizedSourceID.localizedLowercase
+        let looksLikePrivatePath = normalizedSourceID.hasPrefix("/")
+            || normalizedSourceID.hasPrefix("~/")
+            || lowercasedSourceID.hasPrefix("file://")
+            || normalizedSourceID.contains("/Users/")
+            || normalizedSourceID.contains("/private/")
+        self.sourceID = sourceID.count <= 256 && !looksLikePrivatePath
             ? sourceID
             : "journal-\(kind.rawValue)-sha256-\(completeDigest)"
         self.stableSourceDigest = completeDigest
@@ -323,6 +330,67 @@ final class JournalMediaIntakeService {
             guard let duration else { throw JournalMediaIntakeError(.durationUnavailable) }
             guard duration <= maximumDuration else { throw JournalMediaIntakeError(.durationExceeded) }
         }
+    }
+
+    /// Transcribes one already validated caller-owned audio source through a
+    /// disposable read-only copy. This is the pre-commit seam for atomic voice
+    /// capture: the validated bytes are not materialized in canonical storage
+    /// unless the caller later commits the same batch through the atomic writer.
+    func transcribeValidatedAudio(
+        _ batch: JournalValidatedMediaBatch,
+        at index: Int = 0,
+        using service: any CiderTranscriptionServicing
+    ) async -> TranscriptionResult {
+        guard batch.requests.indices.contains(index), batch.validated.indices.contains(index) else {
+            return .failure(.init(
+                code: .invalidSource,
+                message: JournalMediaIntakeError(.transcriptionUnavailable).localizedDescription
+            ))
+        }
+        let request = batch.requests[index]
+        let validated = batch.validated[index]
+        guard request.kind == .audio else {
+            return .failure(.init(
+                code: .invalidSource,
+                message: JournalMediaIntakeError(.transcriptionUnavailable).localizedDescription
+            ))
+        }
+
+        let rootExisted = fileManager.fileExists(atPath: transcriptionWorkingRoot.path)
+        let session = transcriptionWorkingRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let extensionSuffix = validated.fileExtension.isEmpty ? "" : ".\(validated.fileExtension)"
+        let workingCopy = session.appendingPathComponent("source\(extensionSuffix)")
+        do {
+            try fileManager.createDirectory(at: session, withIntermediateDirectories: true)
+            try validator.withSecurityScopedAccess(to: validated.identity.accessURL) {
+                _ = try validator.revalidateWithinActiveScope(
+                    validated,
+                    policy: .init(maximumByteSize: effectiveMaximumByteSize)
+                )
+                try fileManager.copyItem(at: validated.identity.standardizedURL, to: workingCopy)
+                _ = try validator.revalidateWithinActiveScope(
+                    validated,
+                    policy: .init(maximumByteSize: effectiveMaximumByteSize)
+                )
+            }
+            let copied = try validator.validate(workingCopy)
+            guard copied.byteSize == validated.byteSize, copied.sha256 == validated.sha256 else {
+                throw LocalFileIntakeError(.changedDuringValidation)
+            }
+            try fileManager.setAttributes([.posixPermissions: 0o400], ofItemAtPath: workingCopy.path)
+        } catch {
+            cleanupTranscriptionSession(session, removeRoot: !rootExisted)
+            return .failure(.init(
+                code: .sourceUnreadable,
+                message: JournalMediaIntakeError(.transcriptionUnavailable).localizedDescription
+            ))
+        }
+        defer { cleanupTranscriptionSession(session, removeRoot: !rootExisted) }
+        return await service.transcribeStoredAudio(.init(
+            fileURL: workingCopy,
+            sourceID: request.sourceID,
+            displayName: request.displayName ?? validated.displayName
+        ))
     }
 
     func transcribeStoredAudio(_ original: JournalStoredOriginal) async -> TranscriptionResult {

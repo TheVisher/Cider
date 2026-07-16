@@ -18,7 +18,7 @@ enum TranscriptionInputKind: String, CaseIterable, Equatable, Hashable, Sendable
     case storedAudioFile
 }
 
-enum TranscriptionProviderExecution: String, Equatable, Sendable {
+enum TranscriptionProviderExecution: String, Equatable, Hashable, Sendable {
     case onDevice
     case localProcess
     case network
@@ -55,7 +55,7 @@ struct TranscriptionProviderMetadata: Equatable, Sendable {
     }
 }
 
-enum TranscriptionSourceRetention: String, Equatable, Sendable {
+enum TranscriptionSourceRetention: String, Equatable, Hashable, Sendable {
     /// Live audio is process-local input and is not retained by the transcription capability.
     case doNotRetain
     /// The caller owns an immutable original file; transcription may only read it.

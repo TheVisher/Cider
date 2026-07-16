@@ -6,19 +6,25 @@ struct JournalAtomicMediaSource: Equatable, Sendable {
     let kind: JournalMediaKind
     let displayTitle: String?
     let mimeType: String?
+    let expectedContentSHA256: String?
+    let transcription: JournalVoiceTranscription?
 
     init(
         sourceURL: URL,
         sourceID: String,
         kind: JournalMediaKind,
         displayTitle: String? = nil,
-        mimeType: String? = nil
+        mimeType: String? = nil,
+        expectedContentSHA256: String? = nil,
+        transcription: JournalVoiceTranscription? = nil
     ) {
         self.sourceURL = sourceURL
         self.sourceID = sourceID
         self.kind = kind
         self.displayTitle = displayTitle
         self.mimeType = mimeType
+        self.expectedContentSHA256 = expectedContentSHA256
+        self.transcription = transcription
     }
 }
 
@@ -31,6 +37,29 @@ struct JournalAtomicCaptureRequest: Equatable {
     let idempotencyKey: String
     let sourceContext: CaptureSourceContext?
     let media: [JournalAtomicMediaSource]
+    let captureMetadata: [String: String]
+
+    init(
+        journalDate: String,
+        time: String,
+        text: String,
+        source: String,
+        capturedAt: Date,
+        idempotencyKey: String,
+        sourceContext: CaptureSourceContext?,
+        media: [JournalAtomicMediaSource],
+        captureMetadata: [String: String] = [:]
+    ) {
+        self.journalDate = journalDate
+        self.time = time
+        self.text = text
+        self.source = source
+        self.capturedAt = capturedAt
+        self.idempotencyKey = idempotencyKey
+        self.sourceContext = sourceContext
+        self.media = media
+        self.captureMetadata = captureMetadata
+    }
 }
 
 struct JournalAtomicCaptureReceipt: Equatable, Sendable {
@@ -155,6 +184,14 @@ final class JournalAtomicCaptureWriter {
                 reason: "Journal capture validation or persistence failed; nothing was committed."
             )
         }
+        guard zip(request.media, validatedMedia.contentHashes).allSatisfy({ media, contentHash in
+            media.expectedContentSHA256.map { $0 == contentHash } ?? true
+        }) else {
+            throw JournalAtomicCaptureError(
+                code: .notCommitted,
+                reason: "Journal media changed after source validation; nothing was committed."
+            )
+        }
         let requestDigest = Self.requestDigest(request, mediaContentHashes: validatedMedia.contentHashes)
         let eventID = Self.stableUUID(seed: "journal-capture|\(request.idempotencyKey)")
         if let existing = try loadReceipt(eventID: eventID, requestDigest: requestDigest) {
@@ -222,6 +259,37 @@ final class JournalAtomicCaptureWriter {
         }
     }
 
+    /// Loads the existing atomic receipt for an exact higher-level retry before
+    /// invoking an external capability. The caller supplies path-free metadata
+    /// that already binds its source identity and validated content digest.
+    func existingReceipt(
+        idempotencyKey: String,
+        matchingEventMetadata expected: [String: String]
+    ) throws -> JournalAtomicCaptureReceipt? {
+        guard database.isOpen else {
+            throw JournalAtomicCaptureError(
+                code: .notCommitted,
+                reason: "Journal capture requires a writable Cider database; nothing was changed."
+            )
+        }
+        let eventID = Self.stableUUID(seed: "journal-capture|\(idempotencyKey)")
+        let statement = try database.prepare("SELECT metadata FROM capture_events WHERE id = ? AND source_kind = 'journal' LIMIT 1;")
+        statement.bind(eventID.uuidString, at: 1)
+        guard try statement.step() else { return nil }
+        let metadata = DatabaseHelpers.decodeJSON(
+            [String: String].self,
+            from: statement.optionalString(at: 0)
+        ) ?? [:]
+        guard expected.allSatisfy({ metadata[$0.key] == $0.value }),
+              let requestDigest = metadata["journal_request_digest"] else {
+            throw JournalAtomicCaptureError(
+                code: .idempotencyConflict,
+                reason: "That Journal idempotency key already belongs to a different logical capture."
+            )
+        }
+        return try loadReceipt(eventID: eventID, requestDigest: requestDigest)
+    }
+
     private func validate(_ request: JournalAtomicCaptureRequest) throws {
         guard JournalTitle.isValidISODate(request.journalDate),
               Self.isValidTime(request.time),
@@ -285,6 +353,9 @@ final class JournalAtomicCaptureWriter {
     ) throws -> JournalAtomicCaptureReceipt {
         let context = request.sourceContext
         var eventMetadata = context?.metadata ?? [:]
+        for (key, value) in request.captureMetadata {
+            eventMetadata[key] = value
+        }
         eventMetadata["command"] = "capture.add"
         eventMetadata["kind"] = "journal"
         eventMetadata["date"] = request.journalDate
@@ -335,7 +406,8 @@ final class JournalAtomicCaptureWriter {
         for (index, pair) in zip(originals.indices, zip(originals, request.media)) {
             let (original, media) = pair
             let displayTitle = Self.friendlyTitle(media.displayTitle, rawFilename: media.sourceURL.lastPathComponent)
-            let metadata: [String: String] = [
+            var metadata = media.transcription?.storageMetadata() ?? [:]
+            let sourceMetadata: [String: String] = [
                 "journal_note_id": note.id.uuidString,
                 "journal_date": request.journalDate,
                 "journal_time": request.time,
@@ -348,6 +420,9 @@ final class JournalAtomicCaptureWriter {
                 "media_kind": original.kind.rawValue,
                 "retention": "preserve_original",
             ]
+            for (key, value) in sourceMetadata {
+                metadata[key] = value
+            }
             let attachment = try database.prepare("""
                 INSERT INTO capture_attachments (
                     id, capture_event_id, attachment_index, source_attachment_id,
@@ -668,13 +743,23 @@ final class JournalAtomicCaptureWriter {
     ) -> String {
         precondition(request.media.count == mediaContentHashes.count)
         let media = zip(request.media, mediaContentHashes).map { source, contentHash in
-            "\(source.sourceID)|\(source.kind.rawValue)|\(source.displayTitle ?? "")|\(source.sourceURL.lastPathComponent)|\(contentHash)"
+            let base = "\(source.sourceID)|\(source.kind.rawValue)|\(source.displayTitle ?? "")|\(source.sourceURL.lastPathComponent)|\(contentHash)"
+            let transcription = source.transcription?.storageMetadata()
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }
+                .joined(separator: "\u{1f}") ?? ""
+            return transcription.isEmpty ? base : "\(base)|\(transcription)"
         }.joined(separator: "\u{1e}")
         let source = request.sourceContext.map {
             "\($0.surface ?? "")|\($0.channel ?? "")|\($0.channelID ?? "")|\($0.threadID ?? "")|\($0.messageID ?? "")|\($0.senderID ?? "")"
         } ?? ""
+        let captureMetadata = request.captureMetadata
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: "\u{1f}")
+        let base = "\(request.journalDate)|\(request.time)|\(request.text)|\(request.source)|\(source)|\(media)"
         return LocalFileIntakeValidator.sha256(Data(
-            "\(request.journalDate)|\(request.time)|\(request.text)|\(request.source)|\(source)|\(media)".utf8
+            (captureMetadata.isEmpty ? base : "\(base)|\(captureMetadata)").utf8
         ))
     }
 
