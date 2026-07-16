@@ -8,6 +8,11 @@ import Testing
 @Suite("Apple Speech Transcription Service Tests")
 @MainActor
 struct AppleSpeechTranscriptionServiceTests {
+    @Test("live input tap defers to the device format negotiated during activation")
+    func liveInputTapUsesNegotiatedDeviceFormat() {
+        #expect(AppleSpeechTranscriptionService.negotiatedLiveInputTapFormat == nil)
+    }
+
     @Test("speech authorization completion crosses from a background queue exactly once")
     func speechAuthorizationCompletionHopsToMainActorExactlyOnce() async {
         let callbackWasMainThread = Mutex<Bool?>(nil)

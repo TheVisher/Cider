@@ -171,6 +171,11 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
         }
     }
 
+    /// A nil tap format tells AVAudioEngine to use the input device's format after
+    /// activation. Keep this as an explicit policy so a future refactor cannot
+    /// accidentally reintroduce a stale pre-activation format snapshot.
+    static var negotiatedLiveInputTapFormat: AVAudioFormat? { nil }
+
     func startLive(
         _ request: LiveTranscriptionRequest,
         onEvent: @escaping @MainActor @Sendable (TranscriptionEvent) -> Void
@@ -205,7 +210,16 @@ final class AppleSpeechTranscriptionService: CiderTranscriptionServicing {
             finishLiveSession(cancelRecognitionTask: true)
             throw failure
         }
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self] buffer, _ in
+        // Let AVAudioEngine choose the tap's negotiated device format. Passing the
+        // earlier snapshot from outputFormat(forBus:) can become incompatible while
+        // macOS activates the input device (for example, 44.1 kHz -> 48 kHz) and
+        // AVFAudio raises an Objective-C format-mismatch exception before Swift can
+        // report a recoverable transcription failure.
+        inputNode.installTap(
+            onBus: 0,
+            bufferSize: 1_024,
+            format: Self.negotiatedLiveInputTapFormat
+        ) { [weak self] buffer, _ in
             speechRequest.append(buffer)
             let level = Self.normalizedLevel(buffer)
             Task { @MainActor [weak self] in
