@@ -27,7 +27,7 @@ enum RemoteChatCommandRouter {
                 return await runtimeSummary()
             }
             guard let selection = runtimeSelection(from: parts[1]) else {
-                return "Unknown runtime. Use /runtime apple or /runtime local. Codex CLI is only available from the local Cider UI."
+                return "Unknown or unavailable runtime. Use /runtime apple, /runtime local, or /runtime hermes. Codex CLI is currently unavailable."
             }
             await switchRuntime(selection)
             return "Switched runtime.\n\(await runtimeSummary())"
@@ -50,7 +50,7 @@ enum RemoteChatCommandRouter {
         Cider \(channelDisplayName) commands:
         /status — show bridge and runtime health
         /runtime — show active runtime
-        /runtime apple|local — switch runtime
+        /runtime apple|local|hermes — switch runtime
         /restart — restart the active runtime
         """
     }

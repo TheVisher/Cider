@@ -1075,38 +1075,6 @@ struct AIAssistantPanelView: View {
             }
             .buttonStyle(.plain)
 
-            Divider().padding(.horizontal, Spacing.md)
-
-            Button {
-                viewModel.switchRuntime(to: .codexCLI)
-                showModelPicker = false
-            } label: {
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "terminal")
-                        .font(CiderFont.caption)
-                        .foregroundColor(CiderColors.warning)
-                        .frame(width: 14, alignment: .center)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Codex CLI")
-                            .font(CiderFont.label)
-                            .foregroundColor(CiderColors.primary)
-                        Text(codexSubtitle)
-                            .font(CiderFont.caption)
-                            .foregroundColor(CiderColors.tertiary)
-                    }
-                    Spacer()
-                    if viewModel.runtimeSelection == .codexCLI {
-                        Image(systemName: "checkmark")
-                            .font(CiderFont.captionSemibold)
-                            .foregroundColor(CiderColors.warning)
-                    }
-                }
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
             // Download progress
             if modelManager.isDownloading {
                 VStack(spacing: Spacing.xxs) {
@@ -1143,21 +1111,6 @@ struct AIAssistantPanelView: View {
         }
     }
 
-    private var codexSubtitle: String {
-        switch viewModel.runtimeHealth.status {
-        case .running:
-            return "Persistent background agent"
-        case .starting, .restarting:
-            return "Starting runtime..."
-        case .failed:
-            return viewModel.runtimeHealth.lastError ?? "Runtime failed"
-        case .unavailable:
-            return "CLI unavailable"
-        default:
-            return "Persistent CLI runtime (Phase 1)"
-        }
-    }
-
     private var hermesSubtitle: String {
         if viewModel.hermesConversationState != nil {
             return "Attached to \(viewModel.hermesSessionLabel)"
@@ -1174,8 +1127,6 @@ struct AIAssistantPanelView: View {
             return "Apple"
         case .localModel:
             return "Local"
-        case .codexCLI:
-            return "Codex"
         case .hermes:
             return "Hermes"
         }
@@ -1187,17 +1138,6 @@ struct AIAssistantPanelView: View {
             return CiderColors.controlAccent
         case .localModel:
             return CiderColors.success
-        case .codexCLI:
-            switch viewModel.runtimeHealth.status {
-            case .running:
-                return CiderColors.success
-            case .starting, .restarting:
-                return CiderColors.warning
-            case .failed, .unavailable:
-                return CiderColors.destructive
-            default:
-                return CiderColors.warning
-            }
         case .hermes:
             return hermesStatusColor
         }

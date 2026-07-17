@@ -214,6 +214,7 @@ struct AgentToolCall: Sendable {
 enum AgentError: Error, LocalizedError {
     case unauthorized
     case providerUnavailable
+    case runtimeUnavailable(runtimeID: String, reason: String)
     case toolDenied(String)
     case maxRoundsExceeded
     case deliveryFailed(String)
@@ -222,6 +223,8 @@ enum AgentError: Error, LocalizedError {
         switch self {
         case .unauthorized: return "Unauthorized sender"
         case .providerUnavailable: return "AI provider is not available"
+        case .runtimeUnavailable(let runtimeID, let reason):
+            return "Runtime '\(runtimeID)' is unavailable: \(reason)"
         case .toolDenied(let name): return "Tool '\(name)' is not permitted on this channel"
         case .maxRoundsExceeded: return "Maximum tool call rounds exceeded"
         case .deliveryFailed(let reason): return "Message delivery failed: \(reason)"

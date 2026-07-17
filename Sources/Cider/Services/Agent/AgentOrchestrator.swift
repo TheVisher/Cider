@@ -81,6 +81,7 @@ actor AgentOrchestrator {
 
     func startRuntimeIfNeeded() async throws {
         guard let runtime else { throw AgentError.providerUnavailable }
+        try Self.requireProductionRuntimeAvailable(runtime)
         try await runtime.start()
     }
 
@@ -99,11 +100,21 @@ actor AgentOrchestrator {
                 lastError: nil
             )
         }
+        if Self.isDisabledLegacyCodexRuntime(runtime) {
+            return AgentRuntimeHealth(
+                status: .unavailable,
+                detail: LegacyCodexRuntimePolicy.unavailableReason,
+                lastStartedAt: nil,
+                lastActivityAt: nil,
+                lastError: LegacyCodexRuntimePolicy.unavailableReason
+            )
+        }
         return await runtime.health()
     }
 
     func runtimeIdentity() -> (id: String, displayName: String, kind: AgentRuntimeKind)? {
         guard let runtime else { return nil }
+        guard !Self.isDisabledLegacyCodexRuntime(runtime) else { return nil }
         return (runtime.id, runtime.displayName, runtime.kind)
     }
 
@@ -114,6 +125,7 @@ actor AgentOrchestrator {
         guard let runtime else {
             throw AgentError.providerUnavailable
         }
+        try Self.requireProductionRuntimeAvailable(runtime)
         if runtime.kind == .process && !Self.processRuntimeAllowed(on: envelope.channel) {
             throw AgentError.deliveryFailed("Process runtimes are only available from the local Cider UI.")
         }
@@ -764,6 +776,19 @@ actor AgentOrchestrator {
             return true
         case .iMessage, .telegram, .shareIngress, .iosApp, .notification:
             return false
+        }
+    }
+
+    private static func isDisabledLegacyCodexRuntime(_ runtime: any AgentRuntime) -> Bool {
+        LegacyCodexRuntimePolicy.isDisabled(runtimeID: runtime.id)
+    }
+
+    private static func requireProductionRuntimeAvailable(_ runtime: any AgentRuntime) throws {
+        guard !isDisabledLegacyCodexRuntime(runtime) else {
+            throw AgentError.runtimeUnavailable(
+                runtimeID: runtime.id,
+                reason: LegacyCodexRuntimePolicy.unavailableReason
+            )
         }
     }
 

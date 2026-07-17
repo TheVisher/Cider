@@ -2,13 +2,6 @@ import Foundation
 import AppKit
 import os.log
 
-enum AIAgentRuntimeSelection: String, Sendable {
-    case appleIntelligence
-    case localModel
-    case codexCLI
-    case hermes
-}
-
 enum HermesPanelSyncStatus: Equatable {
     case notAttached
     case idle
@@ -76,8 +69,6 @@ final class AIAssistantViewModel: ObservableObject {
         sharedBootstrap.install(coordinator)
     }
 
-    private static let runtimeSelectionDefaultsKey = "cider.aiRuntimeSelection"
-
     @Published var messages: [AIAssistantMessage] = []
     @Published var isStreaming = false
     @Published var context = AIAssistantContext()
@@ -143,10 +134,6 @@ final class AIAssistantViewModel: ObservableObject {
             return runtimeSelection == .localModel
         }
         return provider is MLXProvider
-    }
-
-    var isUsingProcessRuntime: Bool {
-        useOrchestrator && runtimeSelection == .codexCLI
     }
 
     var hermesStatusTitle: String {
@@ -218,10 +205,6 @@ final class AIAssistantViewModel: ObservableObject {
         provider: mlxAgentProvider,
         id: "model.local-qwen"
     )
-    private lazy var codexRuntime = CodexProcessRuntime(
-        workingDirectoryURL: StoragePaths.cachedVaultDirectoryURL
-    )
-
     /// The currently active runtime (for orchestrator mode).
     private var currentAgentRuntime: (any AgentRuntime)? {
         guard useOrchestrator else { return nil }
@@ -230,8 +213,6 @@ final class AIAssistantViewModel: ObservableObject {
             return foundationModelsRuntime
         case .localModel:
             return mlxRuntime
-        case .codexCLI:
-            return codexRuntime
         case .hermes:
             return nil
         }
@@ -256,8 +237,6 @@ final class AIAssistantViewModel: ObservableObject {
         self.dormantConversationShadowCoordinator = dormantConversationShadowCoordinator
         if let provider {
             self.provider = provider
-        } else if initialRuntimeSelection == .codexCLI {
-            self.provider = FoundationModelsProvider()
         } else if MLXModelManager.shared.isLocalModelEnabled || initialRuntimeSelection == .localModel {
             self.provider = MLXProvider()
         } else {
@@ -311,9 +290,6 @@ final class AIAssistantViewModel: ObservableObject {
         case .localModel:
             provider = mlxProvider
             MLXModelManager.shared.isLocalModelEnabled = true
-        case .codexCLI:
-            MLXModelManager.shared.isLocalModelEnabled = false
-            MLXModelManager.shared.unloadModel()
         case .hermes:
             provider = foundationModelsProvider
             MLXModelManager.shared.isLocalModelEnabled = false
@@ -322,7 +298,7 @@ final class AIAssistantViewModel: ObservableObject {
 
         if useOrchestrator {
             Task {
-                await configureOrchestratorRuntime(startIfNeeded: selection == .codexCLI)
+                await configureOrchestratorRuntime(startIfNeeded: false)
             }
         }
 
@@ -351,9 +327,6 @@ final class AIAssistantViewModel: ObservableObject {
         case .localModel:
             provider = mlxProvider
             MLXModelManager.shared.isLocalModelEnabled = true
-        case .codexCLI:
-            MLXModelManager.shared.isLocalModelEnabled = false
-            MLXModelManager.shared.unloadModel()
         case .hermes:
             provider = foundationModelsProvider
             MLXModelManager.shared.isLocalModelEnabled = false
@@ -376,7 +349,7 @@ final class AIAssistantViewModel: ObservableObject {
     func enableOrchestrator() {
         useOrchestrator = true
         orchestratorThreadID = currentConversationID ?? UUID()
-        if runtimeSelection != .codexCLI && runtimeSelection != .hermes {
+        if runtimeSelection != .hermes {
             runtimeSelection = MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence
         }
         Task {
@@ -1601,16 +1574,13 @@ final class AIAssistantViewModel: ObservableObject {
     }
 
     private func persistRuntimeSelection(_ selection: AIAgentRuntimeSelection) {
-        IsolationRuntime.userDefaults.set(selection.rawValue, forKey: Self.runtimeSelectionDefaultsKey)
+        AIAgentRuntimeSelectionStore(defaults: IsolationRuntime.userDefaults).persist(selection)
     }
 
     private static func loadPersistedRuntimeSelection() -> AIAgentRuntimeSelection {
         IsolationRuntime.recordPathAccess("AIAssistantViewModel.UserDefaults")
-        guard let raw = IsolationRuntime.userDefaults.string(forKey: runtimeSelectionDefaultsKey),
-              let selection = AIAgentRuntimeSelection(rawValue: raw)
-        else {
-            return MLXModelManager.shared.isLocalModelEnabled ? .localModel : .appleIntelligence
-        }
-        return selection
+        return AIAgentRuntimeSelectionStore(defaults: IsolationRuntime.userDefaults).load(
+            localModelEnabled: MLXModelManager.shared.isLocalModelEnabled
+        )
     }
 }

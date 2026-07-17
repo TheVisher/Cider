@@ -37,7 +37,7 @@ struct RemoteChatCommandRouterTests {
 
         #expect(telegram.contains("Cider Telegram commands:"))
         #expect(discord.contains("Cider Discord commands:"))
-        #expect(discord.contains("/runtime apple|local"))
+        #expect(discord.contains("/runtime apple|local|hermes"))
         #expect(discord.contains("/restart"))
     }
 
@@ -54,7 +54,7 @@ struct RemoteChatCommandRouterTests {
         ))
 
         #expect(await recorder.switchedRuntime == nil)
-        #expect(response == "Unknown runtime. Use /runtime apple or /runtime local. Codex CLI is only available from the local Cider UI.")
+        #expect(response == "Unknown or unavailable runtime. Use /runtime apple, /runtime local, or /runtime hermes. Codex CLI is currently unavailable.")
     }
 
     @Test("runtime and restart commands use injected safe operations")

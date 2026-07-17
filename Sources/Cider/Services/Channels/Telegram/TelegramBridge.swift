@@ -465,8 +465,6 @@ actor TelegramBridge: ChannelBridge {
             return "Apple Intelligence"
         case .localModel:
             return "Local Qwen"
-        case .codexCLI:
-            return "Codex CLI"
         case .hermes:
             return "Hermes"
         }
