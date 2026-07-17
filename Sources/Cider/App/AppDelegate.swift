@@ -87,11 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let vaultRoot = StoragePaths.cachedVaultDirectoryURL
             let dbPath = vaultRoot.appendingPathComponent(".cider/cider.db")
-            try FileManager.default.createDirectory(
-                at: dbPath.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
+            if !FileManager.default.fileExists(atPath: dbPath.path) {
+                try FileManager.default.createDirectory(
+                    at: dbPath.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+            }
             try CiderDatabase.shared.open(at: dbPath)
             DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
             return true
@@ -118,6 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if integrationPlan.accessibilityPrompt {
             AccessibilityHelpers.promptIfNeeded()
         }
+        // Open SQLite before any migration/reconcile/storage singleton can mutate
+        // the vault. A stale build that cannot read the current schema must stop
+        // here; falling back to JSON can re-adopt the same filesystem as fresh
+        // folders/items and recreate duplicate suffix trees.
+        guard openSQLiteForStartupOrTerminate() else { return }
         let vaultStructureReport = StoragePaths.ensureVaultStructure()
         if !vaultStructureReport.isFullyInitialized {
             let logger = Logger(
@@ -130,12 +136,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
-
-        // Open SQLite before any migration/reconcile/storage singleton can mutate
-        // the vault. A stale build that cannot read the current schema must stop
-        // here; falling back to JSON can re-adopt the same filesystem as fresh
-        // folders/items and recreate duplicate suffix trees.
-        guard openSQLiteForStartupOrTerminate() else { return }
         _ = agentRoomsSession.restoreDurableTestChat()
         composeDormantConversationShadowRuntime(
             database: CiderDatabase.shared,

@@ -25,6 +25,7 @@ final class CiderDatabase {
     private let logger = Logger(subsystem: "com.cider.app", category: "CiderDatabase")
     private var db: OpaquePointer?
     private(set) var databaseURL: URL?
+    private(set) var lastMigrationSafetyArtifactURL: URL?
     private var transactionDepth = 0
     private var rootTransactionMode: TransactionMode?
 
@@ -34,8 +35,9 @@ final class CiderDatabase {
     // MARK: - Lifecycle
 
     /// Open the database at the given file URL.
-    /// Creates the file if it does not exist. Enables WAL mode, foreign keys,
-    /// and runs pending schema migrations.
+    /// Creates the file if it does not exist. Existing sources are validated
+    /// without mutation before open; older healthy sources receive a mandatory
+    /// verified SQLite safety artifact before migrations can write.
     func open(at url: URL) throws {
         let path = url.path
         // Refuse double-open — a second call would leak the prior handle and
@@ -44,30 +46,133 @@ final class CiderDatabase {
         if db != nil {
             throw CiderDatabaseError.alreadyOpen(path)
         }
+        lastMigrationSafetyArtifactURL = nil
         logger.info("Opening database at \(path)")
 
-        var handle: OpaquePointer?
-        let rc = sqlite3_open(path, &handle)
-        guard rc == SQLITE_OK, let handle else {
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
-            sqlite3_close(handle)
-            throw CiderDatabaseError.open(message)
-        }
+        let startupLock = try DatabaseStartupLock.acquire(for: url)
+        defer { startupLock.release() }
 
-        db = handle
-        databaseURL = url
+        // Freshness is authoritative only after Cider startup serialization,
+        // and remains provisional until the SQLite VFS atomically reserves the
+        // path and an IMMEDIATE transaction verifies that it is still empty.
+        var sourceState = try DatabaseStartupPreflight.sourceState(at: url)
+        var isFreshDatabase = false
+
+        var handle: OpaquePointer?
+        var inspection: ExistingDatabaseInspection?
+        var reservationActive = false
+        var sourceSchemaVersion = 0
+        var migrationArtifact: DatabaseMigrationSafetyArtifact?
 
         do {
-            sqlite3_busy_timeout(handle, 5000)
-            // Enable WAL mode for concurrent reads
-            try runSQL("PRAGMA journal_mode=WAL;")
-            // Enable foreign key enforcement
-            try runSQL("PRAGMA foreign_keys=ON;")
+            if sourceState == .fresh {
+                switch try DatabaseStartupPreflight.reserveFreshDatabasePath(at: url) {
+                case .reserved(let pathReservation):
+                    if let freshHandle = try DatabaseStartupPreflight
+                        .openAuthoritativelyReservedFreshDatabase(
+                            at: url,
+                            reservation: pathReservation
+                        ) {
+                        handle = freshHandle
+                        reservationActive = true
+                        isFreshDatabase = true
+                    } else {
+                        sourceState = try DatabaseStartupPreflight.sourceState(at: url)
+                    }
+                case .sourceAppeared:
+                    sourceState = try DatabaseStartupPreflight.sourceState(at: url)
+                }
+                if !isFreshDatabase, sourceState != .existing {
+                    throw CiderDatabaseError.startupPreflightFailed(
+                        kind: .changedDuringRead,
+                        detail: "The database path changed repeatedly during atomic fresh creation. Retry after other creators become idle."
+                    )
+                }
+            }
 
-            // Run schema migrations
-            try DatabaseMigrations.runMigrations(on: handle)
+            if !isFreshDatabase {
+                // First establish health without source mutation. Then reserve
+                // the real SQLite source and revalidate it authoritatively so
+                // the verified artifact and migration use one logical snapshot.
+                let established = try DatabaseStartupPreflight.establishExistingDatabaseHealth(at: url)
+                inspection = established
+                sourceSchemaVersion = established.schemaVersion
+                if sourceSchemaVersion < DatabaseMigrations.latestVersion {
+                    let artifact = try DatabaseStartupPreflight.createRequiredMigrationSafetyArtifact(
+                        from: established,
+                        sourceDatabaseURL: url
+                    )
+                    migrationArtifact = artifact
+                    lastMigrationSafetyArtifactURL = artifact.url
+                }
+
+                let reservation = try DatabaseStartupPreflight.reserveAndRevalidateExistingDatabase(at: url)
+                handle = reservation.handle
+                reservationActive = true
+                sourceSchemaVersion = reservation.schemaVersion
+                try DatabaseStartupPreflight.validateAuthoritativeSourceContinuity(
+                    reservation,
+                    matches: established
+                )
+                try DatabaseStartupPreflight.validateAuthoritativeSourceContinuity(
+                    reservation,
+                    at: url
+                )
+                established.close()
+                inspection = nil
+                if sourceSchemaVersion == DatabaseMigrations.latestVersion {
+                    try DatabaseStartupPreflight.cancelAuthoritativeReservation(reservation.handle)
+                    reservationActive = false
+                }
+            }
+
+            guard let handle else {
+                throw CiderDatabaseError.open("SQLite returned no database handle")
+            }
+            sqlite3_busy_timeout(handle, 5000)
+            // Enable foreign key enforcement
+            try runSQL("PRAGMA foreign_keys=ON;", on: handle)
+
+            if isFreshDatabase {
+                try DatabaseMigrations.runMigrations(
+                    on: handle,
+                    insideExistingImmediateTransaction: true
+                )
+                reservationActive = false
+            } else if sourceSchemaVersion < DatabaseMigrations.latestVersion {
+                do {
+                    try DatabaseMigrations.runMigrations(
+                        on: handle,
+                        insideExistingImmediateTransaction: true
+                    )
+                    reservationActive = false
+                } catch {
+                    reservationActive = sqlite3_get_autocommit(handle) == 0
+                    if let migrationArtifact {
+                        throw CiderDatabaseError.migrationFailed(
+                            artifactURL: migrationArtifact.url,
+                            detail: error.localizedDescription
+                        )
+                    }
+                    throw error
+                }
+            }
+
+            // WAL is configured only after an existing source passed preflight
+            // and any required migration transaction committed.
+            try runSQL("PRAGMA journal_mode=WAL;", on: handle)
+
+            // No recovery/reconcile/service writer is composed until this final
+            // validation confirms the migrated/current database is usable.
+            try DatabaseStartupPreflight.validatePostOpenDatabase(handle)
+
+            db = handle
+            databaseURL = url
         } catch {
-            // Close the handle to avoid leaking on setup failure
+            inspection?.close()
+            if reservationActive, let handle {
+                try? DatabaseStartupPreflight.cancelAuthoritativeReservation(handle)
+            }
             sqlite3_close_v2(handle)
             db = nil
             databaseURL = nil
@@ -96,9 +201,13 @@ final class CiderDatabase {
     /// Run a SQL string that does not return results (DDL, INSERT, UPDATE, DELETE).
     func runSQL(_ sql: String) throws {
         guard let db else { throw CiderDatabaseError.runExec("Database not open") }
+        try runSQL(sql, on: db)
+    }
+
+    private func runSQL(_ sql: String, on handle: OpaquePointer) throws {
         var errorMessage: UnsafeMutablePointer<CChar>?
         defer { sqlite3_free(errorMessage) }
-        let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+        let rc = sqlite3_exec(handle, sql, nil, nil, &errorMessage)
         if rc != SQLITE_OK {
             let message = errorMessage.map { String(cString: $0) } ?? "unknown error"
             if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {

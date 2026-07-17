@@ -980,7 +980,37 @@ struct CiderCLI {
             return
         }
 
-        // Initialize storage services
+        // Open SQLite before any storage service is touched — services check
+        // CiderDatabase.shared.isOpen and use it as the primary store when available.
+        // Without this, CLI writes skip the SQLite persist path and only hit the
+        // filesystem, leaving the DB out of sync with the app.
+        do {
+            let vaultRoot = StoragePaths.cachedVaultDirectoryURL
+            let dbPath = vaultRoot.appendingPathComponent(".cider/cider.db")
+            if !FileManager.default.fileExists(atPath: dbPath.path) {
+                try FileManager.default.createDirectory(
+                    at: dbPath.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+            }
+            try openCanonicalDatabaseWithRetry(at: dbPath)
+        } catch {
+            let databaseOpenError = error
+            Logger(subsystem: "Cider", category: "CLI")
+                .error("Failed to open SQLite database: \(error.localizedDescription).")
+            printCLIError(
+                "Cannot run \(commandDescription(command: command, subcommand: subcommand)) because the canonical SQLite database failed its startup safety gate. Cider will not fall back to JSON or filesystem mutation paths.",
+                details: [
+                    "command": command,
+                    "subcommand": subcommand ?? NSNull(),
+                    "underlyingError": databaseOpenError.localizedDescription
+                ]
+            )
+            return
+        }
+
+        // Derived vault directories and usage audit are writes, so they remain
+        // behind the canonical database's fail-closed startup gate.
         let vaultStructureReport = StoragePaths.ensureVaultStructure()
         if !vaultStructureReport.isFullyInitialized {
             let logger = Logger(subsystem: "Cider", category: "CLI")
@@ -991,35 +1021,6 @@ struct CiderCLI {
             }
         }
         CiderUsageAuditService.shared.recordCLI(command: command, subcommand: subcommand)
-
-        // Open SQLite before any storage service is touched — services check
-        // CiderDatabase.shared.isOpen and use it as the primary store when available.
-        // Without this, CLI writes skip the SQLite persist path and only hit the
-        // filesystem, leaving the DB out of sync with the app.
-        do {
-            let vaultRoot = StoragePaths.cachedVaultDirectoryURL
-            let dbPath = vaultRoot.appendingPathComponent(".cider/cider.db")
-            try FileManager.default.createDirectory(
-                at: dbPath.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try openCanonicalDatabaseWithRetry(at: dbPath)
-        } catch {
-            let databaseOpenError = error
-            Logger(subsystem: "Cider", category: "CLI")
-                .error("Failed to open SQLite database: \(error.localizedDescription).")
-            if requiresCanonicalDatabase(command: command, subcommand: subcommand, args: remaining) {
-                printCLIError(
-                    "Cannot run \(commandDescription(command: command, subcommand: subcommand)) because the canonical SQLite database is unavailable. Cider no longer falls back to JSON or filesystem mutation paths.",
-                    details: [
-                        "command": command,
-                        "subcommand": subcommand ?? NSNull(),
-                        "underlyingError": databaseOpenError.localizedDescription
-                    ]
-                )
-                return
-            }
-        }
 
         if command == "db" {
             handleDatabase(subcommand: subcommand, args: remaining)
@@ -1171,7 +1172,6 @@ struct CiderCLI {
         var lastError: Error?
         for attempt in 0..<max(1, attempts) {
             do {
-                DatabaseSafetyService.shared.capturePreOpenSnapshotIfNeeded(databaseURL: dbPath)
                 try CiderDatabase.shared.open(at: dbPath)
                 DatabaseSafetyService.shared.performStartupSafetyPass(database: CiderDatabase.shared)
                 return

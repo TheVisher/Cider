@@ -20,6 +20,7 @@ struct CiderDatabaseTests {
         let path = url.path
         try? fm.removeItem(atPath: path + "-wal")
         try? fm.removeItem(atPath: path + "-shm")
+        try? fm.removeItem(at: DatabaseStartupPreflight.migrationSafetyDirectory(for: url))
     }
 
     // MARK: - Bootstrap

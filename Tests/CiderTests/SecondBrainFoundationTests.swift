@@ -14,6 +14,7 @@ struct SecondBrainFoundationTests {
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.removeItem(atPath: url.path + "-wal")
         try? FileManager.default.removeItem(atPath: url.path + "-shm")
+        try? FileManager.default.removeItem(at: DatabaseStartupPreflight.migrationSafetyDirectory(for: url))
     }
 
     private var packageRootURL: URL {
@@ -43,8 +44,20 @@ struct SecondBrainFoundationTests {
         process.currentDirectoryURL = packageRootURL
         process.arguments = ["--vault", vaultURL.path] + args
 
-        let output = Pipe()
-        let error = Pipe()
+        let captureRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-cli-output-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: captureRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: captureRoot) }
+        let outputURL = captureRoot.appendingPathComponent("stdout")
+        let errorURL = captureRoot.appendingPathComponent("stderr")
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: outputURL)
+        let error = try FileHandle(forWritingTo: errorURL)
+        defer {
+            try? output.close()
+            try? error.close()
+        }
         let input = stdin.map { _ in Pipe() }
         process.standardOutput = output
         process.standardError = error
@@ -58,13 +71,15 @@ struct SecondBrainFoundationTests {
             input.fileHandleForWriting.closeFile()
         }
         process.waitUntilExit()
+        try output.synchronize()
+        try error.synchronize()
 
         let stdout = String(
-            data: output.fileHandleForReading.readDataToEndOfFile(),
+            data: try Data(contentsOf: outputURL),
             encoding: .utf8
         ) ?? ""
         let stderr = String(
-            data: error.fileHandleForReading.readDataToEndOfFile(),
+            data: try Data(contentsOf: errorURL),
             encoding: .utf8
         ) ?? ""
 

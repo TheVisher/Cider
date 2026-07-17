@@ -15,6 +15,8 @@ Choose the narrowest meaningful verification:
 - release change: build, signing, notarization, and install checks
 - web/editor asset change: run the relevant npm tests for the embedded editor/package
 
+For startup/migration safety changes, use disposable physical SQLite files and fingerprint the database, WAL, SHM, and containing manifest before and after every refused preflight. Cover current and older healthy schemas, a real uncheckpointed WAL, corrupt header/pages/WAL, unreadable input, future schema, orphan sidecars, artifact capture/verification failure, migration rollback with retained artifact, physical close/reopen, and overlapping real processes. Deterministically force a database to appear while another startup waits on serialization, and force old, current, and corrupt sources to appear at the real VFS open boundary after fresh classification. Prove a path-race winner is reclassified through existing-source health/artifact policy, corrupt refusal preserves exact bytes and manifest, and the exclusive-create loser never opens the late source as fresh. Also force a same-inode/same-size external SQLite commit after artifact verification and prove it cannot be migrated from an artifact that lacks the commit. Production-order guards must inspect the real source root and known app/CLI/database owners rather than a copied fixture.
+
 ## Core Smoke Areas
 
 - launch and floating panel activation

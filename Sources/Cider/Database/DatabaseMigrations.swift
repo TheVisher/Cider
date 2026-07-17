@@ -14,140 +14,75 @@ enum DatabaseMigrations {
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
-    static func runMigrations(on db: OpaquePointer) throws {
-        // Ensure schema_version table exists
-        try runOnDB(db, CiderSchema.createSchemaVersion)
+    static func runMigrations(
+        on db: OpaquePointer,
+        insideExistingImmediateTransaction: Bool = false
+    ) throws {
+        if insideExistingImmediateTransaction {
+            guard sqlite3_get_autocommit(db) == 0 else {
+                throw CiderDatabaseError.transactionState(
+                    "Authoritative migration reservation was not active."
+                )
+            }
+        } else {
+            try runOnDB(db, "BEGIN IMMEDIATE TRANSACTION;")
+        }
+        do {
+            // The entire pending chain is one root transaction. Per-version
+            // savepoints retain the existing migration boundaries while making
+            // a later-version failure roll the source back to its original version.
+            try runOnDB(db, CiderSchema.createSchemaVersion)
 
-        var currentVersion = try readVersion(db)
-        logger.info("Current schema version: \(currentVersion)")
+            var currentVersion = try readVersion(db)
+            logger.info("Current schema version: \(currentVersion)")
 
-        // Fail fast on a DB from a newer build. Silently running forward-only
-        // migrations would leave an unknown schema in place and crash downstream
-        // when columns/tables disagree.
-        if currentVersion > latestVersion {
-            logger.error("Schema version \(currentVersion) is newer than supported (\(latestVersion))")
-            throw CiderDatabaseError.schemaTooNew(current: currentVersion, supported: latestVersion)
-        }
+            if currentVersion > latestVersion {
+                logger.error("Schema version \(currentVersion) is newer than supported (\(latestVersion))")
+                throw CiderDatabaseError.schemaTooNew(current: currentVersion, supported: latestVersion)
+            }
 
-        if currentVersion < 1 {
-            try migrateToV1(db)
-            currentVersion = try readVersion(db)
+            if currentVersion < 1 { try migrateToV1(db); currentVersion = try readVersion(db) }
+            if currentVersion < 2 { try migrateToV2(db); currentVersion = try readVersion(db) }
+            if currentVersion < 3 { try migrateToV3(db); currentVersion = try readVersion(db) }
+            if currentVersion < 4 { try migrateToV4(db); currentVersion = try readVersion(db) }
+            if currentVersion < 5 { try migrateToV5(db); currentVersion = try readVersion(db) }
+            if currentVersion < 6 { try migrateToV6(db); currentVersion = try readVersion(db) }
+            if currentVersion < 7 { try migrateToV7(db); currentVersion = try readVersion(db) }
+            if currentVersion < 8 { try migrateToV8(db); currentVersion = try readVersion(db) }
+            if currentVersion < 9 { try migrateToV9(db); currentVersion = try readVersion(db) }
+            if currentVersion < 10 { try migrateToV10(db); currentVersion = try readVersion(db) }
+            if currentVersion < 11 { try migrateToV11(db); currentVersion = try readVersion(db) }
+            if currentVersion < 12 { try migrateToV12(db); currentVersion = try readVersion(db) }
+            if currentVersion < 13 { try migrateToV13(db); currentVersion = try readVersion(db) }
+            if currentVersion < 14 { try migrateToV14(db); currentVersion = try readVersion(db) }
+            if currentVersion < 15 { try migrateToV15(db); currentVersion = try readVersion(db) }
+            if currentVersion < 16 { try migrateToV16(db); currentVersion = try readVersion(db) }
+            if currentVersion < 17 { try migrateToV17(db); currentVersion = try readVersion(db) }
+            if currentVersion < 18 { try migrateToV18(db); currentVersion = try readVersion(db) }
+            if currentVersion < 19 { try migrateToV19(db); currentVersion = try readVersion(db) }
+            if currentVersion < 20 { try migrateToV20(db); currentVersion = try readVersion(db) }
+            if currentVersion < 21 { try migrateToV21(db); currentVersion = try readVersion(db) }
+            if currentVersion < 22 { try migrateToV22(db); currentVersion = try readVersion(db) }
+            if currentVersion < 23 { try migrateToV23(db); currentVersion = try readVersion(db) }
+            if currentVersion < 24 { try migrateToV24(db); currentVersion = try readVersion(db) }
+            if currentVersion < 25 { try migrateToV25(db); currentVersion = try readVersion(db) }
+            if currentVersion < 26 { try migrateToV26(db); currentVersion = try readVersion(db) }
+            if currentVersion < 27 { try migrateToV27(db); currentVersion = try readVersion(db) }
+            if currentVersion < 28 { try migrateToV28(db); currentVersion = try readVersion(db) }
+            if currentVersion < 29 { try migrateToV29(db); currentVersion = try readVersion(db) }
+            if currentVersion < 30 { try migrateToV30(db) }
+
+            try runOnDB(db, "COMMIT;")
+        } catch {
+            try? runOnDB(db, "ROLLBACK;")
+            throw error
         }
-        if currentVersion < 2 {
-            try migrateToV2(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 3 {
-            try migrateToV3(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 4 {
-            try migrateToV4(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 5 {
-            try migrateToV5(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 6 {
-            try migrateToV6(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 7 {
-            try migrateToV7(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 8 {
-            try migrateToV8(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 9 {
-            try migrateToV9(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 10 {
-            try migrateToV10(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 11 {
-            try migrateToV11(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 12 {
-            try migrateToV12(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 13 {
-            try migrateToV13(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 14 {
-            try migrateToV14(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 15 {
-            try migrateToV15(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 16 {
-            try migrateToV16(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 17 {
-            try migrateToV17(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 18 {
-            try migrateToV18(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 19 {
-            try migrateToV19(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 20 {
-            try migrateToV20(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 21 {
-            try migrateToV21(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 22 {
-            try migrateToV22(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 23 {
-            try migrateToV23(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 24 {
-            try migrateToV24(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 25 {
-            try migrateToV25(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 26 {
-            try migrateToV26(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 27 {
-            try migrateToV27(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 28 {
-            try migrateToV28(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 29 {
-            try migrateToV29(db)
-            currentVersion = try readVersion(db)
-        }
-        if currentVersion < 30 {
-            try migrateToV30(db)
-        }
+    }
+
+    /// Reads migration need without creating or changing schema_version.
+    static func currentVersion(on db: OpaquePointer) throws -> Int {
+        guard try tableExists(db, table: "schema_version") else { return 0 }
+        return try readVersion(db)
     }
 
     // MARK: - V29 -> V30: Conversation shadow archive foundation
@@ -1070,12 +1005,13 @@ enum DatabaseMigrations {
     }
 
     private static func withTransaction(_ db: OpaquePointer, body: () throws -> Void) throws {
-        try runOnDB(db, "BEGIN TRANSACTION;")
+        try runOnDB(db, "SAVEPOINT cider_migration_step;")
         do {
             try body()
-            try runOnDB(db, "COMMIT;")
+            try runOnDB(db, "RELEASE SAVEPOINT cider_migration_step;")
         } catch {
-            try? runOnDB(db, "ROLLBACK;")
+            try? runOnDB(db, "ROLLBACK TO SAVEPOINT cider_migration_step;")
+            try? runOnDB(db, "RELEASE SAVEPOINT cider_migration_step;")
             throw error
         }
     }
@@ -1086,6 +1022,9 @@ enum DatabaseMigrations {
         let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
         if rc != SQLITE_OK {
             let message = errorMessage.map { String(cString: $0) } ?? "unknown error"
+            if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+                throw CiderDatabaseError.busy(message)
+            }
             throw CiderDatabaseError.runExec(message)
         }
     }

@@ -47,7 +47,6 @@ final class DatabaseSafetyService {
     private let fileManager: FileManager
 
     private let preOpenSnapshotInterval: TimeInterval = 12 * 60 * 60
-    private let integrityCheckInterval: TimeInterval = 12 * 60 * 60
     private let rollingBackupInterval: TimeInterval = 12 * 60 * 60
     private let preOpenRetentionCount = 3
     private let rollingBackupRetentionCount = 7
@@ -80,20 +79,9 @@ final class DatabaseSafetyService {
 
         do {
             var state = try loadState(for: databaseURL)
-
-            if shouldRun(lastRunAt: state.lastIntegrityCheckAt, minimumInterval: integrityCheckInterval) {
-                let integrity = try database.integrityCheck()
-                state.lastIntegrityCheckAt = Date()
-                try saveState(state, for: databaseURL)
-
-                if integrity.isHealthy {
-                    logger.info("SQLite integrity check passed")
-                } else {
-                    logger.error("SQLite integrity check failed: \(integrity.messages.joined(separator: " | "))")
-                    _ = try? createRollingBackup(reason: "integrity-failure", database: database, updateState: false)
-                }
-            }
-
+            // CiderDatabase.open owns mandatory preflight and post-open
+            // integrity validation. This best-effort service now performs only
+            // the existing rolling-backup cadence after that gate succeeds.
             if shouldRun(lastRunAt: state.lastRollingBackupAt, minimumInterval: rollingBackupInterval) {
                 _ = try createRollingBackup(reason: "startup", database: database, updateState: false)
                 state.lastRollingBackupAt = Date()
