@@ -276,7 +276,11 @@ final class CiderDatabase {
     /// Creates the file if it does not exist. Existing sources are validated
     /// without mutation before open; older healthy sources receive a mandatory
     /// verified SQLite safety artifact before migrations can write.
-    func open(at url: URL) throws {
+    func open(
+        at url: URL,
+        reconcileInterruptedRestore: Bool = true,
+        namespaceAuthority: DatabaseStartupLock? = nil
+    ) throws {
         let path = url.path
         // Refuse double-open — a second call would leak the prior handle and
         // potentially point at a different file. Callers must close() first if
@@ -287,8 +291,18 @@ final class CiderDatabase {
         lastMigrationSafetyArtifactURL = nil
         logger.info("Opening database at \(path)")
 
-        let startupLock = try DatabaseStartupLock.acquire(for: url)
-        defer { startupLock.release() }
+        let startupLock = try namespaceAuthority ?? DatabaseStartupLock.acquire(for: url)
+        let ownsStartupLock = namespaceAuthority == nil
+        defer {
+            if ownsStartupLock { startupLock.release() }
+        }
+        try startupLock.validate(for: url)
+        if reconcileInterruptedRestore {
+            _ = try DatabaseSafetyService.shared.reconcileInterruptedRestore(
+                at: url,
+                namespaceAuthority: startupLock
+            )
+        }
 
         // Freshness is authoritative only after Cider startup serialization,
         // and remains provisional until the SQLite VFS atomically reserves the

@@ -980,6 +980,14 @@ struct CiderCLI {
             return
         }
 
+        if command.lowercased() == "db",
+           ["restore-evidence", "restore-status"].contains(subcommand?.lowercased() ?? "") {
+            let databaseURL = StoragePaths.cachedVaultDirectoryURL
+                .appendingPathComponent(".cider/cider.db")
+            handleDatabaseRestoreEvidence(databaseURL: databaseURL)
+            return
+        }
+
         // Open SQLite before any storage service is touched — services check
         // CiderDatabase.shared.isOpen and use it as the primary store when available.
         // Without this, CLI writes skip the SQLite persist path and only hit the
@@ -13290,8 +13298,11 @@ struct CiderCLI {
         let safety = DatabaseSafetyService.shared
 
         switch subcommand {
+        case "restore-evidence", "restore-status":
+            handleDatabaseRestoreEvidence(databaseURL: databaseURL)
+
         case "backups", "list":
-            let backups = safety.listRollingBackups(databaseURL: databaseURL)
+            let backups = safety.listRestoreCandidates(databaseURL: databaseURL)
             if jsonOutput {
                 outputJSON(databaseEnvelope(
                     command: "db.backups",
@@ -13305,11 +13316,11 @@ struct CiderCLI {
                     ]
                 ))
             } else if backups.isEmpty {
-                print("No rolling SQLite backups found.")
+                print("No restorable SQLite backups found.")
             } else {
                 let formatter = ByteCountFormatter()
                 formatter.countStyle = .file
-                print("SQLite rolling backups (\(backups.count)):")
+                print("SQLite restore candidates (\(backups.count)):")
                 for (index, backup) in backups.enumerated() {
                     let size = formatter.string(fromByteCount: backup.byteSize)
                     print("  [\(index)] \(backup.url.lastPathComponent) — \(backup.createdAt.formatted()) — \(size) — \(backup.verification.state.rawValue)")
@@ -13448,11 +13459,11 @@ struct CiderCLI {
             let ciderRunning = isCiderAppRunning()
             let dryRun = args.contains("--dry-run")
 
-            let backups = safety.listRollingBackups(databaseURL: databaseURL)
+            let backups = safety.listRestoreCandidates(databaseURL: databaseURL)
             guard !backups.isEmpty else {
                 printDatabaseError(
                     command: "db.restore",
-                    message: "No rolling SQLite backups are available to restore.",
+                    message: "No verified SQLite restore candidates are available.",
                     readOnly: true,
                     payload: ["selector": selector, "requiresConfirmation": true]
                 )
@@ -13501,6 +13512,7 @@ struct CiderCLI {
                     payload: databaseRestorePlanPayload(
                         selector: selector,
                         backup: backup,
+                        selectedIndex: backupIndex,
                         databaseURL: databaseURL,
                         ciderRunning: ciderRunning
                     )
@@ -13516,6 +13528,7 @@ struct CiderCLI {
                     payload: databaseRestorePlanPayload(
                         selector: selector,
                         backup: backup,
+                        selectedIndex: backupIndex,
                         databaseURL: databaseURL,
                         ciderRunning: true
                     )
@@ -13531,6 +13544,7 @@ struct CiderCLI {
                     payload: databaseRestorePlanPayload(
                         selector: selector,
                         backup: backup,
+                        selectedIndex: backupIndex,
                         databaseURL: databaseURL,
                         ciderRunning: false
                     )
@@ -13545,17 +13559,74 @@ struct CiderCLI {
                     database: database,
                     reopenDatabase: true
                 )
+                guard let validatedSourceURL = result.sourceBackupURL else {
+                    throw DatabaseSafetyService.RestoreError.recoveryRequired(
+                        "The restore completed, but its service-returned source capability changed before CLI receipt construction.",
+                        artifactURL: result.preRestoreSnapshotURL
+                    )
+                }
+                let receiptCandidates = safety.listRestoreCandidates(databaseURL: databaseURL)
+                guard let validatedSourceIndex = receiptCandidates.firstIndex(where: {
+                    $0.url.standardizedFileURL == validatedSourceURL.standardizedFileURL
+                }) else {
+                    throw DatabaseSafetyService.RestoreError.recoveryRequired(
+                        "The service-validated restore source is no longer an immutable supported selector member.",
+                        artifactURL: result.preRestoreSnapshotURL
+                    )
+                }
+                let validatedSource = result.restoredBackup
                 let status = try database.integrityCheck()
+                guard status.isHealthy else {
+                    throw DatabaseSafetyService.RestoreError.recoveryRequired(
+                        "The restore service returned without a healthy post-restore integrity result.",
+                        artifactURL: result.preRestoreSnapshotURL
+                    )
+                }
+                let validatedRollback: (
+                    backup: DatabaseSafetyService.SQLiteBackupInfo,
+                    index: Int
+                )?
+                if let snapshotURL = result.preRestoreSnapshotURL {
+                    guard let index = receiptCandidates.firstIndex(where: {
+                        $0.url.standardizedFileURL == snapshotURL.standardizedFileURL
+                            && $0.verification.isRecoveryEligible
+                    }), safety.verifyBackup(at: snapshotURL).isRecoveryEligible else {
+                        throw DatabaseSafetyService.RestoreError.recoveryRequired(
+                            "The emitted rollback artifact could not be re-resolved and immutably verified through the current selector policy before receipt serialization.",
+                            artifactURL: snapshotURL
+                        )
+                    }
+                    validatedRollback = (receiptCandidates[index], index)
+                } else {
+                    validatedRollback = nil
+                }
                 if jsonOutput {
+                    let rollbackSelector = validatedRollback?.backup.url.lastPathComponent
                     var payload: [String: Any] = [
                         "selector": selector,
-                        "restoredBackup": databaseBackupToDict(result.restoredBackup, index: backupIndex),
+                        "restoredBackup": databaseBackupToDict(
+                            validatedSource,
+                            index: validatedSourceIndex
+                        ),
                         "integrity": databaseIntegrityToDict(status),
                         "partialFailure": false,
-                        "rollbackGuidance": "If restore results are wrong, run cider-cli db restore <pre-restore-snapshot-name> --dry-run --json, then confirm with --yes only after review.",
+                        "recoveryRequired": false,
+                        "terminalEvidenceRetained": true,
+                        "additionalRestoreRequiresOperatorCleanup": true,
+                        "rollbackGuidance": rollbackSelector.map {
+                            "Review with cider-cli db restore \($0) --dry-run --json, then confirm the exact selector with --yes."
+                        } ?? "This restore created a new destination and has no prior-database rollback artifact.",
                     ]
-                    if let snapshotURL = result.preRestoreSnapshotURL {
-                        payload["preRestoreSnapshot"] = databaseBackupURLToDict(snapshotURL)
+                    if let inventory = result.terminalEvidenceInventory {
+                        payload["terminalEvidenceInventory"] = databaseRestoreEvidenceInventoryToDict(inventory)
+                        payload["operatorProcedure"] = inventory.procedure
+                    }
+                    if let validatedRollback {
+                        payload["preRestoreSnapshot"] = databaseBackupToDict(
+                            validatedRollback.backup,
+                            index: validatedRollback.index
+                        )
+                        payload["rollbackSelector"] = validatedRollback.backup.url.lastPathComponent
                     }
                     outputJSON(databaseEnvelope(
                         command: "db.restore",
@@ -13564,9 +13635,15 @@ struct CiderCLI {
                         payload: payload
                     ))
                 } else {
-                    print("Restored SQLite database from \(result.restoredBackup.url.lastPathComponent)")
-                    if let snapshotURL = result.preRestoreSnapshotURL {
-                        print("Pre-restore snapshot: \(snapshotURL.path)")
+                    print("Restored SQLite database from \(validatedSource.url.lastPathComponent)")
+                    print("Bounded terminal restore evidence was retained; another restore requires explicit operator cleanup.")
+                    if let inventory = result.terminalEvidenceInventory {
+                        printDatabaseRestoreEvidenceInventory(inventory)
+                    }
+                    if let validatedRollback {
+                        let rollbackSelector = validatedRollback.backup.url.lastPathComponent
+                        print("Rollback selector: \(rollbackSelector)")
+                        print("Review with cider-cli db restore \(rollbackSelector) --dry-run --json before using --yes.")
                     }
                     print(status.isHealthy ? "Integrity check passed after restore." : "Integrity check reported issues after restore.")
                     if !status.isHealthy {
@@ -13576,26 +13653,83 @@ struct CiderCLI {
                     }
                 }
             } catch {
+                let restoreError = error as? DatabaseSafetyService.RestoreError
+                var failurePayload: [String: Any] = [
+                    "selector": selector,
+                    "partialFailure": true,
+                    "outcome": restoreError?.requiresRecovery == true
+                        ? "recovery_required"
+                        : "failed",
+                    "recoveryRequired": restoreError?.requiresRecovery == true,
+                    "safeNextCommands": [
+                        "cider-cli db backups --json",
+                        "cider-cli db integrity --json",
+                    ],
+                ]
+                if let retained = restoreError?.retainedRecoveryArtifactURL {
+                    let candidates = safety.listRestoreCandidates(databaseURL: databaseURL)
+                    if let candidateIndex = candidates.firstIndex(where: {
+                        $0.url.standardizedFileURL == retained.standardizedFileURL
+                            && $0.verification.isRecoveryEligible
+                    }) {
+                        failurePayload["retainedRecoveryArtifact"] = databaseBackupToDict(
+                            candidates[candidateIndex],
+                            index: candidateIndex
+                        )
+                        failurePayload["recoverySelector"] = retained.lastPathComponent
+                        failurePayload["recoveryGuidance"] = "Review the exact listed selector with cider-cli db restore \(retained.lastPathComponent) --dry-run --json."
+                    } else {
+                        failurePayload["preservedArtifactEvidence"] = databaseBackupURLToDict(retained)
+                        failurePayload["recoveryGuidance"] = "The preserved path is forensic evidence, not a supported selector. Use cider-cli db backups --json to find eligible recovery packages."
+                    }
+                }
+                if let inventory = try? safety.terminalRestoreEvidenceInventory(at: databaseURL) {
+                    failurePayload["terminalEvidenceInventory"] = databaseRestoreEvidenceInventoryToDict(inventory)
+                    failurePayload["operatorProcedure"] = inventory.procedure
+                }
                 printDatabaseError(
                     command: "db.restore",
                     message: "Error restoring SQLite backup: \(error.localizedDescription)",
                     readOnly: false,
-                    payload: [
-                        "selector": selector,
-                        "partialFailure": true,
-                        "safeNextCommands": [
-                            "cider-cli db backups --json",
-                            "cider-cli db integrity --json",
-                        ],
-                    ]
+                    payload: failurePayload
                 )
             }
 
         default:
             printDatabaseError(
                 command: databaseCommandName(subcommand),
-                message: "Unknown db command: \(subcommand ?? "nil"). Commands: backups, backup, integrity, audit, restore",
+                message: "Unknown db command: \(subcommand ?? "nil"). Commands: backups, backup, integrity, audit, restore, restore-evidence",
                 readOnly: true
+            )
+        }
+    }
+
+    static func handleDatabaseRestoreEvidence(databaseURL: URL) {
+        do {
+            let inventory = try DatabaseSafetyService.shared
+                .terminalRestoreEvidenceInventory(at: databaseURL)
+            if jsonOutput {
+                outputJSON(databaseEnvelope(
+                    command: "db.restore-evidence",
+                    readOnly: true,
+                    changed: false,
+                    payload: [
+                        "inventory": databaseRestoreEvidenceInventoryToDict(inventory),
+                        "operatorProcedure": inventory.procedure,
+                    ]
+                ))
+            } else {
+                printDatabaseRestoreEvidenceInventory(inventory)
+            }
+        } catch {
+            printDatabaseError(
+                command: "db.restore-evidence",
+                message: "Could not inspect fixed restore evidence safely: \(error.localizedDescription)",
+                readOnly: true,
+                payload: [
+                    "recoveryRequired": true,
+                    "safeNextCommands": ["cider-cli db restore-evidence --json"],
+                ]
             )
         }
     }
@@ -15463,6 +15597,92 @@ struct CiderCLI {
         return dict
     }
 
+    static func databaseRestoreEvidenceInventoryToDict(
+        _ inventory: DatabaseSafetyService.RestoreEvidenceInventory
+    ) -> [String: Any] {
+        var result: [String: Any] = [
+            "policyRoot": [
+                "path": inventory.policyRootPath,
+                "device": inventory.policyRootIdentity.device,
+                "inode": inventory.policyRootIdentity.inode,
+                "generation": inventory.policyRootIdentity.generation,
+            ],
+            "recordPresent": inventory.recordPresent,
+            "state": inventory.state,
+            "recoveryRequired": inventory.recoveryRequired,
+            "members": inventory.members.map { member in
+                var value: [String: Any] = [
+                    "role": member.role,
+                    "basename": member.basename,
+                    "policyRelativeLocator": member.policyRelativeLocator,
+                    "type": member.type,
+                    "status": member.status.rawValue,
+                    "expectedTerminalMember": member.expectedTerminalMember,
+                    "safeToRemoveOutOfBand": member.safeToRemoveOutOfBand,
+                ]
+                if let identity = member.identity {
+                    value["identity"] = [
+                        "device": identity.device,
+                        "inode": identity.inode,
+                        "generation": identity.generation,
+                    ]
+                }
+                if let byteCount = member.byteCount { value["byteCount"] = byteCount }
+                if let digest = member.digest { value["sha256"] = digest }
+                return value
+            },
+            "operatorProcedure": inventory.procedure,
+        ]
+        if let transactionID = inventory.transactionID {
+            result["transactionID"] = transactionID
+        }
+        if let recordSHA256 = inventory.recordSHA256 {
+            result["recordSHA256"] = recordSHA256
+        }
+        if let recordPhase = inventory.recordPhase {
+            result["recordPhase"] = recordPhase
+        }
+        if let recordOutcome = inventory.recordOutcome {
+            result["recordOutcome"] = recordOutcome
+        }
+        return result
+    }
+
+    static func printDatabaseRestoreEvidenceInventory(
+        _ inventory: DatabaseSafetyService.RestoreEvidenceInventory
+    ) {
+        print("Restore terminal-evidence inventory: \(inventory.state)")
+        print(
+            "Pinned policy root: \(inventory.policyRootPath) "
+                + "[dev=\(inventory.policyRootIdentity.device) "
+                + "ino=\(inventory.policyRootIdentity.inode) "
+                + "gen=\(inventory.policyRootIdentity.generation)]"
+        )
+        print(
+            "Transaction: \(inventory.transactionID ?? "none"); "
+                + "record SHA-256: \(inventory.recordSHA256 ?? "none"); "
+                + "phase: \(inventory.recordPhase ?? "none"); "
+                + "outcome: \(inventory.recordOutcome ?? "none")"
+        )
+        for member in inventory.members {
+            let identity = member.identity.map {
+                "dev=\($0.device) ino=\($0.inode) gen=\($0.generation)"
+            } ?? "identity=none"
+            let bytes = member.byteCount.map(String.init) ?? "none"
+            let digest = member.digest ?? "none"
+            print(
+                "  \(member.role): \(member.policyRelativeLocator) "
+                    + "status=\(member.status.rawValue) type=\(member.type) "
+                    + "\(identity) bytes=\(bytes) sha256=\(digest) "
+                    + "safeOutOfBandRemoval=\(member.safeToRemoveOutOfBand)"
+            )
+        }
+        print("Operator procedure:")
+        for (index, step) in inventory.procedure.enumerated() {
+            print("  \(index + 1). \(step)")
+        }
+    }
+
     static func databaseIntegrityToDict(_ status: DatabaseIntegrityStatus) -> [String: Any] {
         [
             "healthy": status.isHealthy,
@@ -15473,19 +15693,20 @@ struct CiderCLI {
     static func databaseRestorePlanPayload(
         selector: String,
         backup: DatabaseSafetyService.SQLiteBackupInfo,
+        selectedIndex: Int,
         databaseURL: URL,
         ciderRunning: Bool
     ) -> [String: Any] {
         [
             "selector": selector,
             "targetDatabase": databaseURL.path,
-            "selectedBackup": databaseBackupToDict(backup, index: 0),
+            "selectedBackup": databaseBackupToDict(backup, index: selectedIndex),
             "requiresConfirmation": true,
             "requiredConfirmationFlag": "--yes",
             "activeAppBlocker": ciderRunning,
             "blockers": ciderRunning ? ["cider_app_running"] : [],
             "preRestoreSnapshotPlanned": true,
-            "rollbackGuidance": "Confirmed restore creates a pre-restore snapshot. Use db backups and db restore --dry-run before any rollback.",
+            "rollbackGuidance": "Confirmed restore creates a listed pre-restore package. Use its exact name from db backups with db restore --dry-run before rollback.",
             "safeNextCommands": [
                 "cider-cli db backups --json",
                 "cider-cli db restore \(selector) --dry-run --json",
@@ -15538,6 +15759,7 @@ struct CiderCLI {
     static func databaseCommandName(_ subcommand: String?) -> String {
         switch subcommand {
         case "backups", "list": return "db.backups"
+        case "restore-evidence", "restore-status": return "db.restore-evidence"
         case "backup", "create": return "db.backup"
         case "integrity", "check": return "db.integrity"
         case "audit", "log": return "db.audit"
@@ -33106,6 +33328,7 @@ struct CiderCLI {
           cider-cli db integrity
           cider-cli db audit [--limit <n>] [--type <item-type>] [--action <action>] [--source <ui|cli|agent|migration|cleanup>] [--item <id-prefix>]
           cider-cli db restore <index|filename|latest> --yes
+          cider-cli db restore-evidence [--json]  # read-only fixed-slot inventory; never removes evidence
 
         GLOBAL FLAGS
           --vault <path>   Use a sandbox vault for this invocation. Bypasses

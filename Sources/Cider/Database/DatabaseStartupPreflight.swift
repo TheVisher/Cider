@@ -23,10 +23,21 @@ fileprivate struct DatabaseSourceContinuityToken: Equatable {
 }
 
 final class DatabaseStartupLock {
-    private let descriptor: Int32
+    private var descriptor: Int32
+    private let parentDevice: dev_t
+    private let parentInode: ino_t
+    private let parentGeneration: UInt32
 
-    private init(descriptor: Int32) {
+    private init(
+        descriptor: Int32,
+        parentDevice: dev_t,
+        parentInode: ino_t,
+        parentGeneration: UInt32
+    ) {
         self.descriptor = descriptor
+        self.parentDevice = parentDevice
+        self.parentInode = parentInode
+        self.parentGeneration = parentGeneration
     }
 
     static func acquire(for databaseURL: URL, timeout: TimeInterval = 5) throws -> DatabaseStartupLock {
@@ -53,12 +64,99 @@ final class DatabaseStartupLock {
             }
             Thread.sleep(forTimeInterval: 0.05)
         }
-        return DatabaseStartupLock(descriptor: descriptor)
+        var value = stat()
+        guard fstat(descriptor, &value) == 0,
+              value.st_mode & S_IFMT == S_IFDIR else {
+            flock(descriptor, LOCK_UN)
+            Darwin.close(descriptor)
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The database parent authority changed while its startup lock was acquired."
+            )
+        }
+        return DatabaseStartupLock(
+            descriptor: descriptor,
+            parentDevice: value.st_dev,
+            parentInode: value.st_ino,
+            parentGeneration: value.st_gen
+        )
     }
 
     func release() {
+        guard descriptor >= 0 else { return }
         flock(descriptor, LOCK_UN)
         Darwin.close(descriptor)
+        descriptor = -1
+    }
+
+    func validate(for databaseURL: URL) throws {
+        guard descriptor >= 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .concurrentStartup,
+                detail: "The held database namespace authority was already released."
+            )
+        }
+        var held = stat()
+        var reachable = stat()
+        let parentPath = databaseURL.deletingLastPathComponent().path
+        guard fstat(descriptor, &held) == 0,
+              lstat(parentPath, &reachable) == 0,
+              held.st_mode & S_IFMT == S_IFDIR,
+              reachable.st_mode & S_IFMT == S_IFDIR,
+              held.st_dev == parentDevice,
+              held.st_ino == parentInode,
+              held.st_gen == parentGeneration,
+              reachable.st_dev == parentDevice,
+              reachable.st_ino == parentInode,
+              reachable.st_gen == parentGeneration else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .changedDuringRead,
+                detail: "The held database namespace authority no longer matches the reachable parent directory."
+            )
+        }
+    }
+
+    func coversDirectory(device: dev_t, inode: ino_t, generation: UInt32) -> Bool {
+        guard descriptor >= 0 else { return false }
+        var held = stat()
+        return fstat(descriptor, &held) == 0
+            && held.st_mode & S_IFMT == S_IFDIR
+            && held.st_dev == parentDevice
+            && held.st_ino == parentInode
+            && held.st_gen == parentGeneration
+            && device == parentDevice
+            && inode == parentInode
+            && generation == parentGeneration
+    }
+
+    /// Returns a caller-owned duplicate of the exact directory descriptor on
+    /// which the startup/restore flock is held. Callers must close it.
+    func duplicateParentDescriptor(for databaseURL: URL) throws -> Int32 {
+        try validate(for: databaseURL)
+        let duplicate = fcntl(descriptor, F_DUPFD_CLOEXEC, 0)
+        guard duplicate >= 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The held database namespace authority could not be duplicated."
+            )
+        }
+        var duplicated = stat()
+        guard fstat(duplicate, &duplicated) == 0,
+              duplicated.st_mode & S_IFMT == S_IFDIR,
+              duplicated.st_dev == parentDevice,
+              duplicated.st_ino == parentInode,
+              duplicated.st_gen == parentGeneration else {
+            Darwin.close(duplicate)
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .changedDuringRead,
+                detail: "The duplicated database namespace authority changed identity."
+            )
+        }
+        return duplicate
+    }
+
+    deinit {
+        release()
     }
 }
 
