@@ -526,11 +526,19 @@ struct ConversationShadowWriterTests {
             database: fixture.database
         )
         let backupDatabase = CiderDatabase()
-        try backupDatabase.open(at: preRunBackup)
+        let verificationCopyURL = fixture.root.appendingPathComponent("verified-backup-copy.db")
+        try safety.materializeVerifiedBackupDatabase(
+            from: preRunBackup,
+            at: verificationCopyURL
+        )
+        try backupDatabase.open(at: verificationCopyURL)
         #expect(try backupDatabase.integrityCheck().isHealthy)
         backupDatabase.close()
         let isolatedRestoreURL = fixture.root.appendingPathComponent("isolated-restore.db")
-        try FileManager.default.copyItem(at: preRunBackup, to: isolatedRestoreURL)
+        try safety.materializeVerifiedBackupDatabase(
+            from: preRunBackup,
+            at: isolatedRestoreURL
+        )
         let isolatedRestore = CiderDatabase()
         try isolatedRestore.open(at: isolatedRestoreURL)
         let restoredRepository = ConversationRepository(database: isolatedRestore)

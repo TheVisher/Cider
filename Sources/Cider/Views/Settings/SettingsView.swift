@@ -169,14 +169,20 @@ struct SettingsView: View {
         }
 
         let backups = DatabaseSafetyService.shared.listRollingBackups(databaseURL: databaseURL)
-        guard let latest = backups.first else {
+        guard !backups.isEmpty else {
             return "No rolling backups yet. Cider will create them automatically, or you can make one now."
         }
 
+        let verifiedBackups = backups.filter { $0.verification.isVerified }
+        let unusableCount = backups.count - verifiedBackups.count
+        guard let latest = verifiedBackups.first else {
+            return "No verified rolling backups. \(unusableCount) retained artifact\(unusableCount == 1 ? " is" : "s are") unusable."
+        }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         let size = formatter.string(fromByteCount: latest.byteSize)
-        return "\(backups.count) rolling backup\(backups.count == 1 ? "" : "s"). Latest: \(latest.createdAt.formatted()) (\(size))."
+        let unusableSuffix = unusableCount == 0 ? "" : " \(unusableCount) unusable."
+        return "\(verifiedBackups.count) verified rolling backup\(verifiedBackups.count == 1 ? "" : "s"). Latest: \(latest.createdAt.formatted()) (\(size)).\(unusableSuffix)"
     }
 
     func revealSQLiteBackupsFolder() {

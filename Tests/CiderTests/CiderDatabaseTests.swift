@@ -324,7 +324,10 @@ struct CiderDatabaseTests {
         let backupURL = try service.createRollingBackup(reason: "conversation-core", database: database)
 
         let isolatedRestoreURL = isolatedDirectory.appendingPathComponent("isolated-restore.db")
-        try FileManager.default.copyItem(at: backupURL, to: isolatedRestoreURL)
+        try service.materializeVerifiedBackupDatabase(
+            from: backupURL,
+            at: isolatedRestoreURL
+        )
         let isolatedRestore = CiderDatabase()
         try isolatedRestore.open(at: isolatedRestoreURL)
         let restoredRepository = ConversationRepository(database: isolatedRestore)
@@ -347,8 +350,12 @@ struct CiderDatabaseTests {
             .init(roomID: roomID, role: "user", contentText: "after backup"),
             intent: .historicalReplay
         )
+        let backupPath = service.rollingBackupsDirectory(for: databaseURL).appendingPathComponent(
+            backupURL.packageName,
+            isDirectory: true
+        )
         _ = try service.restoreRollingBackup(
-            from: backupURL,
+            from: backupPath,
             into: databaseURL,
             database: database,
             reopenDatabase: true
@@ -359,7 +366,7 @@ struct CiderDatabaseTests {
         #expect(try reopenedRepository.turn(id: turn.id)?.source?.id == "turn-backup")
     }
 
-    @Test("DatabaseSafetyService captures a pre-open snapshot of database files")
+    @Test("DatabaseSafetyService captures a verified pre-open SQLite package")
     func preOpenSnapshotCopiesDatabaseFiles() throws {
         let isolatedDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("cider-db-safety-\(UUID().uuidString)", isDirectory: true)
@@ -381,25 +388,14 @@ struct CiderDatabaseTests {
         try insert.step()
         db.close()
 
-        let walURL = URL(fileURLWithPath: url.path + "-wal")
-        try Data("wal".utf8).write(to: walURL)
-        defer { try? FileManager.default.removeItem(at: walURL) }
-
         let service = DatabaseSafetyService()
         service.capturePreOpenSnapshotIfNeeded(databaseURL: url)
 
-        let preflightDir = service.preOpenSnapshotsDirectory(for: url)
-        let snapshots = try FileManager.default.contentsOfDirectory(at: preflightDir, includingPropertiesForKeys: nil)
-        #expect(!snapshots.isEmpty)
-
-        let matchingSnapshot = snapshots.first { snapshotURL in
-            let dbCopy = snapshotURL.appendingPathComponent(url.lastPathComponent).path
-            let walCopy = snapshotURL.appendingPathComponent(walURL.lastPathComponent).path
-            return FileManager.default.fileExists(atPath: dbCopy)
-                && FileManager.default.fileExists(atPath: walCopy)
-        }
-
-        #expect(matchingSnapshot != nil)
+        let snapshots = service.listPreOpenSnapshots(databaseURL: url)
+        let snapshot = try #require(snapshots.first)
+        #expect(snapshot.verification.isVerified)
+        #expect(snapshot.verification.schemaVersion == DatabaseMigrations.latestVersion)
+        #expect(snapshot.verification.artifactNames == ["database.sqlite", "manifest.json"])
     }
 
     @Test("DatabaseSafetyService lists rolling backups newest first")
@@ -416,13 +412,12 @@ struct CiderDatabaseTests {
 
         let service = DatabaseSafetyService()
         let first = try service.createRollingBackup(reason: "first", database: db)
-        Thread.sleep(forTimeInterval: 1.1)
         let second = try service.createRollingBackup(reason: "second", database: db)
 
         let backups = service.listRollingBackups(databaseURL: url)
         #expect(backups.count == 2)
-        #expect(backups[0].url.standardizedFileURL == second.standardizedFileURL)
-        #expect(backups[1].url.standardizedFileURL == first.standardizedFileURL)
+        #expect(backups[0].url.lastPathComponent == second.packageName)
+        #expect(backups[1].url.lastPathComponent == first.packageName)
     }
 
     @Test("Restoring a rolling backup replaces the current database contents")
@@ -449,7 +444,11 @@ struct CiderDatabaseTests {
         try originalInsert.step()
 
         let service = DatabaseSafetyService()
-        let backupURL = try service.createRollingBackup(reason: "restore-test", database: db)
+        let backupArtifact = try service.createRollingBackup(reason: "restore-test", database: db)
+        let backupURL = service.rollingBackupsDirectory(for: url).appendingPathComponent(
+            backupArtifact.packageName,
+            isDirectory: true
+        )
 
         let changedInsert = try db.prepare(
             "INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"

@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "cider-cli", targets: ["CiderCLI"])
     ],
     dependencies: [
+        .package(name: "CID850Interpose", path: "Tests/CID850Interpose"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm/", .upToNextMinor(from: "2.29.1")),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
@@ -40,9 +41,22 @@ let package = Package(
             path: "Sources/CiderCLI",
             swiftSettings: [.unsafeFlags(["-enable-testing"])]
         ),
+        .executableTarget(
+            name: "CID850BoundaryHarness",
+            dependencies: [
+                "Cider",
+                .product(name: "CID850Interpose", package: "CID850Interpose"),
+            ],
+            path: "Tests/CID850BoundaryHarness",
+            swiftSettings: [.unsafeFlags(["-enable-testing"])]
+        ),
         .testTarget(
             name: "CiderTests",
-            dependencies: ["Cider", "CiderCLI"],
+            dependencies: [
+                "Cider",
+                "CiderCLI",
+                "CID850BoundaryHarness",
+            ],
             path: "Tests/CiderTests"
         )
     ]

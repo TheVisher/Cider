@@ -13312,31 +13312,32 @@ struct CiderCLI {
                 print("SQLite rolling backups (\(backups.count)):")
                 for (index, backup) in backups.enumerated() {
                     let size = formatter.string(fromByteCount: backup.byteSize)
-                    print("  [\(index)] \(backup.url.lastPathComponent) — \(backup.createdAt.formatted()) — \(size)")
+                    print("  [\(index)] \(backup.url.lastPathComponent) — \(backup.createdAt.formatted()) — \(size) — \(backup.verification.state.rawValue)")
                 }
             }
 
         case "backup", "create":
-            do {
-                let backupURL = try safety.createManualBackup(database: database)
+            let receipt = safety.createManualBackup(database: database)
+            if receipt.usable {
                 if jsonOutput {
                     outputJSON(databaseEnvelope(
                         command: "db.backup",
                         readOnly: false,
                         changed: true,
-                        payload: [
-                            "backup": databaseBackupURLToDict(backupURL),
-                            "verification": databaseBackupVerificationDict(backupURL),
-                        ]
+                        payload: ["receipt": databaseBackupCreationReceiptToDict(receipt)]
                     ))
                 } else {
-                    print("Created SQLite backup at \(backupURL.path)")
+                    print(receipt.message)
+                    for warning in receipt.warnings {
+                        print("Warning: \(warning)")
+                    }
                 }
-            } catch {
+            } else {
                 printDatabaseError(
                     command: "db.backup",
-                    message: "Error creating SQLite backup: \(error.localizedDescription)",
-                    readOnly: false
+                    message: receipt.message,
+                    readOnly: false,
+                    payload: ["receipt": databaseBackupCreationReceiptToDict(receipt)]
                 )
             }
 
@@ -13474,6 +13475,23 @@ struct CiderCLI {
             let backupIndex = backups.firstIndex { candidate in
                 candidate.url.standardizedFileURL == backup.url.standardizedFileURL
             } ?? 0
+
+            guard backup.verification.isRecoveryEligible else {
+                printDatabaseError(
+                    command: "db.restore",
+                    message: "The selected backup is unusable and cannot be restored: "
+                        + backup.verification.messages.joined(separator: " "),
+                    readOnly: true,
+                    payload: [
+                        "selector": selector,
+                        "selectedBackup": databaseBackupToDict(backup, index: backupIndex),
+                        "requiresConfirmation": true,
+                        "blockers": ["backup_unusable"],
+                        "safeNextCommands": ["cider-cli db backups --json"],
+                    ]
+                )
+                return
+            }
 
             if dryRun {
                 outputJSON(databaseEnvelope(
@@ -15387,6 +15405,7 @@ struct CiderCLI {
             "path": backup.url.path,
             "createdAt": backup.createdAt.timeIntervalSince1970,
             "byteSize": backup.byteSize,
+            "verification": databaseBackupVerificationDict(backup.verification),
         ]
     }
 
@@ -15407,14 +15426,41 @@ struct CiderCLI {
         return dict
     }
 
-    static func databaseBackupVerificationDict(_ url: URL) -> [String: Any] {
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-        let byteSize = attrs[.size] as? Int64 ?? 0
-        return [
-            "exists": FileManager.default.fileExists(atPath: url.path),
-            "nonEmpty": byteSize > 0,
-            "byteSize": byteSize,
+    static func databaseBackupVerificationDict(
+        _ verification: DatabaseSafetyService.BackupVerification
+    ) -> [String: Any] {
+        var dict: [String: Any] = [
+            "state": verification.state.rawValue,
+            "verified": verification.isVerified,
+            "recoveryEligible": verification.isRecoveryEligible,
+            "retainedBytesUnchanged": verification.retainedBytesUnchanged,
+            "artifactNames": verification.artifactNames,
+            "messages": verification.messages,
         ]
+        if let schemaVersion = verification.schemaVersion { dict["schemaVersion"] = schemaVersion }
+        if let hash = verification.databaseSHA256 { dict["databaseSHA256"] = hash }
+        if let hash = verification.manifestSHA256 { dict["manifestSHA256"] = hash }
+        return dict
+    }
+
+    static func databaseBackupCreationReceiptToDict(
+        _ receipt: DatabaseSafetyService.BackupCreationReceipt
+    ) -> [String: Any] {
+        var dict: [String: Any] = [
+            "state": receipt.state.rawValue,
+            "created": receipt.created,
+            "verified": receipt.verified,
+            "usable": receipt.usable,
+            "message": receipt.message,
+            "warnings": receipt.warnings,
+        ]
+        if let backupURL = receipt.backupURL { dict["backup"] = databaseBackupURLToDict(backupURL) }
+        if let artifactName = receipt.artifactName { dict["artifactName"] = artifactName }
+        if let verification = receipt.verification {
+            dict["verification"] = databaseBackupVerificationDict(verification)
+        }
+        if let failureKind = receipt.failureKind { dict["failureKind"] = failureKind.rawValue }
+        return dict
     }
 
     static func databaseIntegrityToDict(_ status: DatabaseIntegrityStatus) -> [String: Any] {

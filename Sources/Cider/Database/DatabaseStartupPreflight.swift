@@ -66,6 +66,7 @@ final class ExistingDatabaseInspection {
     let handle: OpaquePointer
     let schemaVersion: Int
     fileprivate let sourceContinuity: DatabaseSourceContinuityToken
+    let sourceLineage: DatabaseSourceLineage
     private let disposableDirectoryURL: URL?
     private var isClosed = false
 
@@ -73,11 +74,13 @@ final class ExistingDatabaseInspection {
         handle: OpaquePointer,
         schemaVersion: Int,
         sourceContinuity: DatabaseSourceContinuityToken,
+        sourceLineage: DatabaseSourceLineage,
         disposableDirectoryURL: URL?
     ) {
         self.handle = handle
         self.schemaVersion = schemaVersion
         self.sourceContinuity = sourceContinuity
+        self.sourceLineage = sourceLineage
         self.disposableDirectoryURL = disposableDirectoryURL
     }
 
@@ -257,6 +260,16 @@ enum DatabaseStartupPreflight {
             )
         }
 
+        let lineageObservation: DatabaseSourceLineageObservation
+        do {
+            lineageObservation = try DatabaseSourceLineageObservation(databaseURL: databaseURL)
+        } catch {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .changedDuringRead,
+                detail: "The database lineage could not be pinned before inspection: \(error.localizedDescription)"
+            )
+        }
+
         let walURL = URL(fileURLWithPath: databaseURL.path + "-wal")
         let walSize: Int
         if fileManager.fileExists(atPath: walURL.path) {
@@ -272,7 +285,11 @@ enum DatabaseStartupPreflight {
             walSize = 0
         }
         if walSize > 0 {
-            return try inspectDisposableWALCopy(databaseURL: databaseURL, walURL: walURL)
+            return try inspectDisposableWALCopy(
+                databaseURL: databaseURL,
+                walURL: walURL,
+                lineageObservation: lineageObservation
+            )
         }
 
         let continuityBeforeOpen = try sourceSignatures(at: databaseURL)
@@ -294,6 +311,7 @@ enum DatabaseStartupPreflight {
                 handle: handle,
                 schemaVersion: version,
                 sourceContinuity: continuityAfterValidation,
+                sourceLineage: try lineageObservation.validate(),
                 disposableDirectoryURL: nil
             )
         } catch {
@@ -408,6 +426,21 @@ enum DatabaseStartupPreflight {
         )
     }
 
+    /// Captures the already health-checked logical source into a caller-owned
+    /// staging path. The inspection may be an immutable source handle or a
+    /// disposable coherent DB/WAL copy; neither path writes the retained source.
+    static func captureBackup(
+        from inspection: ExistingDatabaseInspection,
+        to destinationDescriptor: Int32,
+        maximumBytes: Int64
+    ) throws {
+        try CiderDatabase.captureOnlineBackup(
+            from: inspection.handle,
+            into: destinationDescriptor,
+            maximumBytes: maximumBytes
+        )
+    }
+
     static func migrationSafetyDirectory(for sourceDatabaseURL: URL) -> URL {
         sourceDatabaseURL.deletingLastPathComponent()
             .appendingPathComponent("backups", isDirectory: true)
@@ -438,7 +471,8 @@ enum DatabaseStartupPreflight {
 
     private static func inspectDisposableWALCopy(
         databaseURL: URL,
-        walURL: URL
+        walURL: URL,
+        lineageObservation: DatabaseSourceLineageObservation
     ) throws -> ExistingDatabaseInspection {
         let fileManager = FileManager.default
         for _ in 0..<3 {
@@ -474,6 +508,7 @@ enum DatabaseStartupPreflight {
                             database: afterDatabase,
                             wal: afterWAL
                         ),
+                        sourceLineage: try lineageObservation.validate(),
                         disposableDirectoryURL: disposableDirectory
                     )
                 } catch {

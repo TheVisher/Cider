@@ -553,17 +553,13 @@ extension SettingsView {
                             isCreatingDatabaseBackup = true
                             databaseBackupResult = nil
                             Task {
-                                do {
-                                    let backupURL = try DatabaseSafetyService.shared.createManualBackup()
-                                    await MainActor.run {
-                                        databaseBackupResult = "Created \(backupURL.lastPathComponent)"
-                                        isCreatingDatabaseBackup = false
-                                    }
-                                } catch {
-                                    await MainActor.run {
-                                        databaseBackupResult = "Backup failed: \(error.localizedDescription)"
-                                        isCreatingDatabaseBackup = false
-                                    }
+                                let receipt = DatabaseSafetyService.shared.createManualBackup()
+                                await MainActor.run {
+                                    let warningSuffix = receipt.warnings.isEmpty
+                                        ? ""
+                                        : " \(receipt.warnings.joined(separator: " "))"
+                                    databaseBackupResult = receipt.message + warningSuffix
+                                    isCreatingDatabaseBackup = false
                                 }
                             }
                         } label: {
