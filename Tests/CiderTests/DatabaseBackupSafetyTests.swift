@@ -13,7 +13,7 @@ struct DatabaseBackupSafetyTests {
     func appendOnlyRestorationFailureCannotPersistAcrossRestart() throws {
         let result = try runCID850BoundaryHarness("append-restore")
 
-        #expect(!result.didAttack)
+        #expect(!result.didMutation)
         #expect(!result.policyAppendOnly)
         #expect(result.created)
         #expect(result.verified)
@@ -59,7 +59,7 @@ struct DatabaseBackupSafetyTests {
     func stagingMkdiratToOpenatReplacementFailsClosed() throws {
         let result = try runCID850BoundaryHarness("staging")
 
-        #expect(!result.didAttack)
+        #expect(!result.didMutation)
         #expect(result.created)
         #expect(result.verified)
         #expect(result.usable)
@@ -80,7 +80,7 @@ struct DatabaseBackupSafetyTests {
     func publicationCloneToOpenReplacementFailsClosed() throws {
         let result = try runCID850BoundaryHarness("publication")
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(!result.created)
         #expect(!result.verified)
         #expect(!result.usable)
@@ -88,7 +88,7 @@ struct DatabaseBackupSafetyTests {
         #expect(result.heldExists)
         #expect(!result.receiptNamesHeldArtifact)
         #expect(result.replacementMatchesHeld)
-        #expect(result.retainedVerified)
+        #expect(!result.retainedVerified)
         #expect(result.sourceUnchanged)
         #expect(result.priorUnchanged)
         print(
@@ -148,7 +148,7 @@ struct DatabaseBackupSafetyTests {
     func productionPublicationDoesNotSelectReplacementSourceName() throws {
         let result = try runCID850BoundaryHarness("publication-source")
 
-        #expect(!result.didAttack)
+        #expect(!result.didMutation)
         #expect(!result.replacementStayedAtSource)
         #expect(result.created)
         #expect(result.usable)
@@ -394,7 +394,7 @@ struct DatabaseBackupSafetyTests {
     func productionLateSourceGrowthRemainsDurablyBounded() throws {
         let result = try runCID850AggregateGrowthHarness()
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(result.writerSucceeded)
         #expect(result.failureKind == DatabaseSafetyService.BackupFailureKind.retentionCapacity.rawValue)
         #expect(!result.created && !result.verified && !result.usable)
@@ -414,7 +414,7 @@ struct DatabaseBackupSafetyTests {
     func aggregateCloneSeamRacesRemainDurablyBounded(_ boundary: String) throws {
         let result = try runCID850AggregateCloneRaceHarness(boundary)
 
-        #expect(result.attacksCompleted == 3)
+        #expect(result.mutationsCompleted == 3)
         #expect(result.failureKinds.allSatisfy {
             $0 == DatabaseSafetyService.BackupFailureKind.retentionCapacity.rawValue
         })
@@ -719,7 +719,7 @@ struct DatabaseBackupSafetyTests {
     func retentionMutationDoesNotTouchReplacementOccupant() throws {
         let result = try runCID850BoundaryHarness("retention")
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(result.created)
         #expect(result.verified)
         #expect(result.usable)
@@ -1182,6 +1182,27 @@ struct DatabaseBackupSafetyTests {
         #expect(!receipt.usable)
     }
 
+    @Test(
+        "qualified receipt rejects inode substitution, post-read mutation, and oversized substitution",
+        arguments: ["before-open-identical", "post-read-mutate", "before-open-oversized"]
+    )
+    func qualifiedReceiptMemberReadsStayIdentityBoundAndBounded(action: String) throws {
+        let result = try runCID850Harness(
+            "qualified-receipt-race:\(action)",
+            as: CID851QualifiedReceiptRaceResult.self
+        )
+        #expect(result.action == action)
+        #expect(result.didMutation)
+        #expect(result.receiptUnusable)
+        #expect(result.returnedPromptly)
+        #expect(result.liveDatabaseExact)
+        #expect(result.manifestExact)
+        #expect(result.originalMemberPreserved)
+        if action != "post-read-mutate" {
+            #expect(result.visibleMemberDifferentInode)
+        }
+    }
+
     @Test("current lineage is enforced while safe raw and v1 artifacts remain recovery-only")
     func currentLineageAndLegacyRecoveryClassification() throws {
         let first = try Fixture()
@@ -1292,7 +1313,15 @@ struct DatabaseBackupSafetyTests {
         )
         source.database.close()
         _ = try source.service.restoreRollingBackup(from: current, into: source.databaseURL)
+        try performDisposableTerminalEvidenceCleanup(
+            databaseURL: source.databaseURL,
+            service: source.service
+        )
         _ = try source.service.restoreRollingBackup(from: associatedV1, into: source.databaseURL)
+        try performDisposableTerminalEvidenceCleanup(
+            databaseURL: source.databaseURL,
+            service: source.service
+        )
         _ = try source.service.restoreRollingBackup(from: associatedRaw, into: source.databaseURL)
         #expect(try scalarInt(
             databaseURL: source.databaseURL,
@@ -1353,8 +1382,55 @@ struct DatabaseBackupSafetyTests {
                 databaseURL: fixture.databaseURL,
                 sql: "SELECT count(*) FROM labels WHERE id = 'absent-policy-source';"
             ) == 1)
+            try performDisposableTerminalEvidenceCleanup(
+                databaseURL: fixture.databaseURL,
+                service: fixture.service
+            )
             try removeDisposableSQLiteSet(at: fixture.databaseURL)
         }
+    }
+
+    @Test("absent-destination completion records and preserves the physical DB/WAL/SHM namespace")
+    func absentDestinationRestoreRegistersPostReopenNamespace() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('absent-complete', 'Absent Complete', '#446688', 'custom', 1, 1);
+            """)
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "absent-completion",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        fixture.database.close()
+        for suffix in ["", "-wal", "-shm"] {
+            let url = URL(fileURLWithPath: fixture.databaseURL.path + suffix)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+
+        let result = try fixture.service.restoreRollingBackup(
+            from: backup,
+            into: fixture.databaseURL,
+            database: fixture.database,
+            reopenDatabase: true
+        )
+
+        #expect(result.sourceBackupURL?.standardizedFileURL == backup.standardizedFileURL)
+        #expect(fixture.database.isOpen)
+        #expect(FileManager.default.fileExists(atPath: fixture.databaseURL.path + "-wal"))
+        #expect(FileManager.default.fileExists(atPath: fixture.databaseURL.path + "-shm"))
+        #expect(try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL).state == .completedCommit)
+        #expect(try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL).state == .completedCommit)
+        #expect(try scalarInt(
+            databaseURL: fixture.databaseURL,
+            sql: "SELECT count(*) FROM labels WHERE id = 'absent-complete';"
+        ) == 1)
     }
 
     @Test("failure receipt drops a pathname after its retained occupant is replaced")
@@ -1596,8 +1672,8 @@ struct DatabaseBackupSafetyTests {
         }
     }
 
-    @Test("restore cannot delete a replacement installed at the final live mutation boundary")
-    func restorePreservesLivePathReplacement() throws {
+    @Test("descriptor-bound restore does not invoke FileManager live-path mutation callbacks")
+    func restoreDoesNotUseFileManagerLivePathCallbacks() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let backup = try observedURL(
@@ -1608,24 +1684,22 @@ struct DatabaseBackupSafetyTests {
         let manager = RestoreLivePathReplacementFileManager(databaseURL: fixture.databaseURL)
         let service = DatabaseSafetyService(fileManager: manager)
 
-        do {
-            _ = try service.restoreRollingBackup(
-                from: backup,
-                into: fixture.databaseURL,
-                database: fixture.database
-            )
-            Issue.record("Expected final live-path replacement to abort restore")
-        } catch {
-            #expect(manager.didReplace)
-            #expect(try Data(contentsOf: fixture.databaseURL) == manager.replacementData)
-        }
+        _ = try service.restoreRollingBackup(
+            from: backup,
+            into: fixture.databaseURL,
+            database: fixture.database,
+            reopenDatabase: true
+        )
+        #expect(!manager.didReplace)
+        #expect(fixture.database.isOpen)
+        #expect(try fixture.database.integrityCheck().isHealthy)
     }
 
     @Test("a WAL appearing immediately before the database swap is preserved and aborts restore")
     func walAppearanceAtActualSwapSeamRollsBackWithoutDeletion() throws {
         let result = try runCID850RestoreSidecarHarness("restore-sidecar-before-wal")
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(result.restoreFailed)
         #expect(result.databaseRolledBack)
         #expect(result.unexpectedOccupantPreserved)
@@ -1637,7 +1711,7 @@ struct DatabaseBackupSafetyTests {
     func shmAppearanceAtActualSwapSeamRollsBackWithoutDeletion() throws {
         let result = try runCID850RestoreSidecarHarness("restore-sidecar-after-shm")
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(result.restoreFailed)
         #expect(result.databaseRolledBack)
         #expect(result.unexpectedOccupantPreserved)
@@ -1645,28 +1719,472 @@ struct DatabaseBackupSafetyTests {
         #expect(!result.reopened)
     }
 
+    @Test("a WAL interposed at the SQLite VFS open boundary is never consumed as restore output")
+    func sidecarAppearanceAtSQLiteOpenBoundaryFailsClosed() throws {
+        let result = try runCID850RestoreSidecarHarness("restore-sidecar-at-open-wal")
+
+        #expect(result.didMutation)
+        #expect(result.restoreFailed)
+        #expect(result.databaseRolledBack)
+        #expect(result.unexpectedOccupantPreserved)
+        // The exact original database is restored live. The interposed valid
+        // WAL itself is the preserved recovery occupant; it is not mistaken
+        // for, or replaced by, the pre-restore WAL identity.
+        #expect(!result.quarantinedOriginalPreserved)
+        #expect(!result.reopened)
+    }
+
+    @Test("an absent destination also rejects a WAL appearing at the SQLite open boundary")
+    func absentDestinationSidecarAtSQLiteOpenBoundaryFailsClosed() throws {
+        let result = try runCID850RestoreSidecarHarness(
+            "restore-sidecar-at-open-absent-wal"
+        )
+
+        #expect(result.didMutation)
+        #expect(result.sqliteOpenCallbackCount > 0)
+        #expect(result.restoreFailed)
+        #expect(result.unexpectedOccupantPreserved)
+        #expect(!result.quarantinedOriginalPreserved)
+        #expect(result.databaseRolledBack)
+        #expect(!result.reopened)
+    }
+
+    @Test("canonical v2 interruption boundaries converge after an interrupted reconciliation and two restarts")
+    func canonicalRestoreInterruptionMatrixConverges() throws {
+        struct BoundaryCase {
+            let label: String
+            let mode: String
+            let restoreBoundary: Int
+            let restoreOrdinal: Int
+            let reconciliationBoundary: Int
+            let reconciliationOrdinal: Int
+            let reconciliationIsInterrupted: Bool
+        }
+        let cases = [
+            BoundaryCase(label: "record creation", mode: "existing", restoreBoundary: 3, restoreOrdinal: 1, reconciliationBoundary: 8, reconciliationOrdinal: 1, reconciliationIsInterrupted: true),
+            BoundaryCase(label: "prepared state", mode: "existing", restoreBoundary: 3, restoreOrdinal: 2, reconciliationBoundary: 3, reconciliationOrdinal: 1, reconciliationIsInterrupted: true),
+            BoundaryCase(label: "existing originals retained", mode: "existing", restoreBoundary: 3, restoreOrdinal: 3, reconciliationBoundary: 3, reconciliationOrdinal: 1, reconciliationIsInterrupted: true),
+            BoundaryCase(label: "absent clone", mode: "absent", restoreBoundary: 4, restoreOrdinal: 1, reconciliationBoundary: 6, reconciliationOrdinal: 1, reconciliationIsInterrupted: false),
+            BoundaryCase(label: "published state", mode: "existing", restoreBoundary: 3, restoreOrdinal: 4, reconciliationBoundary: 3, reconciliationOrdinal: 1, reconciliationIsInterrupted: true),
+            BoundaryCase(label: "post-commit production open", mode: "existing", restoreBoundary: 9, restoreOrdinal: 1, reconciliationBoundary: 3, reconciliationOrdinal: 1, reconciliationIsInterrupted: false),
+            BoundaryCase(label: "completion state", mode: "existing", restoreBoundary: 3, restoreOrdinal: 7, reconciliationBoundary: 8, reconciliationOrdinal: 1, reconciliationIsInterrupted: false),
+            BoundaryCase(label: "cleanup database retention", mode: "existing", restoreBoundary: 5, restoreOrdinal: 4, reconciliationBoundary: 6, reconciliationOrdinal: 1, reconciliationIsInterrupted: false),
+            BoundaryCase(label: "cleanup WAL retention", mode: "existing", restoreBoundary: 5, restoreOrdinal: 5, reconciliationBoundary: 6, reconciliationOrdinal: 1, reconciliationIsInterrupted: false),
+            BoundaryCase(label: "cleanup SHM retention", mode: "existing", restoreBoundary: 5, restoreOrdinal: 6, reconciliationBoundary: 6, reconciliationOrdinal: 1, reconciliationIsInterrupted: false),
+        ]
+
+        for item in cases {
+            let result = try runCID850Harness(
+                "restore-v2-interruption:\(item.mode):\(item.restoreBoundary):\(item.restoreOrdinal):\(item.reconciliationBoundary):\(item.reconciliationOrdinal)",
+                as: CID851RestoreV2InterruptionResult.self
+            )
+            #expect(
+                result.restoreStatus == Int32(90 + item.restoreBoundary),
+                "restore boundary did not interrupt: \(item.label)"
+            )
+            if item.reconciliationIsInterrupted {
+                #expect(
+                    result.reconciliationStatus == Int32(90 + item.reconciliationBoundary),
+                    "reconciliation boundary did not interrupt: \(item.label)"
+                )
+            }
+            #expect(["none", "rolledBack", "completedCommit"].contains(result.firstReconciliation))
+            #expect(
+                result.secondReconciliation == result.firstReconciliation,
+                "restart did not converge on terminal evidence: \(item.label)"
+            )
+            #expect(result.sourceUnchanged)
+            #expect(result.parentIdentityUnchanged)
+            if result.firstReconciliation == "none" {
+                #expect(result.canonicalRecordAbsent)
+                #expect(result.hiddenMemberCount == 0)
+            } else {
+                #expect(!result.canonicalRecordAbsent)
+                #expect(result.hiddenMemberCount > 0)
+            }
+            #expect(result.retainedUnlinkAttempts == 0)
+            #expect(result.repeatedFingerprintExact)
+            #expect(result.liveNamespaceCoherent)
+            #expect(result.integrityHealthy)
+        }
+    }
+
+    @Test("planned state never adopts an unknown staging pathname occupant across repeated restart")
+    func plannedUnknownStagingOccupantIsPreservedExactly() throws {
+        let result = try runCID850Harness(
+            "restore-v2-planned-unknown",
+            as: CID851RestorePlannedUnknownResult.self
+        )
+
+        #expect(result.childStatus == 92)
+        #expect(result.firstRecoveryRequired)
+        #expect(result.secondRecoveryRequired)
+        #expect(result.replacementIdentityExact)
+        #expect(result.replacementBytesExact)
+        #expect(result.completeFingerprintExact)
+        #expect(result.transactionRemainsPlanned)
+        #expect(result.transactionClaimsNoStagedIdentity)
+        #expect(result.sourceUnchanged)
+    }
+
+    @Test("planned reconciliation rejects an unwritten FIFO promptly and converges")
+    func plannedFIFOStagingOccupantNeverBlocksReconciliation() throws {
+        let result = try runCID850Harness(
+            "restore-v2-planned-fifo",
+            as: CID851RestorePlannedFIFOResult.self
+        )
+
+        #expect(result.childStatus == 92)
+        #expect(result.firstReturnedPromptly)
+        #expect(result.secondReturnedPromptly)
+        #expect(result.firstRecoveryRequired)
+        #expect(result.secondRecoveryRequired)
+        #expect(result.fifoIdentityAndTypeExact)
+        #expect(result.canonicalStateExact)
+        #expect(result.repeatedFingerprintExact)
+        #expect(result.sourceUnchanged)
+    }
+
+    @Test(
+        "all package consumers promptly reject descriptor-acquired nonregular members",
+        arguments: ["database.sqlite", "manifest.json"],
+        ["fifo", "socket", "directory", "symlink"]
+    )
+    func packageSpecialMembersNeverBlockOrDiverge(member: String, kind: String) throws {
+        let result = try runCID850HarnessWithTimeout(
+            "restore-v2-package-special:\(member):\(kind)",
+            as: CID851PackageSpecialMemberResult.self
+        )
+
+        #expect(result.kind == kind)
+        #expect(result.member == member)
+        #expect(result.listRejected)
+        #expect(result.directVerificationRejected)
+        #expect(result.urlMaterializationRejected)
+        #expect(result.qualifiedMaterializationRejected)
+        #expect(result.liveRestoreRejected)
+        #expect(result.specialIdentityAndTypeExact)
+        #expect(result.otherMemberExact)
+        #expect(result.liveDatabaseExact)
+    }
+
+    @Test(
+        "all raw recovery consumers promptly reject descriptor-acquired nonregular members",
+        arguments: ["fifo", "socket", "directory", "symlink"]
+    )
+    func rawSpecialMembersNeverBlockOrDiverge(kind: String) throws {
+        let result = try runCID850HarnessWithTimeout(
+            "restore-v2-raw-special:\(kind)",
+            as: CID851RawSpecialMemberResult.self
+        )
+
+        #expect(result.kind == kind)
+        #expect(result.listRejected)
+        #expect(result.directVerificationRejected)
+        #expect(result.urlMaterializationRejected)
+        #expect(result.liveRestoreRejected)
+        #expect(result.specialIdentityAndTypeExact)
+        #expect(result.liveDatabaseExact)
+    }
+
+    @Test("terminal restore evidence is bounded, nonselectable, and never automatically unlinked")
+    func terminalRestoreEvidencePersistsAcrossCompletionAndRepeatedRestart() throws {
+        let result = try runCID850Harness(
+            "restore-v2-terminal-evidence",
+            as: CID851TerminalEvidenceResult.self
+        )
+        #expect(result.evidenceCount > 0)
+        #expect(result.unlinkAttempts == 0)
+        #expect(result.evidenceNonselectable)
+        #expect(result.evidenceNonmaterializable)
+        #expect(result.evidenceNonrestorable)
+        #expect(result.firstReconciliation == "completedCommit")
+        #expect(result.secondReconciliation == "completedCommit")
+        #expect(result.repeatedFingerprintExact)
+        #expect(result.capacityRefusedBeforeMutation)
+        #expect(result.hardByteCapacityRefusedBeforeMutation)
+    }
+
+    @Test("success and restart expose one complete identity-qualified fixed-slot inventory")
+    func terminalEvidenceInventoryIsActionableAcrossRestartAndPartialCleanup() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let source = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "evidence-inventory",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('inventory-live', 'Inventory Live', '#112233', 'custom', 1, 1);
+            """)
+        let sourceBefore = try fingerprintTree(source)
+        let result = try fixture.service.restoreRollingBackup(
+            from: source,
+            into: fixture.databaseURL,
+            database: fixture.database,
+            reopenDatabase: true
+        )
+        let success = try #require(result.terminalEvidenceInventory)
+        #expect(success.recordPresent)
+        #expect(success.transactionID != nil)
+        #expect(success.recordSHA256?.count == 64)
+        #expect(success.recordPhase == "completed")
+        #expect(success.recordOutcome == "committed")
+        #expect(success.members.count == 13)
+        let qualified = success.members.filter(\.safeToRemoveOutOfBand)
+        #expect(!qualified.isEmpty)
+        #expect(qualified.count <= 7)
+        #expect(qualified.allSatisfy { $0.status == .presentQualified })
+        #expect(success.procedure.contains { $0.contains("do not use wildcard") })
+        #expect(try fingerprintTree(source) == sourceBefore)
+
+        fixture.database.close()
+        let restart = try fixture.service.terminalRestoreEvidenceInventory(
+            at: fixture.databaseURL
+        )
+        #expect(restart.transactionID == success.transactionID)
+        #expect(restart.recordSHA256 == success.recordSHA256)
+        #expect(restart.members == success.members)
+
+        let removed = try #require(qualified.first)
+        try FileManager.default.removeItem(
+            at: fixture.root.appendingPathComponent(removed.basename)
+        )
+        let partial = try fixture.service.terminalRestoreEvidenceInventory(
+            at: fixture.databaseURL
+        )
+        #expect(partial.recoveryRequired)
+        #expect(partial.members.first { $0.role == removed.role }?.status == .absent)
+        #expect(partial.members.filter(\.safeToRemoveOutOfBand).count == qualified.count - 1)
+        #expect(try fingerprintTree(source) == sourceBefore)
+    }
+
+    @Test("fixed-slot reoccupation after record removal blocks the next restore before mutation")
+    func postRecordRemovalFixedSlotReoccupationCannotCreateAnotherGraph() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let source = try observedURL(
+            for: fixture.service.createRollingBackup(reason: "post-clear", database: fixture.database),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        let result = try fixture.service.restoreRollingBackup(
+            from: source,
+            into: fixture.databaseURL,
+            database: fixture.database,
+            reopenDatabase: true
+        )
+        fixture.database.close()
+        let inventory = try #require(result.terminalEvidenceInventory)
+        for member in inventory.members where member.safeToRemoveOutOfBand {
+            try FileManager.default.removeItem(
+                at: fixture.root.appendingPathComponent(member.basename)
+            )
+        }
+        #expect(try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL).state == .completedCommit)
+        #expect(try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL).state == .none)
+        let cleared = try fixture.service.terminalRestoreEvidenceInventory(at: fixture.databaseURL)
+        #expect(!cleared.recordPresent)
+        #expect(cleared.state == "fully-cleared")
+
+        let fixedSlot = try #require(cleared.members.first).basename
+        let occupant = Data("fixed-slot-reoccupation".utf8)
+        try occupant.write(to: fixture.root.appendingPathComponent(fixedSlot))
+        let sourceBefore = try fingerprintTree(source)
+        let destinationBefore = try sqliteSetFingerprint(fixture.databaseURL)
+        let namesBefore = try directoryEntryNames(at: fixture.root)
+        #expect(throws: (any Error).self) {
+            _ = try fixture.service.restoreRollingBackup(
+                from: source,
+                into: fixture.databaseURL,
+                database: nil,
+                reopenDatabase: false
+            )
+        }
+        #expect(try Data(contentsOf: fixture.root.appendingPathComponent(fixedSlot)) == occupant)
+        #expect(try fingerprintTree(source) == sourceBefore)
+        #expect(try sqliteSetFingerprint(fixture.databaseURL) == destinationBefore)
+        #expect(try directoryEntryNames(at: fixture.root) == namesBefore)
+        let reoccupied = try fixture.service.terminalRestoreEvidenceInventory(at: fixture.databaseURL)
+        #expect(reoccupied.state == "reoccupied-without-record")
+        #expect(reoccupied.members.first { $0.basename == fixedSlot }?.status == .reoccupied)
+    }
+
+    @Test("every fixed role inventories regular and special occupants without following or blocking")
+    func everyFixedEvidenceRoleRejectsEverySpecialOccupantType() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+        let baseline = try fixture.service.terminalRestoreEvidenceInventory(at: fixture.databaseURL)
+        #expect(baseline.members.count == 13)
+        for member in baseline.members {
+            for kind in ["regular", "fifo", "socket", "directory", "symlink"] {
+                let url = fixture.root.appendingPathComponent(member.basename)
+                var socketDescriptor: Int32 = -1
+                switch kind {
+                case "regular":
+                    try Data("occupant-\(member.role)".utf8).write(to: url)
+                case "fifo":
+                    #expect(mkfifo(url.path, S_IRUSR | S_IWUSR) == 0)
+                case "socket":
+                    socketDescriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+                    guard socketDescriptor >= 0 else { throw POSIXError(.EIO) }
+                    let shortSocketURL = URL(
+                        fileURLWithPath: "/tmp/cid851-socket-\(UUID().uuidString)"
+                    )
+                    defer { try? FileManager.default.removeItem(at: shortSocketURL) }
+                    try bindUnixSocket(socketDescriptor, at: shortSocketURL)
+                    try FileManager.default.moveItem(at: shortSocketURL, to: url)
+                case "directory":
+                    try FileManager.default.createDirectory(
+                        at: url,
+                        withIntermediateDirectories: false
+                    )
+                case "symlink":
+                    #expect(symlink("missing-target", url.path) == 0)
+                default:
+                    throw CocoaError(.validationMissingMandatoryProperty)
+                }
+                let observed = try fixture.service.terminalRestoreEvidenceInventory(
+                    at: fixture.databaseURL
+                )
+                let slot = try #require(observed.members.first { $0.role == member.role })
+                #expect(slot.status == (kind == "regular" ? .reoccupied : .specialUnknownOccupant))
+                #expect(slot.identity != nil)
+                #expect(observed.recoveryRequired)
+                if socketDescriptor >= 0 { Darwin.close(socketDescriptor) }
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+        #expect(try fixture.service.terminalRestoreEvidenceInventory(at: fixture.databaseURL).state == "fully-cleared")
+    }
+
+    @Test("reoccupation at completed-record removal republishes the record and stays bounded")
+    func completedRecordRemovalReoccupationPreservesRecordAndOccupant() throws {
+        let result = try runCID850Harness(
+            "restore-v2-record-removal-reoccupation",
+            as: CID851RecordRemovalReoccupationResult.self
+        )
+        #expect(result.didMutation)
+        #expect(result.reconciliationRecoveryRequired)
+        #expect(result.recordBytesPreserved)
+        #expect(result.occupantBytesExact)
+        #expect(result.inventoryReoccupied)
+        #expect(result.repeatedRecoveryRequired)
+        #expect(result.fixedGraphNamesExact)
+        #expect(result.sourceUnchanged)
+        #expect(result.liveDatabaseExact)
+    }
+
+    @Test("a writable descriptor change after retained proof remains named across return and restart")
+    func postProofHeldDescriptorMutationRemainsReachableWithoutUnlink() throws {
+        let result = try runCID850Harness(
+            "restore-v2-held-descriptor-evidence",
+            as: CID851HeldDescriptorEvidenceResult.self
+        )
+        #expect(result.didMutation)
+        #expect(result.restoreFailed)
+        #expect(result.unlinkAttempts == 0)
+        #expect(result.retainedNameReachesDescriptorBytes)
+        #expect(result.repeatedRecoveryRequired)
+        #expect(result.repeatedFingerprintExact)
+    }
+
+    @Test("retention destination collision and source reoccupation preserve every occupant")
+    func terminalRetentionNamespaceCollisionsPreserveEveryOccupant() throws {
+        for attack in ["destination", "source"] {
+            let result = try runCID850Harness(
+                "restore-v2-retention-collision:\(attack)",
+                as: CID851RetentionCollisionResult.self
+            )
+            #expect(result.attack == attack)
+            #expect(result.didMutation)
+            #expect(result.restoreFailed)
+            #expect(result.unlinkAttempts == 0)
+            #expect(result.retainedEvidencePresent)
+            #expect(result.sourceReoccupationPresent)
+        }
+    }
+
+    @Test("canonical v2 graph rejects arbitrary names and cross-member identity reuse before mutation")
+    func malformedRestoreV2GraphIsRejectedBeforeMutation() throws {
+        let result = try runCID850Harness(
+            "restore-v2-malformed-graph",
+            as: CID851RestoreMalformedGraphResult.self
+        )
+
+        #expect(result.variantCount == 15)
+        #expect(result.rejectedCount == result.variantCount)
+        #expect(result.completeFingerprintsExact)
+        #expect(result.canonicalStateBytesExact)
+    }
+
+    @Test(
+        "same-inode same-size changes at member syscalls fail closed and remain preserved",
+        arguments: ["rename", "unlink", "clone"]
+    )
+    func restoreMemberSyscallSeamMutationIsPreserved(operation: String) throws {
+        let result = try runCID850Harness(
+            "restore-v2-member-seam:\(operation)",
+            as: CID851RestoreMemberSeamResult.self
+        )
+
+        #expect(result.didMutation)
+        #expect(result.restoreFailed)
+        #expect(result.firstRecoveryRequired)
+        #expect(result.secondRecoveryRequired)
+        #expect(result.changedMemberPreserved)
+        if operation == "unlink" {
+            #expect(result.sourceReplacementPreserved)
+            #expect(result.distinctPreservedIdentities)
+        }
+        #expect(result.repeatedFingerprintExact)
+        #expect(result.sourceUnchanged)
+        #expect(result.retainedUnlinkAttempts == 0)
+    }
+
+    @Test("cleanup retention publication never replaces an existing destination occupant")
+    func cleanupRetentionDestinationCollisionPreservesBothOccupants() throws {
+        let result = try runCID850Harness(
+            "restore-v2-member-seam:destination-exists",
+            as: CID851RestoreMemberSeamResult.self
+        )
+
+        #expect(result.didMutation)
+        #expect(result.restoreFailed)
+        #expect(result.firstRecoveryRequired)
+        #expect(result.secondRecoveryRequired)
+        #expect(result.cleanupSourcePreserved)
+        #expect(result.destinationOccupantPreserved)
+        #expect(result.repeatedFingerprintExact)
+        #expect(result.sourceUnchanged)
+        #expect(result.retainedUnlinkAttempts == 0)
+    }
+
     @Test("post-swap parent fsync failure rolls back the complete original SQLite set")
     func postSwapParentFsyncFailureRollsBackCoherently() throws {
         let result = try runCID850RestoreFsyncHarness("restore-post-swap-fsync")
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(result.restoreFailed)
         #expect(result.originalSQLiteSetRestored)
         #expect(result.replacementRetained)
+        #expect(result.recoveryRequired)
+        #expect(result.recoveryArtifactVerified)
+        #expect(result.recoverySelector?.hasSuffix(".ciderbackup") == true)
         #expect(result.unexpectedOccupantsPreserved)
         #expect(!result.reopened)
         #expect(result.originalFingerprint == result.finalFingerprint)
-        #expect(result.failureMessage.localizedCaseInsensitiveContains(
-            "prior coherent database was restored"
-        ))
-        #expect(result.failureMessage.localizedCaseInsensitiveContains(
-            "replacement remains retained"
-        ))
+        #expect(result.failureMessage.localizedCaseInsensitiveContains("requires recovery"))
         print(
             "CID850_EVIDENCE restore_post_swap_fsync original="
             + fingerprintDescription(result.originalFingerprint)
             + " final=" + fingerprintDescription(result.finalFingerprint)
-            + " replacement_retained=\(result.replacementRetained)"
+            + " rollback_selector=\(result.recoverySelector ?? "none")"
         )
     }
 
@@ -1676,31 +2194,527 @@ struct DatabaseBackupSafetyTests {
             "restore-post-swap-and-rollback-fsync"
         )
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(result.restoreFailed)
         #expect(result.originalSQLiteSetRestored)
         #expect(result.replacementRetained)
+        #expect(result.recoveryRequired)
+        #expect(result.recoveryArtifactVerified)
+        #expect(result.recoverySelector?.hasSuffix(".ciderbackup") == true)
         #expect(!result.reopened)
         #expect(result.originalFingerprint == result.finalFingerprint)
-        #expect(result.failureMessage.localizedCaseInsensitiveContains(
-            "rollback parent-directory flush failed"
-        ))
-        #expect(result.failureMessage.localizedCaseInsensitiveContains(
-            "crash durability is uncertain"
-        ))
+        #expect(result.failureMessage.localizedCaseInsensitiveContains("requires recovery"))
         print(
             "CID850_EVIDENCE restore_rollback_fsync original="
             + fingerprintDescription(result.originalFingerprint)
             + " final=" + fingerprintDescription(result.finalFingerprint)
-            + " replacement_retained=\(result.replacementRetained)"
+            + " rollback_selector=\(result.recoverySelector ?? "none")"
         )
+    }
+
+    @Test("a process interruption after the live swap rolls back exactly and restart reconciliation is idempotent")
+    func processInterruptionAfterSwapReconcilesExactlyOnce() throws {
+        let result = try runCID851RestoreCrashHarness()
+
+        #expect(result.childStatus == 87)
+        #expect(result.reconciliationState == "rolledBack")
+        #expect(result.repeatedState == "rolledBack")
+        #expect(result.exactOriginalRestored)
+        #expect(result.sourceUnchanged)
+        #expect(result.physicallyReopened)
+        #expect(result.integrityHealthy)
+        #expect(result.hiddenRestoreArtifactCount > 0)
+        #expect(result.repeatedFingerprintExact)
+        #expect(result.originalFingerprint == result.finalFingerprint)
+        print(
+            "CID851_EVIDENCE crash_restart original="
+            + fingerprintDescription(result.originalFingerprint)
+            + " final=" + fingerprintDescription(result.finalFingerprint)
+            + " source_unchanged=\(result.sourceUnchanged)"
+            + " reopen=\(result.physicallyReopened)"
+            + " states=\(result.reconciliationState)/\(result.repeatedState)"
+        )
+    }
+
+    @Test("interruption after real reopen but before completion registers the full replacement namespace")
+    func processInterruptionAfterReopenBeforeCompletionConverges() throws {
+        let result = try runCID850Harness(
+            "restore-crash-before-completion",
+            as: CID851RestoreCrashResult.self
+        )
+
+        #expect(result.childStatus == 93)
+        #expect(result.reconciliationState == "rolledBack")
+        #expect(result.repeatedState == "rolledBack")
+        #expect(result.exactOriginalRestored)
+        #expect(result.sourceUnchanged)
+        #expect(result.physicallyReopened)
+        #expect(result.integrityHealthy)
+        #expect(result.hiddenRestoreArtifactCount > 0)
+        #expect(result.repeatedFingerprintExact)
+    }
+
+    @Test("same-inode content change before restart compensation is preserved and remains bounded")
+    func sameFileContentChangeAtReconciliationFailsClosedRepeatedly() throws {
+        let result = try runCID851RestoreSameFileChangeHarness()
+
+        #expect(result.childStatus == 87)
+        #expect(result.firstRecoveryRequired)
+        #expect(result.repeatedRecoveryRequired)
+        #expect(result.sameInodeChangedContentPreserved)
+        #expect(result.journalPreserved)
+        #expect(result.sourceUnchanged)
+        #expect(result.hiddenFingerprintAfterFirst == result.hiddenFingerprintAfterSecond)
+    }
+
+    @Test("terminal completion remains canonical and restart-convergent without record removal")
+    func terminalCompletionRemainsCanonicalWithoutRecordRemoval() throws {
+        let result = try runCID850Harness(
+            "restore-v2-interruption:existing:7:25:7:1",
+            as: CID851RestoreV2InterruptionResult.self
+        )
+
+        #expect(result.restoreStatus == 0)
+        #expect(result.firstReconciliation == "completedCommit")
+        #expect(result.secondReconciliation == "completedCommit")
+        #expect(!result.canonicalRecordAbsent)
+        #expect(result.sourceUnchanged)
+        #expect(result.parentIdentityUnchanged)
+        #expect(result.liveNamespaceCoherent)
+        #expect(result.integrityHealthy)
+        #expect(result.hiddenMemberCount > 0)
+        #expect(result.repeatedFingerprintExact)
+        #expect(result.retainedUnlinkAttempts == 0)
+    }
+
+    @Test("a physical reopen failure after swap preserves exact recovery and returns indeterminate")
+    func physicalReopenFailureAfterSwapRetainsExactRecovery() throws {
+        let result = try runCID851RestoreValidationHarness("restore-reopen-failure")
+
+        #expect(result.didMutation)
+        #expect(result.restoreFailed)
+        #expect(result.recoveryRequired)
+        #expect(!result.exactOriginalRestored)
+        #expect(result.exactOriginalRetained)
+        #expect(result.originalFingerprint != result.finalFingerprint)
+        #expect(result.sourceUnchanged)
+        #expect(result.recoveryArtifactNamedByError)
+        #expect(result.rollbackArtifactVerified)
+        #expect(result.rollbackSelector?.hasSuffix(".ciderbackup") == true)
+        #expect(!result.physicallyReopened)
+        #expect(!result.integrityHealthy)
+        #expect(result.failureMessage.localizedCaseInsensitiveContains("requires recovery"))
+    }
+
+    @Test("restore holds one namespace authority continuously across physical reopen and receipt")
+    func restoreUsesOneContinuousNamespaceAuthority() throws {
+        let result = try runCID850Harness(
+            "restore-authority",
+            as: CID851RestoreAuthorityResult.self
+        )
+
+        #expect(result.restored)
+        #expect(result.integrityHealthy)
+        #expect(result.exclusiveAcquisitions == 1)
+        #expect(result.releases == 1)
+    }
+
+    @Test("new restore transactions use one canonical record pinned from the locked parent descriptor")
+    func restoreUsesOneCanonicalDescriptorBoundTransactionAuthority() throws {
+        let result = try runCID850Harness(
+            "restore-architecture",
+            as: CID851RestoreArchitectureResult.self
+        )
+
+        #expect(result.restored)
+        #expect(result.integrityHealthy)
+        #expect(result.legacyMetadataWrites == 0)
+        #expect(result.canonicalMetadataWrites > 0)
+        #expect(result.parentReopensAfterLock == 0)
+    }
+
+    @Test("service receipt capability becomes unusable when current-v2 ownership eligibility is removed")
+    func restoreReceiptRevalidatesCurrentSourceOwnershipEligibility() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let source = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "receipt-current-eligibility",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('receipt-eligibility-live', 'Live', '#446688', 'custom', 1, 1);
+            """)
+        let result = try fixture.service.restoreRollingBackup(
+            from: source,
+            into: fixture.databaseURL,
+            database: fixture.database,
+            reopenDatabase: true
+        )
+        #expect(result.sourceBackupURL?.standardizedFileURL == source.standardizedFileURL)
+
+        try cid851RemovePackageOwnershipMetadata(at: source)
+        let policyURL = source.deletingLastPathComponent()
+        if removexattr(
+            policyURL.path,
+            "com.cider.cid850.parent-ownership-ledger-v1",
+            0
+        ) != 0, errno != ENOATTR {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+
+        #expect(!fixture.service.verifyBackup(at: source).isRecoveryEligible)
+        #expect(result.sourceBackupURL == nil)
+    }
+
+    @Test("moved source and replaced parent stop cleanup and receipt until reconciliation")
+    func finalCleanupAndReceiptRevalidateSourceAndParentCapabilities() throws {
+        for boundary in ["restore-source-before-cleanup", "restore-parent-before-cleanup"] {
+            let result = try runCID850Harness(
+                boundary,
+                as: CID851RestoreFinalCapabilityResult.self
+            )
+            #expect(result.didMutation)
+            #expect(result.restoreFailed)
+            #expect(result.recoveryRequired)
+            #expect(result.hiddenRecoveryRetained)
+            #expect(result.sourceMoved || result.parentReplaced)
+            #expect(["completedCommit", "rolledBack"].contains(result.firstReconciliation))
+            #expect(result.secondReconciliation == result.firstReconciliation)
+            #expect(result.physicallyReopened)
+            #expect(result.integrityHealthy)
+        }
+    }
+
+    @Test("an integrity failure after swap preserves exact recovery and returns indeterminate")
+    func integrityFailureAfterSwapRetainsExactRecovery() throws {
+        let result = try runCID851RestoreValidationHarness("restore-integrity-failure")
+
+        #expect(result.didMutation)
+        #expect(result.restoreFailed)
+        #expect(result.recoveryRequired)
+        #expect(!result.exactOriginalRestored)
+        #expect(result.exactOriginalRetained)
+        #expect(result.originalFingerprint != result.finalFingerprint)
+        #expect(result.sourceUnchanged)
+        #expect(result.recoveryArtifactNamedByError)
+        #expect(result.rollbackArtifactVerified)
+        #expect(result.rollbackSelector?.hasSuffix(".ciderbackup") == true)
+        #expect(!result.physicallyReopened)
+        #expect(!result.integrityHealthy)
+        #expect(result.failureMessage.localizedCaseInsensitiveContains("requires recovery"))
+    }
+
+    @Test("an unregistered valid-looking restore journal cannot authorize deletion")
+    func forgedRestoreJournalPreservesUnrelatedOccupant() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+
+        let unrelatedURL = fixture.root.appendingPathComponent("unrelated-user-file.bin")
+        let unrelatedBytes = Data("unrelated bytes must survive forged restore intent".utf8)
+        try unrelatedBytes.write(to: unrelatedURL)
+        let databaseIdentity = try cid851PersistedIdentity(at: fixture.databaseURL)
+        let unrelatedIdentity = try cid851PersistedIdentity(at: unrelatedURL)
+        let databaseHash = sha256(try Data(contentsOf: fixture.databaseURL))
+        let unrelatedHash = sha256(unrelatedBytes)
+        let journalName = cid851RestoreJournalName(databaseName: fixture.databaseURL.lastPathComponent)
+        let journalURL = fixture.root.appendingPathComponent(journalName)
+        let record = CID851ForgedRestoreRecord(
+            version: 1,
+            databaseName: fixture.databaseURL.lastPathComponent,
+            replacementName: unrelatedURL.lastPathComponent,
+            originalDatabase: CID851ForgedRestoreArtifact(
+                originalName: fixture.databaseURL.lastPathComponent,
+                retainedName: unrelatedURL.lastPathComponent,
+                identity: databaseIdentity,
+                sha256: databaseHash
+            ),
+            replacementDatabase: CID851ForgedRestoreArtifact(
+                originalName: fixture.databaseURL.lastPathComponent,
+                retainedName: unrelatedURL.lastPathComponent,
+                identity: unrelatedIdentity,
+                sha256: unrelatedHash
+            ),
+            sidecars: [],
+            recoveryArtifactPath: nil
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(record).write(to: journalURL)
+
+        do {
+            _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+            Issue.record("Expected an unregistered restore journal to be rejected")
+        } catch let error as DatabaseSafetyService.RestoreError {
+            #expect(error.requiresRecovery)
+        }
+
+        #expect(try Data(contentsOf: unrelatedURL) == unrelatedBytes)
+        #expect(FileManager.default.fileExists(atPath: journalURL.path))
+        #expect(try sha256(Data(contentsOf: fixture.databaseURL)) == databaseHash)
+    }
+
+    @Test("a registered restore record with a separator-containing generated member fails closed")
+    func registeredMalformedRestoreMemberPreservesEveryOccupant() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+        let unrelatedURL = fixture.root.appendingPathComponent("registered-unrelated.bin")
+        let unrelatedBytes = Data("registered malformed metadata must not authorize deletion".utf8)
+        try unrelatedBytes.write(to: unrelatedURL)
+        let databaseIdentity = try cid851PersistedIdentity(at: fixture.databaseURL)
+        let unrelatedIdentity = try cid851PersistedIdentity(at: unrelatedURL)
+        let record = CID851ForgedRestoreRecord(
+            version: 1,
+            databaseName: fixture.databaseURL.lastPathComponent,
+            replacementName: "../registered-unrelated.bin",
+            originalDatabase: CID851ForgedRestoreArtifact(
+                originalName: fixture.databaseURL.lastPathComponent,
+                retainedName: "../registered-unrelated.bin",
+                identity: databaseIdentity,
+                sha256: sha256(try Data(contentsOf: fixture.databaseURL))
+            ),
+            replacementDatabase: CID851ForgedRestoreArtifact(
+                originalName: fixture.databaseURL.lastPathComponent,
+                retainedName: "../registered-unrelated.bin",
+                identity: unrelatedIdentity,
+                sha256: sha256(unrelatedBytes)
+            ),
+            sidecars: [],
+            recoveryArtifactPath: nil
+        )
+        try cid851WriteRegisteredJournal(record, databaseURL: fixture.databaseURL)
+
+        #expect(throws: DatabaseSafetyService.RestoreError.self) {
+            _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+        }
+        #expect(try Data(contentsOf: unrelatedURL) == unrelatedBytes)
+        #expect(FileManager.default.fileExists(atPath: cid851RestoreJournalURL(for: fixture.databaseURL).path))
+    }
+
+    @Test("a registered restore record with unknown metadata is not an exact Cider record")
+    func registeredNonCanonicalRestoreRecordFailsClosed() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+        let journalURL = cid851RestoreJournalURL(for: fixture.databaseURL)
+        let record = try cid851BenignForgedRestoreRecord(databaseURL: fixture.databaseURL)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var bytes = try encoder.encode(record)
+        bytes.removeLast()
+        bytes.append(contentsOf: Data(",\"unexpected\":true}".utf8))
+        try cid851WriteRegisteredJournalBytes(bytes, databaseURL: fixture.databaseURL)
+
+        #expect(throws: DatabaseSafetyService.RestoreError.self) {
+            _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+        }
+        #expect(try Data(contentsOf: journalURL) == bytes)
+    }
+
+    @Test("a registered restore journal replaced at the same name loses authority")
+    func replacedRegisteredRestoreJournalFailsClosed() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: fixture.databaseURL.path + suffix)
+            if FileManager.default.fileExists(atPath: sidecar.path) {
+                try FileManager.default.removeItem(at: sidecar)
+            }
+        }
+        let record = try cid851BenignForgedRestoreRecord(databaseURL: fixture.databaseURL)
+        try cid851WriteRegisteredJournal(record, databaseURL: fixture.databaseURL)
+        let journalURL = cid851RestoreJournalURL(for: fixture.databaseURL)
+        let heldURL = fixture.root.appendingPathComponent("held-restore-record.json")
+        let bytes = try Data(contentsOf: journalURL)
+        try FileManager.default.moveItem(at: journalURL, to: heldURL)
+        try bytes.write(to: journalURL)
+
+        #expect(throws: DatabaseSafetyService.RestoreError.self) {
+            _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+        }
+        #expect(try Data(contentsOf: heldURL) == bytes)
+        #expect(try Data(contentsOf: journalURL) == bytes)
+    }
+
+    @Test("journal registration metadata must equal the canonical decoded record before cleanup")
+    func mismatchedRegisteredRestoreRecordCannotAuthorizeCleanup() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+        let journalRecord = try cid851BenignForgedRestoreRecord(databaseURL: fixture.databaseURL)
+        let replacementURL = fixture.root.appendingPathComponent(journalRecord.replacementName)
+        let replacementBefore = try Data(contentsOf: replacementURL)
+        let registrationRecord = CID851ForgedRestoreRecord(
+            version: journalRecord.version,
+            databaseName: journalRecord.databaseName,
+            replacementName: journalRecord.replacementName,
+            originalDatabase: journalRecord.originalDatabase,
+            replacementDatabase: journalRecord.replacementDatabase,
+            sidecars: journalRecord.sidecars,
+            recoveryArtifactPath: fixture.root.appendingPathComponent("different-capability.ciderbackup").path
+        )
+        try cid851WriteRegisteredJournal(
+            journalRecord,
+            registrationRecord: registrationRecord,
+            databaseURL: fixture.databaseURL
+        )
+
+        #expect(throws: DatabaseSafetyService.RestoreError.self) {
+            _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+        }
+        #expect(try Data(contentsOf: replacementURL) == replacementBefore)
+        #expect(FileManager.default.fileExists(atPath: cid851RestoreJournalURL(for: fixture.databaseURL).path))
+    }
+
+    @Test("matching prepared intent and journal reconcile as one transaction across repeated restart")
+    func preparedIntentAndJournalConvergeTogether() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        fixture.database.close()
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: fixture.databaseURL.path + suffix)
+            if FileManager.default.fileExists(atPath: sidecar.path) {
+                try FileManager.default.removeItem(at: sidecar)
+            }
+        }
+        let record = try cid851BenignForgedRestoreRecord(databaseURL: fixture.databaseURL)
+        _ = try cid851WritePreparedIntent(record: record, databaseURL: fixture.databaseURL)
+        try cid851WriteRegisteredJournal(record, databaseURL: fixture.databaseURL)
+
+        let first = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+        let second = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+
+        #expect(first.state == .rolledBack)
+        #expect(second.state == .none)
+        #expect(!cid851HasXattr(
+            "com.cider.cid851.restore-staging-intent-v1",
+            at: fixture.root
+        ))
+    }
+
+    @Test("arbitrary-name current-v2 packages are rejected uniformly with or without ownership metadata")
+    func arbitraryNameCurrentPackagesCannotDivergeAcrossConsumers() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let first = try observedURL(
+            for: fixture.service.createRollingBackup(reason: "arbitrary-owned", database: fixture.database),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        let second = try observedURL(
+            for: fixture.service.createRollingBackup(reason: "arbitrary-unowned", database: fixture.database),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        let policy = first.deletingLastPathComponent()
+        let arbitraryOwned = policy.appendingPathComponent("owned-arbitrary.ciderbackup", isDirectory: true)
+        let arbitraryUnowned = policy.appendingPathComponent("unowned-arbitrary.ciderbackup", isDirectory: true)
+        try FileManager.default.moveItem(at: first, to: arbitraryOwned)
+        try FileManager.default.moveItem(at: second, to: arbitraryUnowned)
+        try cid851RemovePackageOwnershipMetadata(at: arbitraryUnowned)
+        let destinationBefore = try sqliteSetFingerprint(fixture.databaseURL)
+
+        for candidate in [arbitraryOwned, arbitraryUnowned] {
+            let before = try fingerprintTree(candidate)
+            #expect(!fixture.service.listRestoreCandidates(databaseURL: fixture.databaseURL).contains {
+                $0.url.standardizedFileURL == candidate.standardizedFileURL
+            })
+            #expect(!fixture.service.verifyBackup(at: candidate).isRecoveryEligible)
+            let materialized = fixture.root.appendingPathComponent(UUID().uuidString + ".sqlite")
+            #expect(throws: (any Error).self) {
+                _ = try fixture.service.materializeVerifiedBackupDatabase(
+                    from: candidate,
+                    at: materialized
+                )
+            }
+            #expect(CiderCLI.resolveDatabaseBackup(
+                candidate.lastPathComponent,
+                in: fixture.service.listRestoreCandidates(databaseURL: fixture.databaseURL)
+            ) == nil)
+            #expect(throws: (any Error).self) {
+                _ = try fixture.service.restoreRollingBackup(
+                    from: candidate,
+                    into: fixture.databaseURL
+                )
+            }
+            #expect(try sqliteSetFingerprint(fixture.databaseURL) == destinationBefore)
+            #expect(try fingerprintTree(candidate) == before)
+        }
+    }
+
+    @Test("restore dry-run serializes the actual selected candidate index")
+    func restoreDryRunUsesActualSelectedIndex() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        for reason in ["selected-index-a", "selected-index-b", "selected-index-c"] {
+            _ = try fixture.service.createRollingBackup(reason: reason, database: fixture.database)
+        }
+        let candidates = fixture.service.listRestoreCandidates(databaseURL: fixture.databaseURL)
+        let selectedIndex = 2
+        let selected = candidates[selectedIndex]
+        let payload = CiderCLI.databaseRestorePlanPayload(
+            selector: selected.url.lastPathComponent,
+            backup: selected,
+            selectedIndex: selectedIndex,
+            databaseURL: fixture.databaseURL,
+            ciderRunning: false
+        )
+        let selectedPayload = try #require(payload["selectedBackup"] as? [String: Any])
+
+        #expect(selectedPayload["index"] as? Int == selectedIndex)
+    }
+
+    @Test("a moved current-v2 package is rejected identically by every restore consumer")
+    func movedCurrentPackageCannotBypassOwnershipAtLiveRestore() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let owned = try observedURL(
+            for: fixture.service.createRollingBackup(reason: "moved-current-v2", database: fixture.database),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        let moved = fixture.root.appendingPathComponent("moved-current-v2.ciderbackup", isDirectory: true)
+        try FileManager.default.copyItem(at: owned, to: moved)
+        let movedBefore = try fingerprintTree(moved)
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('moved-v2-live', 'Must Survive', '#335577', 'custom', 1, 1);
+            """)
+        fixture.database.close()
+        let destinationBefore = try sqliteSetFingerprint(fixture.databaseURL)
+
+        #expect(!fixture.service.listRestoreCandidates(databaseURL: fixture.databaseURL).contains {
+            $0.url.standardizedFileURL == moved.standardizedFileURL
+        })
+        #expect(!fixture.service.verifyBackup(at: moved).isRecoveryEligible)
+        let materialized = fixture.root.appendingPathComponent("moved-materialized.sqlite")
+        do {
+            _ = try fixture.service.materializeVerifiedBackupDatabase(from: moved, at: materialized)
+            Issue.record("Expected moved current-v2 materialization to be rejected")
+        } catch {
+            #expect(!FileManager.default.fileExists(atPath: materialized.path))
+        }
+        do {
+            _ = try fixture.service.restoreRollingBackup(from: moved, into: fixture.databaseURL)
+            Issue.record("Expected moved current-v2 live restore to be rejected")
+        } catch {
+            #expect(try sqliteSetFingerprint(fixture.databaseURL) == destinationBefore)
+        }
+        #expect(try fingerprintTree(moved) == movedBefore)
     }
 
     @Test("qualified materialization rejects package replacement at its final descriptor read")
     func qualifiedUseRejectsReplacementAtFinalRead() throws {
         let result = try runCID850BoundaryHarness("use")
 
-        #expect(result.didAttack)
+        #expect(result.didMutation)
         #expect(!result.useSucceeded)
         #expect(!result.destinationExists)
         #expect(result.heldExists)
@@ -1889,15 +2903,13 @@ struct DatabaseBackupSafetyTests {
         let before = try fingerprintTree(malformed)
 
         let verification = fixture.service.verifyBackup(at: malformed)
-        let listed = try #require(
-            fixture.service.listRollingBackups(databaseURL: fixture.databaseURL)
-                .first { $0.url.standardizedFileURL == malformed.standardizedFileURL }
-        )
+        let listed = fixture.service.listRollingBackups(databaseURL: fixture.databaseURL)
+            .first { $0.url.standardizedFileURL == malformed.standardizedFileURL }
 
         #expect(verification.state == .unusable)
         #expect(!verification.isVerified)
         #expect(verification.retainedBytesUnchanged)
-        #expect(listed.verification.state == .unusable)
+        #expect(listed == nil)
         #expect(try fingerprintTree(malformed) == before)
         #expect(try fingerprintTree(valid) != [:])
     }
@@ -2890,8 +3902,254 @@ private final class Fixture {
     }
 }
 
+private struct CID851ForgedPersistedIdentity: Codable {
+    let device: UInt64
+    let inode: UInt64
+    let generation: UInt32
+    let fileType: UInt32
+    let linkCount: UInt64
+    let byteSize: Int64
+}
+
+private struct CID851ForgedRestoreArtifact: Codable {
+    let originalName: String
+    let retainedName: String
+    let identity: CID851ForgedPersistedIdentity
+    let sha256: String
+}
+
+private struct CID851ForgedRestoreRecord: Codable {
+    let version: Int
+    let databaseName: String
+    let replacementName: String
+    let originalDatabase: CID851ForgedRestoreArtifact
+    let replacementDatabase: CID851ForgedRestoreArtifact
+    let sidecars: [CID851ForgedRestoreArtifact]
+    let recoveryArtifactPath: String?
+}
+
+private struct CID851ForgedLedgerIdentity: Encodable {
+    let device: UInt64
+    let inode: UInt64
+    let generation: UInt32
+}
+
+private struct CID851ForgedJournalRegistration: Encodable {
+    let version: Int
+    let authority: CID851ForgedLedgerIdentity
+    let journalName: String
+    let journal: CID851ForgedLedgerIdentity
+    let journalIdentity: CID851ForgedPersistedIdentity
+    let journalSHA256: String
+    let record: CID851ForgedRestoreRecord
+    let stagingIntent: CID851ForgedStagingIntent
+}
+
+private struct CID851ForgedStagingIntent: Encodable {
+    let version: Int
+    let authority: CID851ForgedLedgerIdentity
+    let mode: String
+    let phase: String
+    let databaseName: String
+    let stagingName: String
+    let databaseSHA256: String
+    let stagingIdentity: CID851ForgedPersistedIdentity?
+    let installedIdentity: CID851ForgedPersistedIdentity?
+}
+
+private func cid851PersistedIdentity(at url: URL) throws -> CID851ForgedPersistedIdentity {
+    var value = stat()
+    guard lstat(url.path, &value) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    return CID851ForgedPersistedIdentity(
+        device: UInt64(truncatingIfNeeded: value.st_dev),
+        inode: UInt64(truncatingIfNeeded: value.st_ino),
+        generation: value.st_gen,
+        fileType: UInt32(value.st_mode & S_IFMT),
+        linkCount: UInt64(value.st_nlink),
+        byteSize: Int64(value.st_size)
+    )
+}
+
+private func cid851RestoreJournalName(databaseName: String) -> String {
+    let token = SHA256.hash(data: Data(databaseName.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
+        .prefix(16)
+    return ".cid851-restore-\(token).json"
+}
+
+private func cid851RestoreJournalURL(for databaseURL: URL) -> URL {
+    databaseURL.deletingLastPathComponent().appendingPathComponent(
+        cid851RestoreJournalName(databaseName: databaseURL.lastPathComponent)
+    )
+}
+
+private func cid851BenignForgedRestoreRecord(
+    databaseURL: URL
+) throws -> CID851ForgedRestoreRecord {
+    let replacementName = ".cid850-restore-\(UUID().uuidString.lowercased()).sqlite"
+    let replacementURL = databaseURL.deletingLastPathComponent()
+        .appendingPathComponent(replacementName)
+    let databaseBytes = try Data(contentsOf: databaseURL)
+    try databaseBytes.write(to: replacementURL)
+    return CID851ForgedRestoreRecord(
+        version: 1,
+        databaseName: databaseURL.lastPathComponent,
+        replacementName: replacementName,
+        originalDatabase: CID851ForgedRestoreArtifact(
+            originalName: databaseURL.lastPathComponent,
+            retainedName: replacementName,
+            identity: try cid851PersistedIdentity(at: databaseURL),
+            sha256: sha256(databaseBytes)
+        ),
+        replacementDatabase: CID851ForgedRestoreArtifact(
+            originalName: databaseURL.lastPathComponent,
+            retainedName: replacementName,
+            identity: try cid851PersistedIdentity(at: replacementURL),
+            sha256: sha256(databaseBytes)
+        ),
+        sidecars: [],
+        recoveryArtifactPath: nil
+    )
+}
+
+private func cid851WriteRegisteredJournal(
+    _ record: CID851ForgedRestoreRecord,
+    registrationRecord: CID851ForgedRestoreRecord? = nil,
+    databaseURL: URL
+) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    try cid851WriteRegisteredJournalBytes(
+        encoder.encode(record),
+        registrationRecord: registrationRecord,
+        databaseURL: databaseURL
+    )
+}
+
+private func cid851WriteRegisteredJournalBytes(
+    _ bytes: Data,
+    registrationRecord: CID851ForgedRestoreRecord? = nil,
+    databaseURL: URL
+) throws {
+    let parentURL = databaseURL.deletingLastPathComponent()
+    let journalURL = cid851RestoreJournalURL(for: databaseURL)
+    try bytes.write(to: journalURL)
+    func ledgerIdentity(_ url: URL) throws -> CID851ForgedLedgerIdentity {
+        var value = stat()
+        guard lstat(url.path, &value) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return CID851ForgedLedgerIdentity(
+            device: UInt64(truncatingIfNeeded: value.st_dev),
+            inode: UInt64(truncatingIfNeeded: value.st_ino),
+            generation: value.st_gen
+        )
+    }
+    let registeredRecord: CID851ForgedRestoreRecord
+    if let registrationRecord {
+        registeredRecord = registrationRecord
+    } else {
+        registeredRecord = try JSONDecoder().decode(
+            CID851ForgedRestoreRecord.self,
+            from: bytes
+        )
+    }
+    let stagingIntent = try cid851WritePreparedIntent(
+        record: registeredRecord,
+        databaseURL: databaseURL
+    )
+    let registration = CID851ForgedJournalRegistration(
+        version: 1,
+        authority: try ledgerIdentity(parentURL),
+        journalName: journalURL.lastPathComponent,
+        journal: try ledgerIdentity(journalURL),
+        journalIdentity: try cid851PersistedIdentity(at: journalURL),
+        journalSHA256: sha256(bytes),
+        record: registeredRecord,
+        stagingIntent: stagingIntent
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let registrationBytes = try encoder.encode(registration)
+    let attribute = "com.cider.cid851.restore-journal-registration-v1"
+    let result = registrationBytes.withUnsafeBytes { buffer in
+        setxattr(
+            parentURL.path,
+            attribute,
+            buffer.baseAddress,
+            buffer.count,
+            0,
+            0
+        )
+    }
+    guard result == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+}
+
+private func cid851WritePreparedIntent(
+    record: CID851ForgedRestoreRecord,
+    databaseURL: URL
+) throws -> CID851ForgedStagingIntent {
+    let parentURL = databaseURL.deletingLastPathComponent()
+    var parentStat = stat()
+    guard lstat(parentURL.path, &parentStat) == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    let intent = CID851ForgedStagingIntent(
+        version: 1,
+        authority: CID851ForgedLedgerIdentity(
+            device: UInt64(truncatingIfNeeded: parentStat.st_dev),
+            inode: UInt64(truncatingIfNeeded: parentStat.st_ino),
+            generation: parentStat.st_gen
+        ),
+        mode: "existing",
+        phase: "prepared",
+        databaseName: record.databaseName,
+        stagingName: record.replacementName,
+        databaseSHA256: record.replacementDatabase.sha256,
+        stagingIdentity: record.replacementDatabase.identity,
+        installedIdentity: nil
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let bytes = try encoder.encode(intent)
+    let result = bytes.withUnsafeBytes { buffer in
+        setxattr(
+            parentURL.path,
+            "com.cider.cid851.restore-staging-intent-v1",
+            buffer.baseAddress,
+            buffer.count,
+            0,
+            0
+        )
+    }
+    guard result == 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    return intent
+}
+
+private func cid851HasXattr(_ name: String, at url: URL) -> Bool {
+    getxattr(url.path, name, nil, 0, 0, 0) >= 0
+}
+
+private func cid851RemovePackageOwnershipMetadata(at packageURL: URL) throws {
+    for name in [
+        "com.cider.cid850.package-owner-v1",
+        "com.cider.cid850.package-creation-nonce-v1",
+    ] {
+        if removexattr(packageURL.path, name, 0) != 0, errno != ENOATTR {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+}
+
 private struct CID850BoundaryHarnessResult: Decodable {
-    let didAttack: Bool
+    let didMutation: Bool
     let created: Bool
     let verified: Bool
     let usable: Bool
@@ -2919,7 +4177,7 @@ private struct CID850SharedCreationResult: Decodable {
 }
 
 private struct CID850AggregateGrowthResult: Decodable {
-    let didAttack: Bool
+    let didMutation: Bool
     let writerSucceeded: Bool
     let failureKind: String?
     let created: Bool
@@ -2934,7 +4192,7 @@ private struct CID850AggregateGrowthResult: Decodable {
 }
 
 private struct CID850AggregateCloneRaceResult: Decodable {
-    let attacksCompleted: Int
+    let mutationsCompleted: Int
     let failureKinds: [String?]
     let everyAttemptFailed: Bool
     let sourceUnchanged: Bool
@@ -2947,24 +4205,252 @@ private struct CID850AggregateCloneRaceResult: Decodable {
 }
 
 private struct CID850RestoreSidecarResult: Decodable {
-    let didAttack: Bool
+    let didMutation: Bool
     let restoreFailed: Bool
     let databaseRolledBack: Bool
     let unexpectedOccupantPreserved: Bool
     let quarantinedOriginalPreserved: Bool
     let reopened: Bool
+    let sqliteOpenCallbackCount: Int32
 }
 
 private struct CID850RestoreFsyncResult: Decodable {
-    let didAttack: Bool
+    let didMutation: Bool
     let restoreFailed: Bool
     let originalSQLiteSetRestored: Bool
     let replacementRetained: Bool
+    let recoveryRequired: Bool
+    let recoveryArtifactVerified: Bool
+    let recoverySelector: String?
     let unexpectedOccupantsPreserved: Bool
     let reopened: Bool
     let failureMessage: String
     let originalFingerprint: [String: String]
     let finalFingerprint: [String: String]
+}
+
+private struct CID851RestoreCrashResult: Decodable {
+    let childStatus: Int32
+    let reconciliationState: String
+    let repeatedState: String
+    let exactOriginalRestored: Bool
+    let sourceUnchanged: Bool
+    let physicallyReopened: Bool
+    let integrityHealthy: Bool
+    let hiddenRestoreArtifactCount: Int
+    let repeatedFingerprintExact: Bool
+    let originalFingerprint: [String: String]
+    let finalFingerprint: [String: String]
+}
+
+private struct CID851RestoreSameFileChangeResult: Decodable {
+    let childStatus: Int32
+    let firstRecoveryRequired: Bool
+    let repeatedRecoveryRequired: Bool
+    let sameInodeChangedContentPreserved: Bool
+    let journalPreserved: Bool
+    let sourceUnchanged: Bool
+    let hiddenFingerprintAfterFirst: [String: String]
+    let hiddenFingerprintAfterSecond: [String: String]
+}
+
+private struct CID851RestoreRecordRemovalSyncResult: Decodable {
+    let didMutation: Bool
+    let restoreFailed: Bool
+    let recoveryRequired: Bool
+    let journalAbsentAfterFailure: Bool
+    let registrationPresentAfterFailure: Bool
+    let reconciliationState: String
+    let repeatedState: String
+    let registrationClearedAfterReconciliation: Bool
+    let sourceUnchanged: Bool
+    let physicallyReopened: Bool
+    let integrityHealthy: Bool
+    let hiddenRestoreArtifactCount: Int
+}
+
+private struct CID851RestoreValidationFailureResult: Decodable {
+    let didMutation: Bool
+    let restoreFailed: Bool
+    let recoveryRequired: Bool
+    let exactOriginalRestored: Bool
+    let exactOriginalRetained: Bool
+    let sourceUnchanged: Bool
+    let recoveryArtifactNamedByError: Bool
+    let rollbackArtifactVerified: Bool
+    let rollbackSelector: String?
+    let physicallyReopened: Bool
+    let integrityHealthy: Bool
+    let failureMessage: String
+    let originalFingerprint: [String: String]
+    let finalFingerprint: [String: String]
+}
+
+private struct CID851RestoreAuthorityResult: Decodable {
+    let restored: Bool
+    let integrityHealthy: Bool
+    let exclusiveAcquisitions: Int32
+    let releases: Int32
+}
+
+private struct CID851RestoreArchitectureResult: Decodable {
+    let restored: Bool
+    let integrityHealthy: Bool
+    let legacyMetadataWrites: Int32
+    let canonicalMetadataWrites: Int32
+    let parentReopensAfterLock: Int32
+}
+
+private struct CID851RestoreV2InterruptionResult: Decodable {
+    let restoreStatus: Int32
+    let reconciliationStatus: Int32
+    let firstReconciliation: String
+    let secondReconciliation: String
+    let sourceUnchanged: Bool
+    let parentIdentityUnchanged: Bool
+    let canonicalRecordAbsent: Bool
+    let hiddenMemberCount: Int
+    let repeatedFingerprintExact: Bool
+    let destinationExists: Bool
+    let liveNamespaceCoherent: Bool
+    let integrityHealthy: Bool
+    let retainedUnlinkAttempts: Int32
+}
+
+private struct CID851RestorePlannedUnknownResult: Decodable {
+    let childStatus: Int32
+    let firstRecoveryRequired: Bool
+    let secondRecoveryRequired: Bool
+    let replacementIdentityExact: Bool
+    let replacementBytesExact: Bool
+    let completeFingerprintExact: Bool
+    let transactionRemainsPlanned: Bool
+    let transactionClaimsNoStagedIdentity: Bool
+    let sourceUnchanged: Bool
+}
+
+private struct CID851RestorePlannedFIFOResult: Decodable {
+    let childStatus: Int32
+    let firstReturnedPromptly: Bool
+    let secondReturnedPromptly: Bool
+    let firstRecoveryRequired: Bool
+    let secondRecoveryRequired: Bool
+    let fifoIdentityAndTypeExact: Bool
+    let canonicalStateExact: Bool
+    let repeatedFingerprintExact: Bool
+    let sourceUnchanged: Bool
+}
+
+private struct CID851PackageSpecialMemberResult: Decodable {
+    let kind: String
+    let member: String
+    let listRejected: Bool
+    let directVerificationRejected: Bool
+    let urlMaterializationRejected: Bool
+    let qualifiedMaterializationRejected: Bool
+    let liveRestoreRejected: Bool
+    let specialIdentityAndTypeExact: Bool
+    let otherMemberExact: Bool
+    let liveDatabaseExact: Bool
+}
+
+private struct CID851RawSpecialMemberResult: Decodable {
+    let kind: String
+    let listRejected: Bool
+    let directVerificationRejected: Bool
+    let urlMaterializationRejected: Bool
+    let liveRestoreRejected: Bool
+    let specialIdentityAndTypeExact: Bool
+    let liveDatabaseExact: Bool
+}
+
+private struct CID851TerminalEvidenceResult: Decodable {
+    let evidenceCount: Int
+    let unlinkAttempts: Int32
+    let evidenceNonselectable: Bool
+    let evidenceNonmaterializable: Bool
+    let evidenceNonrestorable: Bool
+    let firstReconciliation: String
+    let secondReconciliation: String
+    let repeatedFingerprintExact: Bool
+    let capacityRefusedBeforeMutation: Bool
+    let hardByteCapacityRefusedBeforeMutation: Bool
+}
+
+private struct CID851HeldDescriptorEvidenceResult: Decodable {
+    let didMutation: Bool
+    let restoreFailed: Bool
+    let unlinkAttempts: Int32
+    let retainedNameReachesDescriptorBytes: Bool
+    let repeatedRecoveryRequired: Bool
+    let repeatedFingerprintExact: Bool
+}
+
+private struct CID851RetentionCollisionResult: Decodable {
+    let attack: String
+    let didMutation: Bool
+    let restoreFailed: Bool
+    let unlinkAttempts: Int32
+    let retainedEvidencePresent: Bool
+    let sourceReoccupationPresent: Bool
+}
+
+private struct CID851RecordRemovalReoccupationResult: Decodable {
+    let didMutation: Bool
+    let reconciliationRecoveryRequired: Bool
+    let recordBytesPreserved: Bool
+    let occupantBytesExact: Bool
+    let inventoryReoccupied: Bool
+    let repeatedRecoveryRequired: Bool
+    let fixedGraphNamesExact: Bool
+    let sourceUnchanged: Bool
+    let liveDatabaseExact: Bool
+}
+
+private struct CID851QualifiedReceiptRaceResult: Decodable {
+    let action: String
+    let didMutation: Bool
+    let receiptUnusable: Bool
+    let returnedPromptly: Bool
+    let liveDatabaseExact: Bool
+    let manifestExact: Bool
+    let originalMemberPreserved: Bool
+    let visibleMemberDifferentInode: Bool
+}
+
+private struct CID851RestoreMalformedGraphResult: Decodable {
+    let variantCount: Int
+    let rejectedCount: Int
+    let completeFingerprintsExact: Bool
+    let canonicalStateBytesExact: Bool
+}
+
+private struct CID851RestoreMemberSeamResult: Decodable {
+    let didMutation: Bool
+    let restoreFailed: Bool
+    let firstRecoveryRequired: Bool
+    let secondRecoveryRequired: Bool
+    let changedMemberPreserved: Bool
+    let sourceReplacementPreserved: Bool
+    let distinctPreservedIdentities: Bool
+    let cleanupSourcePreserved: Bool
+    let destinationOccupantPreserved: Bool
+    let repeatedFingerprintExact: Bool
+    let sourceUnchanged: Bool
+    let retainedUnlinkAttempts: Int32
+}
+
+private struct CID851RestoreFinalCapabilityResult: Decodable {
+    let didMutation: Bool
+    let restoreFailed: Bool
+    let recoveryRequired: Bool
+    let sourceMoved: Bool
+    let parentReplaced: Bool
+    let hiddenRecoveryRetained: Bool
+    let firstReconciliation: String
+    let secondReconciliation: String
+    let physicallyReopened: Bool
+    let integrityHealthy: Bool
 }
 
 private struct CID850CrashPublicationAttempt {
@@ -3009,6 +4495,44 @@ private func runCID850BoundaryHarness(_ boundary: String) throws -> CID850Bounda
     return try JSONDecoder().decode(CID850BoundaryHarnessResult.self, from: output)
 }
 
+private func runCID851RestoreCrashHarness() throws -> CID851RestoreCrashResult {
+    let executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = ["restore-crash-after-swap"]
+    let standardOutput = Pipe()
+    let standardError = Pipe()
+    process.standardOutput = standardOutput
+    process.standardError = standardError
+    try process.run()
+    process.waitUntilExit()
+    let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
+    let errors = standardError.fileHandleForReading.readDataToEndOfFile()
+    guard process.terminationStatus == 0 else {
+        throw NSError(
+            domain: "CID851RestoreCrashHarness",
+            code: Int(process.terminationStatus),
+            userInfo: [NSLocalizedDescriptionKey: String(decoding: errors + output, as: UTF8.self)]
+        )
+    }
+    return try JSONDecoder().decode(CID851RestoreCrashResult.self, from: output)
+}
+
+private func runCID851RestoreSameFileChangeHarness() throws -> CID851RestoreSameFileChangeResult {
+    try runCID850Harness(
+        "restore-crash-same-file-change",
+        as: CID851RestoreSameFileChangeResult.self
+    )
+}
+
+private func runCID851RestoreRecordRemovalSyncHarness() throws -> CID851RestoreRecordRemovalSyncResult {
+    try runCID850Harness(
+        "restore-record-removal-fsync",
+        as: CID851RestoreRecordRemovalSyncResult.self
+    )
+}
+
 private func runCID850AggregateGrowthHarness() throws -> CID850AggregateGrowthResult {
     let executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         .appendingPathComponent(".build/debug/CID850BoundaryHarness")
@@ -3047,6 +4571,12 @@ private func runCID850RestoreFsyncHarness(_ boundary: String) throws -> CID850Re
     try runCID850Harness(boundary, as: CID850RestoreFsyncResult.self)
 }
 
+private func runCID851RestoreValidationHarness(
+    _ boundary: String
+) throws -> CID851RestoreValidationFailureResult {
+    try runCID850Harness(boundary, as: CID851RestoreValidationFailureResult.self)
+}
+
 private func runCID850ReceiptSpecialHarness(_ boundary: String) throws -> CID850ReceiptSpecialResult {
     try runCID850Harness(boundary, as: CID850ReceiptSpecialResult.self)
 }
@@ -3066,6 +4596,43 @@ private func runCID850Harness<Result: Decodable>(
     process.standardError = standardError
     try process.run()
     process.waitUntilExit()
+    let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
+    let errors = standardError.fileHandleForReading.readDataToEndOfFile()
+    guard process.terminationStatus == 0 else {
+        throw NSError(
+            domain: "CID850BoundaryHarness",
+            code: Int(process.terminationStatus),
+            userInfo: [NSLocalizedDescriptionKey: String(decoding: errors + output, as: UTF8.self)]
+        )
+    }
+    return try JSONDecoder().decode(type, from: output)
+}
+
+private func runCID850HarnessWithTimeout<Result: Decodable>(
+    _ boundary: String,
+    as type: Result.Type
+) throws -> Result {
+    let executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = [boundary]
+    let standardOutput = Pipe()
+    let standardError = Pipe()
+    process.standardOutput = standardOutput
+    process.standardError = standardError
+    let finished = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in finished.signal() }
+    try process.run()
+    guard finished.wait(timeout: .now() + .seconds(3)) == .success else {
+        process.terminate()
+        process.waitUntilExit()
+        throw NSError(
+            domain: "CID850BoundaryHarnessTimeout",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "\(boundary) did not return promptly"]
+        )
+    }
     let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
     let errors = standardError.fileHandleForReading.readDataToEndOfFile()
     guard process.terminationStatus == 0 else {
@@ -3524,6 +5091,29 @@ private func removeDisposableSQLiteSet(at databaseURL: URL) throws {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+    }
+}
+
+@MainActor
+private func performDisposableTerminalEvidenceCleanup(
+    databaseURL: URL,
+    service: DatabaseSafetyService
+) throws {
+    let parent = databaseURL.deletingLastPathComponent()
+    for url in try FileManager.default.contentsOfDirectory(
+        at: parent,
+        includingPropertiesForKeys: nil,
+        options: []
+    ) where url.lastPathComponent.hasPrefix(".cid851-restore-")
+        && url.lastPathComponent.contains("-cleanup-retained-") {
+        try FileManager.default.removeItem(at: url)
+    }
+    _ = try service.reconcileInterruptedRestore(at: databaseURL)
+    guard try service.reconcileInterruptedRestore(at: databaseURL).state == .none else {
+        throw DatabaseSafetyService.RestoreError.recoveryRequired(
+            "Disposable test cleanup did not release the terminal restore transaction slot.",
+            artifactURL: nil
+        )
     }
 }
 

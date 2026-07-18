@@ -16,7 +16,8 @@ let package = Package(
             name: "CID850Interpose",
             path: ".",
             exclude: ["Package.swift"],
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
     ]
 )

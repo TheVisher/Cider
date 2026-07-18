@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Cider
+@testable import CiderCLI
 
 @Suite("CiderDatabase Tests")
 @MainActor
@@ -479,6 +480,74 @@ struct CiderDatabaseTests {
         changedLookup.bind("restore-after", at: 1)
         #expect(try changedLookup.step())
         #expect(changedLookup.int(at: 0) == 0)
+    }
+
+    @Test("A restore emits a verified rollback artifact selectable through the supported candidate list")
+    func emittedRollbackArtifactIsSelectableAndRestorable() throws {
+        let isolatedDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cider-db-restore-selector-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: isolatedDir, withIntermediateDirectories: true)
+        let url = isolatedDir.appendingPathComponent("cider.db")
+        defer { try? FileManager.default.removeItem(at: isolatedDir) }
+
+        let db = CiderDatabase()
+        try db.open(at: url)
+        defer { db.close() }
+        let service = DatabaseSafetyService()
+
+        try db.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('before-restore', 'Before Restore', '#111111', 'custom', 1, 1);
+            """)
+        let replacement = try service.createRollingBackup(reason: "selector-source", database: db)
+        let replacementURL = service.rollingBackupsDirectory(for: url)
+            .appendingPathComponent(replacement.packageName, isDirectory: true)
+        try db.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('rollback-only', 'Rollback Only', '#222222', 'custom', 2, 2);
+            """)
+
+        let result = try service.restoreRollingBackup(
+            from: replacementURL,
+            into: url,
+            database: db,
+            reopenDatabase: true
+        )
+        let rollback = try #require(result.preRestoreSnapshotURL)
+        let candidates = service.listRestoreCandidates(databaseURL: url)
+        let selected = CiderCLI.resolveDatabaseBackup(rollback.lastPathComponent, in: candidates)
+
+        #expect(selected?.url.standardizedFileURL == rollback.standardizedFileURL)
+        #expect(selected?.kind == .preflight)
+        #expect(selected?.verification.isVerified == true)
+        #expect(service.verifyBackup(at: rollback).isVerified)
+        let materialized = isolatedDir.appendingPathComponent("materialized-rollback.sqlite")
+        try service.materializeVerifiedBackupDatabase(from: rollback, at: materialized)
+        #expect(FileManager.default.fileExists(atPath: materialized.path))
+
+        // Terminal restore-v2 evidence deliberately occupies the fixed
+        // transaction slot. Simulate the explicit operator cleanup that is
+        // outside the production command surface before proving the emitted
+        // rollback package itself remains restorable.
+        for url in try FileManager.default.contentsOfDirectory(
+            at: isolatedDir,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) where url.lastPathComponent.hasPrefix(".cid851-restore-")
+            && url.lastPathComponent.contains("-cleanup-retained-") {
+            try FileManager.default.removeItem(at: url)
+        }
+        _ = try service.reconcileInterruptedRestore(at: url)
+
+        _ = try service.restoreRollingBackup(
+            from: try #require(selected).url,
+            into: url,
+            database: db,
+            reopenDatabase: true
+        )
+        let lookup = try db.prepare("SELECT count(*) FROM labels WHERE id = 'rollback-only';")
+        #expect(try lookup.step())
+        #expect(lookup.int(at: 0) == 1)
     }
 
     // MARK: - Reopening

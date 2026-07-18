@@ -11832,9 +11832,9 @@ struct CiderCLIAgentSafetyTests {
         #expect(backupPayload["command"] as? String == "db.backup")
         #expect(backupPayload["readOnly"] as? Bool == false)
         #expect(backupPayload["changed"] as? Bool == true)
-        #expect(backupPayload["verification"] as? [String: Any] != nil)
-        let createdBackup = try #require(backupPayload["backup"] as? [String: Any])
-        #expect(createdBackup["path"] as? String != nil)
+        let backupReceipt = try #require(backupPayload["receipt"] as? [String: Any])
+        #expect(backupReceipt["verification"] as? [String: Any] != nil)
+        #expect(backupReceipt["artifactName"] as? String != nil)
 
         let backups = try runCLI(args: ["db", "backups", "--json"], vault: vault)
         let backupsPayload = try parseJSONObject(backups.stdout)
@@ -11873,9 +11873,93 @@ struct CiderCLIAgentSafetyTests {
             #expect(restorePayload["ok"] as? Bool == true)
             #expect(restorePayload["readOnly"] as? Bool == false)
             #expect(restorePayload["changed"] as? Bool == true)
+            #expect(restorePayload["terminalEvidenceRetained"] as? Bool == true)
+            #expect(restorePayload["additionalRestoreRequiresOperatorCleanup"] as? Bool == true)
             #expect(restorePayload["preRestoreSnapshot"] as? [String: Any] != nil)
+            let rollbackSelector = try #require(restorePayload["rollbackSelector"] as? String)
             let restoreIntegrity = try #require(restorePayload["integrity"] as? [String: Any])
             #expect(restoreIntegrity["healthy"] as? Bool == true)
+
+            let listedAfterRestore = try runCLI(args: ["db", "backups", "--json"], vault: vault)
+            let listedPayload = try parseJSONObject(listedAfterRestore.stdout)
+            let listedCandidates = try #require(listedPayload["backups"] as? [[String: Any]])
+            let listedRollback = try #require(listedCandidates.first {
+                ($0["name"] as? String) == rollbackSelector
+            })
+            #expect(listedRollback["kind"] as? String == "preflight")
+            let listedVerification = try #require(listedRollback["verification"] as? [String: Any])
+            #expect(listedVerification["verified"] as? Bool == true)
+
+            let rollbackDryRun = try runCLI(
+                args: ["db", "restore", rollbackSelector, "--dry-run", "--json"],
+                vault: vault
+            )
+            let rollbackDryRunPayload = try parseJSONObject(rollbackDryRun.stdout)
+            #expect(rollbackDryRun.status == 0)
+            #expect(rollbackDryRunPayload["ok"] as? Bool == true)
+            #expect(rollbackDryRunPayload["changed"] as? Bool == false)
+            let plannedRollback = try #require(
+                rollbackDryRunPayload["selectedBackup"] as? [String: Any]
+            )
+            #expect(plannedRollback["name"] as? String == rollbackSelector)
+
+            let rollback = try runCLI(
+                args: ["db", "restore", rollbackSelector, "--yes", "--json"],
+                vault: vault
+            )
+            let rollbackPayload = try parseJSONObject(rollback.stdout)
+            #expect(rollback.status == 1)
+            #expect(rollbackPayload["ok"] as? Bool == false)
+            #expect(rollbackPayload["changed"] as? Bool == false)
+            #expect(rollbackPayload["recoveryRequired"] as? Bool == true)
+            #expect((rollbackPayload["error"] as? String)?.contains("terminal-evidence capacity") == true)
+        }
+    }
+
+    @Test("JSON and text restore receipts reject a rollback selector changed at final qualification")
+    func databaseRestoreReceiptFormatsRevalidateSelectorAfterConcurrentChange() throws {
+        let interposer = try cid851InterposerURL()
+        for action in ["moved", "replaced", "ineligible"] {
+            for json in [true, false] {
+                let vault = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(
+                        "cider-cli-receipt-selector-\(action)-\(json)-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                try FileManager.default.createDirectory(
+                    at: vault,
+                    withIntermediateDirectories: true
+                )
+                defer { try? FileManager.default.removeItem(at: vault) }
+
+                let backup = try runCLI(args: ["db", "backup", "--json"], vault: vault)
+                #expect(backup.status == 0)
+
+                var arguments = ["db", "restore", "latest", "--yes"]
+                if json { arguments.append("--json") }
+                let result = try runCLI(
+                    args: arguments,
+                    vault: vault,
+                    environment: [
+                        "DYLD_INSERT_LIBRARIES": interposer.path,
+                        "CIDER_TEST_RECEIPT_SELECTOR_ACTION": action,
+                    ]
+                )
+                #expect(result.status == 1, "\(action) \(json ? "JSON" : "text")")
+                if json {
+                    let payload = try parseJSONObject(result.stdout)
+                    #expect(payload["command"] as? String == "db.restore")
+                    #expect(payload["ok"] as? Bool == false)
+                    #expect(payload["rollbackSelector"] == nil)
+                    #expect(payload["recoverySelector"] == nil)
+                    let guidance = payload["recoveryGuidance"] as? String ?? ""
+                    #expect(!guidance.contains("db restore 20"))
+                } else {
+                    #expect(!result.stdout.contains("Rollback selector:"))
+                    #expect(!result.stdout.contains("Review with cider-cli db restore 20"))
+                    #expect(result.stdout.contains("Error restoring SQLite backup"))
+                }
+            }
         }
     }
 
@@ -13162,6 +13246,25 @@ struct CiderCLIAgentSafetyTests {
             root.appendingPathComponent(".build/debug/cider-cli"),
         ]
         if let url = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) {
+            return url
+        }
+        throw CocoaError(.fileNoSuchFile)
+    }
+
+    private func cid851InterposerURL() throws -> URL {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let candidates = [
+            root.appendingPathComponent(
+                ".build/arm64-apple-macosx/debug/libCID850Interpose.dylib"
+            ),
+            root.appendingPathComponent(".build/debug/libCID850Interpose.dylib"),
+        ]
+        if let url = candidates.first(where: {
+            FileManager.default.fileExists(atPath: $0.path)
+        }) {
             return url
         }
         throw CocoaError(.fileNoSuchFile)
