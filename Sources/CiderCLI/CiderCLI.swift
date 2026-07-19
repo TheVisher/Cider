@@ -13276,6 +13276,69 @@ struct CiderCLI {
         }
     }
 
+    static func runOfflineDatabaseMaintenanceRestore(
+        backupURL: URL,
+        databaseURL: URL
+    ) throws -> OfflineDatabaseRestoreReceipt? {
+        guard let executableDirectory = Bundle.main.executableURL?.deletingLastPathComponent() else {
+            throw NSError(
+                domain: "CiderCLI.DatabaseMaintenance",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot locate the cider-db-maintenance helper."]
+            )
+        }
+        let helperURL = ProcessInfo.processInfo.environment["CIDER_DATABASE_MAINTENANCE_EXECUTABLE"]
+            .map(URL.init(fileURLWithPath:))
+            ?? executableDirectory.appendingPathComponent("cider-db-maintenance")
+        guard FileManager.default.isExecutableFile(atPath: helperURL.path) else {
+            throw NSError(
+                domain: "CiderCLI.DatabaseMaintenance",
+                code: 2,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The offline database maintenance helper is unavailable at \(helperURL.path)."
+                ]
+            )
+        }
+
+        let process = Process()
+        let standardOutput = Pipe()
+        let standardError = Pipe()
+        process.executableURL = helperURL
+        process.arguments = [
+            "restore",
+            "--backup", backupURL.path,
+            "--database", databaseURL.path,
+            "--lock-timeout", "5",
+            "--json",
+        ]
+        process.standardOutput = standardOutput
+        process.standardError = standardError
+        try process.run()
+        process.waitUntilExit()
+
+        let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
+        let errors = standardError.fileHandleForReading.readDataToEndOfFile()
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+            if !output.isEmpty { FileHandle.standardOutput.write(output) }
+            if !errors.isEmpty { FileHandle.standardError.write(errors) }
+            processExitCode = process.terminationStatus == 0 ? 1 : process.terminationStatus
+            return nil
+        }
+        do {
+            return try JSONDecoder().decode(OfflineDatabaseRestoreReceipt.self, from: output)
+        } catch {
+            throw NSError(
+                domain: "CiderCLI.DatabaseMaintenance",
+                code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "The offline helper exited successfully without a valid verified restore receipt."
+                ]
+            )
+        }
+    }
+
     static func handleDatabase(subcommand: String?, args: [String]) {
         let database = CiderDatabase.shared
         guard let databaseURL = database.databaseURL else {
@@ -13476,7 +13539,7 @@ struct CiderCLI {
                 candidate.url.standardizedFileURL == backup.url.standardizedFileURL
             } ?? 0
 
-            guard backup.verification.isRecoveryEligible else {
+            guard backup.verification.isVerified else {
                 printDatabaseError(
                     command: "db.restore",
                     message: "The selected backup is unusable and cannot be restored: "
@@ -13486,7 +13549,7 @@ struct CiderCLI {
                         "selector": selector,
                         "selectedBackup": databaseBackupToDict(backup, index: backupIndex),
                         "requiresConfirmation": true,
-                        "blockers": ["backup_unusable"],
+                        "blockers": ["backup_not_current_v2"],
                         "safeNextCommands": ["cider-cli db backups --json"],
                     ]
                 )
@@ -13539,41 +13602,36 @@ struct CiderCLI {
             }
 
             do {
-                let result = try safety.restoreRollingBackup(
-                    from: backup.url,
-                    into: databaseURL,
-                    database: database,
-                    reopenDatabase: true
-                )
-                let status = try database.integrityCheck()
+                database.close()
+                guard let result = try runOfflineDatabaseMaintenanceRestore(
+                    backupURL: backup.url,
+                    databaseURL: databaseURL
+                ) else { return }
                 if jsonOutput {
-                    var payload: [String: Any] = [
-                        "selector": selector,
-                        "restoredBackup": databaseBackupToDict(result.restoredBackup, index: backupIndex),
-                        "integrity": databaseIntegrityToDict(status),
-                        "partialFailure": false,
-                        "rollbackGuidance": "If restore results are wrong, run cider-cli db restore <pre-restore-snapshot-name> --dry-run --json, then confirm with --yes only after review.",
-                    ]
-                    if let snapshotURL = result.preRestoreSnapshotURL {
-                        payload["preRestoreSnapshot"] = databaseBackupURLToDict(snapshotURL)
-                    }
                     outputJSON(databaseEnvelope(
                         command: "db.restore",
                         readOnly: false,
                         changed: true,
-                        payload: payload
+                        payload: [
+                            "selector": selector,
+                            "restoredBackup": databaseBackupToDict(backup, index: backupIndex),
+                            "preRestoreSnapshot": databaseBackupURLToDict(
+                                URL(fileURLWithPath: result.rollbackPath)
+                            ),
+                            "integrity": [
+                                "healthy": result.integrity.isHealthy,
+                                "messages": result.integrity.messages,
+                            ],
+                            "partialFailure": false,
+                            "rollbackGuidance": "If restore results are wrong, inspect and confirm a current-v2 rolling package before another offline restore.",
+                            "maintenanceReceipt": result.receiptPath,
+                        ]
                     ))
                 } else {
-                    print("Restored SQLite database from \(result.restoredBackup.url.lastPathComponent)")
-                    if let snapshotURL = result.preRestoreSnapshotURL {
-                        print("Pre-restore snapshot: \(snapshotURL.path)")
-                    }
-                    print(status.isHealthy ? "Integrity check passed after restore." : "Integrity check reported issues after restore.")
-                    if !status.isHealthy {
-                        for message in status.messages {
-                            print("  - \(message)")
-                        }
-                    }
+                    print("Restored SQLite database from \(backup.url.lastPathComponent)")
+                    print("Pre-restore snapshot: \(result.rollbackPath)")
+                    print("Integrity, exact logical NEW, WAL mode, and a rollback-capable write all passed.")
+                    print("Receipt: \(result.receiptPath)")
                 }
             } catch {
                 printDatabaseError(

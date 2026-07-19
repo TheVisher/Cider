@@ -23,32 +23,198 @@ fileprivate struct DatabaseSourceContinuityToken: Equatable {
 }
 
 final class DatabaseStartupLock {
-    private let descriptor: Int32
+    private var descriptor: Int32?
 
     private init(descriptor: Int32) {
         self.descriptor = descriptor
     }
 
     static func acquire(for databaseURL: URL, timeout: TimeInterval = 5) throws -> DatabaseStartupLock {
-        // Lock the existing parent directory, not SQLite's database file.
-        // Darwin implements flock with advisory file locks that can interfere
-        // with SQLite's byte-range locking when both target the database file.
-        let lockURL = databaseURL.deletingLastPathComponent()
-        let descriptor = Darwin.open(lockURL.path, O_RDONLY | O_CLOEXEC)
+        // Preserve the accepted startup serialization contract on the existing
+        // parent directory. This lock is released after preflight/open.
+        let descriptor = Darwin.open(
+            databaseURL.deletingLastPathComponent().path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
         guard descriptor >= 0 else {
             throw CiderDatabaseError.startupPreflightFailed(
                 kind: .unreadable,
-                detail: "The database source cannot be opened for the startup safety lock. Check vault permissions and disk availability."
+                detail: "The database parent cannot be opened for startup serialization."
+            )
+        }
+        return try acquireDescriptor(
+            descriptor,
+            operation: LOCK_EX,
+            timeout: timeout,
+            detail: "Another Cider process did not finish database startup"
+        )
+    }
+
+    static func acquireMaintenanceShared(
+        for databaseURL: URL,
+        timeout: TimeInterval = 5
+    ) throws -> DatabaseStartupLock {
+        try acquireMaintenance(
+            for: databaseURL,
+            operation: LOCK_SH,
+            timeout: timeout,
+            detail: "Offline database maintenance did not finish"
+        )
+    }
+
+    static func acquireMaintenanceExclusive(
+        for databaseURL: URL,
+        timeout: TimeInterval = 5
+    ) throws -> DatabaseStartupLock {
+        try acquireMaintenance(
+            for: databaseURL,
+            operation: LOCK_EX,
+            timeout: timeout,
+            detail: "Another Cider process still owns the database for ordinary use"
+        )
+    }
+
+    private static func acquireMaintenance(
+        for databaseURL: URL,
+        operation: Int32,
+        timeout: TimeInterval,
+        detail: String
+    ) throws -> DatabaseStartupLock {
+        // Keep lifetime authority in stable per-user application support, not
+        // an ephemeral temporary directory. The override is an explicit
+        // test/development contract for isolated disposable roots.
+        let registryURL: URL
+        if let override = ProcessInfo.processInfo.environment[
+            "CIDER_DATABASE_MAINTENANCE_LOCK_DIRECTORY"
+        ] {
+            registryURL = URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
+        } else {
+            guard let applicationSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first else {
+                throw CiderDatabaseError.startupPreflightFailed(
+                    kind: .unreadable,
+                    detail: "The stable per-user application support directory is unavailable."
+                )
+            }
+            registryURL = applicationSupport
+                .appendingPathComponent("Cider", isDirectory: true)
+                .appendingPathComponent("DatabaseMaintenanceLocks", isDirectory: true)
+                .standardizedFileURL
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: registryURL,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The private database maintenance lock registry cannot be created."
+            )
+        }
+        let registryDescriptor = Darwin.open(
+            registryURL.path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard registryDescriptor >= 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The private database maintenance lock registry cannot be pinned."
+            )
+        }
+        defer { Darwin.close(registryDescriptor) }
+        var registryStat = stat()
+        guard fstat(registryDescriptor, &registryStat) == 0,
+              registryStat.st_mode & S_IFMT == S_IFDIR,
+              registryStat.st_uid == geteuid(),
+              registryStat.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The database maintenance lock registry has unsafe ownership or permissions."
+            )
+        }
+        let intendedURL = databaseURL.standardizedFileURL
+        let owningRootURL = intendedURL.deletingLastPathComponent()
+        let owningRootDescriptor = Darwin.open(
+            owningRootURL.path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard owningRootDescriptor >= 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The intended database owning root cannot be pinned for maintenance ownership."
+            )
+        }
+        defer { Darwin.close(owningRootDescriptor) }
+        var owningRootStat = stat()
+        guard fstat(owningRootDescriptor, &owningRootStat) == 0,
+              owningRootStat.st_mode & S_IFMT == S_IFDIR,
+              owningRootStat.st_uid == geteuid(),
+              owningRootStat.st_mode & mode_t(S_IWGRP | S_IWOTH) == 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The intended database owning root has unsafe identity or permissions."
+            )
+        }
+        let keyMaterial = "\(intendedURL.path)\n"
+            + "\(owningRootStat.st_dev):\(owningRootStat.st_ino):\(owningRootStat.st_uid)"
+        let key = SHA256.hash(data: Data(keyMaterial.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let lockName = "\(key).lock"
+        let descriptor = Darwin.openat(
+            registryDescriptor,
+            lockName,
+            O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The database maintenance ownership file cannot be opened."
+            )
+        }
+        var descriptorStat = stat()
+        var pathStat = stat()
+        guard fstat(descriptor, &descriptorStat) == 0,
+              fstatat(registryDescriptor, lockName, &pathStat, AT_SYMLINK_NOFOLLOW) == 0,
+              descriptorStat.st_dev == pathStat.st_dev,
+              descriptorStat.st_ino == pathStat.st_ino,
+              descriptorStat.st_mode & S_IFMT == S_IFREG,
+              descriptorStat.st_uid == geteuid(),
+              descriptorStat.st_nlink == 1,
+              descriptorStat.st_mode & mode_t(S_IRWXG | S_IRWXO) == 0 else {
+            Darwin.close(descriptor)
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The private database maintenance lock changed identity or has unsafe ownership."
             )
         }
 
+        return try acquireDescriptor(
+            descriptor,
+            operation: operation,
+            timeout: timeout,
+            detail: detail
+        )
+    }
+
+    private static func acquireDescriptor(
+        _ descriptor: Int32,
+        operation: Int32,
+        timeout: TimeInterval,
+        detail: String
+    ) throws -> DatabaseStartupLock {
         let deadline = Date().addingTimeInterval(timeout)
-        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+        while flock(descriptor, operation | LOCK_NB) != 0 {
             if errno != EWOULDBLOCK || Date() >= deadline {
                 Darwin.close(descriptor)
                 throw CiderDatabaseError.startupPreflightFailed(
                     kind: .concurrentStartup,
-                    detail: "Another Cider process did not finish database startup within \(Int(timeout)) seconds. Close the other process or retry."
+                    detail: "\(detail) within \(timeout.formatted()) seconds. Close the other process or retry."
                 )
             }
             Thread.sleep(forTimeInterval: 0.05)
@@ -57,8 +223,14 @@ final class DatabaseStartupLock {
     }
 
     func release() {
+        guard let descriptor else { return }
+        self.descriptor = nil
         flock(descriptor, LOCK_UN)
         Darwin.close(descriptor)
+    }
+
+    deinit {
+        release()
     }
 }
 

@@ -45,4 +45,7 @@ void cid850_interpose_grow_published_child_after_clone(void);
 void cid850_interpose_replace_published_child_after_clone(void);
 bool cid850_interpose_did_attack(void);
 
+// Internal bridge used only between source files in this test dylib.
+int cid868_test_fsync_result(int descriptor, bool *handled);
+
 #endif

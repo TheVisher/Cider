@@ -493,6 +493,11 @@ static int cid850_fclonefileat(
 }
 
 static int cid850_fsync(int descriptor) {
+    bool cid868_handled = false;
+    int cid868_result = cid868_test_fsync_result(descriptor, &cid868_handled);
+    if (cid868_handled) {
+        return cid868_result;
+    }
     bool should_fail = false;
     pthread_mutex_lock(&cid850_lock);
     if (!cid850_inside_interposer

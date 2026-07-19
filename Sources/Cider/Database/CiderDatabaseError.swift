@@ -6,6 +6,7 @@ enum CiderDatabasePreflightFailureKind: String, Equatable {
     case unhealthy
     case changedDuringRead
     case concurrentStartup
+    case maintenanceRequired
 }
 
 /// Errors thrown by CiderDatabase operations.

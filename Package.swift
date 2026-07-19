@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "Cider", targets: ["Cider"]),
-        .executable(name: "cider-cli", targets: ["CiderCLI"])
+        .executable(name: "cider-cli", targets: ["CiderCLI"]),
+        .executable(name: "cider-db-maintenance", targets: ["CiderDatabaseMaintenance"])
     ],
     dependencies: [
         .package(name: "CID850Interpose", path: "Tests/CID850Interpose"),
@@ -42,6 +43,11 @@ let package = Package(
             swiftSettings: [.unsafeFlags(["-enable-testing"])]
         ),
         .executableTarget(
+            name: "CiderDatabaseMaintenance",
+            dependencies: ["Cider"],
+            path: "Sources/CiderDatabaseMaintenance"
+        ),
+        .executableTarget(
             name: "CID850BoundaryHarness",
             dependencies: [
                 "Cider",
@@ -50,12 +56,20 @@ let package = Package(
             path: "Tests/CID850BoundaryHarness",
             swiftSettings: [.unsafeFlags(["-enable-testing"])]
         ),
+        .executableTarget(
+            name: "CID868MaintenanceHarness",
+            dependencies: ["Cider"],
+            path: "Tests/CID868MaintenanceHarness",
+            swiftSettings: [.unsafeFlags(["-enable-testing"])]
+        ),
         .testTarget(
             name: "CiderTests",
             dependencies: [
                 "Cider",
                 "CiderCLI",
+                "CiderDatabaseMaintenance",
                 "CID850BoundaryHarness",
+                "CID868MaintenanceHarness",
             ],
             path: "Tests/CiderTests"
         )

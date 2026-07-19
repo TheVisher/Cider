@@ -266,6 +266,9 @@ final class CiderDatabase {
     private(set) var lastMigrationSafetyArtifactURL: URL?
     private var transactionDepth = 0
     private var rootTransactionMode: TransactionMode?
+    private var maintenanceOwnership: DatabaseStartupLock?
+
+    init() {}
 
     /// Whether the database connection is currently open.
     var isOpen: Bool { db != nil }
@@ -287,7 +290,18 @@ final class CiderDatabase {
         lastMigrationSafetyArtifactURL = nil
         logger.info("Opening database at \(path)")
 
-        let startupLock = try DatabaseStartupLock.acquire(for: url)
+        // Ordinary processes first join shared maintenance ownership. This
+        // closes the race with a helper seeking exclusive ownership while a
+        // separate startup-only lock still serializes normal preflight work.
+        let lifetimeOwnership = try DatabaseStartupLock.acquireMaintenanceShared(for: url)
+        let startupLock: DatabaseStartupLock
+        do {
+            startupLock = try DatabaseStartupLock.acquire(for: url)
+            try OfflineDatabaseRestoreStartupGate.reconcileBeforeOrdinaryOpen(databaseURL: url)
+        } catch {
+            lifetimeOwnership.release()
+            throw error
+        }
         defer { startupLock.release() }
 
         // Freshness is authoritative only after Cider startup serialization,
@@ -414,7 +428,9 @@ final class CiderDatabase {
             db = handle
             databaseURL = url
             backupSourceLineage = sourceLineage
+            maintenanceOwnership = lifetimeOwnership
         } catch {
+            lifetimeOwnership.release()
             inspection?.close()
             if reservationActive, let handle {
                 try? DatabaseStartupPreflight.cancelAuthoritativeReservation(handle)
@@ -438,6 +454,7 @@ final class CiderDatabase {
         self.backupSourceLineage = nil
         self.transactionDepth = 0
         self.rootTransactionMode = nil
+        self.maintenanceOwnership = nil
         logger.info("Database closed")
     }
 
@@ -474,7 +491,7 @@ final class CiderDatabase {
             let message = String(cString: sqlite3_errmsg(db))
             throw CiderDatabaseError.prepare(message)
         }
-        return SQLStatement(stmt)
+        return SQLStatement(stmt, maintenanceOwnership: maintenanceOwnership)
     }
 
     /// Run a block inside a SQLite transaction.

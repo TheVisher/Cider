@@ -8,9 +8,13 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 /// Provides type-safe bind and column accessors. Finalizes on deinit.
 final class SQLStatement {
     private let stmt: OpaquePointer
+    // sqlite3_close_v2 leaves a connection alive while statements remain.
+    // Retain shared maintenance ownership for that same physical lifetime.
+    private let maintenanceOwnership: AnyObject?
 
-    init(_ stmt: OpaquePointer) {
+    init(_ stmt: OpaquePointer, maintenanceOwnership: AnyObject? = nil) {
         self.stmt = stmt
+        self.maintenanceOwnership = maintenanceOwnership
     }
 
     deinit {

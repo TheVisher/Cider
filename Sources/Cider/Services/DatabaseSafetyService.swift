@@ -709,6 +709,28 @@ final class DatabaseSafetyService {
         }
     }
 
+    struct OfflineCurrentV2RestoreSource {
+        let backupURL: URL
+        private let sourceReference: RetainedPathReference
+
+        fileprivate init(
+            backupURL: URL,
+            sourceReference: RetainedPathReference
+        ) {
+            self.backupURL = backupURL
+            self.sourceReference = sourceReference
+        }
+
+        func validateSourceUnchanged() throws {
+            guard sourceReference.currentURL() != nil else {
+                throw RestoreError.unhealthyBackup(
+                    backupURL,
+                    messages: ["The current-v2 rolling package moved, was replaced, or changed before destination mutation."]
+                )
+            }
+        }
+    }
+
     private struct SafetyState: Codable {
         var lastPreOpenSnapshotAt: Date?
         var lastIntegrityCheckAt: Date?
@@ -2286,6 +2308,65 @@ final class DatabaseSafetyService {
         defer { Darwin.close(destinationDescriptor) }
         try write(databaseData, to: destinationDescriptor, artifactName: destinationURL.lastPathComponent)
         return destinationURL
+    }
+
+    func materializeCurrentV2RollingRestoreSource(
+        from backupURL: URL,
+        at candidateURL: URL,
+        expectedLineage: String,
+        destinationURL: URL
+    ) throws -> OfflineCurrentV2RestoreSource {
+        guard backupURL.pathExtension.lowercased() == packageExtension else {
+            throw RestoreError.unhealthyBackup(
+                backupURL,
+                messages: ["Offline maintenance restore accepts current-v2 rolling packages only."]
+            )
+        }
+        let retainedUse = try pinRestoreSource(
+            at: backupURL,
+            expectedKind: .rolling,
+            expectedLineage: expectedLineage,
+            legacyDestinationURL: destinationURL
+        )
+        guard retainedUse.verification.state == .verified,
+              retainedUse.verification.isVerified else {
+            throw RestoreError.unhealthyBackup(
+                backupURL,
+                messages: ["Offline maintenance restore rejects raw and v1 recovery artifacts."]
+            )
+        }
+        let finalUse = try retainedUse.finalDatabaseData(service: self)
+        let descriptor = Darwin.open(
+            candidateURL.path,
+            O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            throw BackupError.publication(
+                "The offline restore candidate could not be exclusively created."
+            )
+        }
+        do {
+            try write(finalUse.data, to: descriptor, artifactName: candidateURL.lastPathComponent)
+            _ = try verifySQLiteDatabase(data: finalUse.data, descriptor: descriptor)
+            Darwin.close(descriptor)
+        } catch {
+            Darwin.close(descriptor)
+            throw error
+        }
+        let source = OfflineCurrentV2RestoreSource(
+            backupURL: backupURL,
+            sourceReference: finalUse.reference
+        )
+        try source.validateSourceUnchanged()
+        return source
+    }
+
+    func captureOfflinePreRestoreRollback(databaseURL: URL) throws -> URL {
+        try capturePreOpenSnapshot(
+            databaseURL: databaseURL,
+            reason: "offline-pre-restore"
+        )
     }
 
     @discardableResult
