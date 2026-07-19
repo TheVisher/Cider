@@ -10,6 +10,17 @@ void cid850_interpose_crash_after_fclonefileat(const char *suffix);
 void cid850_interpose_replace_after_renameatx_np(const char *suffix, const char *held_name);
 void cid850_interpose_replace_before_renameatx_np(const char *suffix, const char *held_name);
 void cid850_interpose_crash_before_renameatx_np(const char *suffix);
+void cid850_interpose_crash_after_renameatx_np(const char *suffix);
+void cid868_interpose_crash_restore_state(int ordinal, bool after_write);
+void cid868_interpose_fail_restore_reopen(void);
+void cid868_interpose_fail_restore_integrity(void);
+void cid868_interpose_mutate_source_after_reopened(const char *source_database_path);
+void cid868_interpose_fail_committed_cleanup_once(void);
+void cid868_interpose_fail_committed_cleanup_persistently(void);
+void cid868_interpose_swap_parent_during_sqlite_open(
+    const char *database_path,
+    const char *decoy_parent_path
+);
 void cid850_interpose_replace_before_lseek(
     const char *suffix,
     const char *held_name,

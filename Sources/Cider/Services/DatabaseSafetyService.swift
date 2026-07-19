@@ -679,6 +679,16 @@ final class DatabaseSafetyService {
     enum RestoreError: LocalizedError {
         case missingBackup(URL)
         case unhealthyBackup(URL, messages: [String])
+        case recoveredFailure(String)
+        case committedCleanupRequired(String, artifactURL: URL?)
+        case recoveryRequired(String, artifactURL: URL?)
+
+        var requiresRecovery: Bool {
+            switch self {
+            case .committedCleanupRequired, .recoveryRequired: true
+            default: false
+            }
+        }
 
         var errorDescription: String? {
             switch self {
@@ -687,8 +697,27 @@ final class DatabaseSafetyService {
             case .unhealthyBackup(let url, let messages):
                 let detail = messages.isEmpty ? "unknown integrity failure" : messages.joined(separator: " | ")
                 return "Backup at \(url.path) failed integrity check: \(detail)"
+            case .recoveredFailure(let detail):
+                return "Database restore failed and the exact original SQLite set was restored: \(detail)"
+            case .committedCleanupRequired(let detail, let artifactURL):
+                let retained = artifactURL.map { " Retained commit evidence remains at \($0.path)." } ?? ""
+                return "The replacement database was committed, but restore cleanup requires recovery: \(detail)\(retained)"
+            case .recoveryRequired(let detail, let artifactURL):
+                let retained = artifactURL.map { " Preserved evidence remains at \($0.path)." } ?? ""
+                return "Database restore is indeterminate and requires recovery: \(detail)\(retained)"
             }
         }
+    }
+
+    enum RestoreReconciliationState: String, Equatable {
+        case none
+        case rolledBack
+        case completedCommit
+    }
+
+    struct RestoreReconciliationResult: Equatable {
+        let state: RestoreReconciliationState
+        let recoveryArtifactURL: URL?
     }
 
     struct RestoreResult: Equatable {
@@ -754,6 +783,163 @@ final class DatabaseSafetyService {
         func isSameObject(as other: FileIdentity) -> Bool {
             isSameNode(as: other) && linkCount == other.linkCount
         }
+    }
+
+    struct BoundedFileEvidence: Equatable {
+        let device: UInt64
+        let inode: UInt64
+        let generation: UInt32
+        let fileType: UInt32
+        let linkCount: UInt64
+        let byteSize: Int64
+        let modifiedSeconds: Int64
+        let modifiedNanoseconds: Int64
+        let changedSeconds: Int64
+        let changedNanoseconds: Int64
+        let sha256: String
+
+        fileprivate init(stat value: stat, sha256: String) {
+            device = UInt64(truncatingIfNeeded: value.st_dev)
+            inode = UInt64(truncatingIfNeeded: value.st_ino)
+            generation = value.st_gen
+            fileType = UInt32(value.st_mode & S_IFMT)
+            linkCount = UInt64(value.st_nlink)
+            byteSize = Int64(value.st_size)
+            modifiedSeconds = Int64(value.st_mtimespec.tv_sec)
+            modifiedNanoseconds = Int64(value.st_mtimespec.tv_nsec)
+            changedSeconds = Int64(value.st_ctimespec.tv_sec)
+            changedNanoseconds = Int64(value.st_ctimespec.tv_nsec)
+            self.sha256 = sha256
+        }
+
+        fileprivate func matches(_ value: stat) -> Bool {
+            device == UInt64(truncatingIfNeeded: value.st_dev)
+                && inode == UInt64(truncatingIfNeeded: value.st_ino)
+                && generation == value.st_gen
+                && fileType == UInt32(value.st_mode & S_IFMT)
+                && linkCount == UInt64(value.st_nlink)
+                && byteSize == Int64(value.st_size)
+                && modifiedSeconds == Int64(value.st_mtimespec.tv_sec)
+                && modifiedNanoseconds == Int64(value.st_mtimespec.tv_nsec)
+                && changedSeconds == Int64(value.st_ctimespec.tv_sec)
+                && changedNanoseconds == Int64(value.st_ctimespec.tv_nsec)
+        }
+    }
+
+    private struct RestorePersistedIdentity: Codable, Equatable {
+        let device: UInt64
+        let inode: UInt64
+        let generation: UInt32
+        let fileType: UInt32
+        let linkCount: UInt64
+        let byteSize: Int64
+
+        init(_ identity: FileIdentity) {
+            device = UInt64(truncatingIfNeeded: identity.device)
+            inode = UInt64(truncatingIfNeeded: identity.inode)
+            generation = identity.generation
+            fileType = UInt32(identity.fileType)
+            linkCount = UInt64(identity.linkCount)
+            byteSize = Int64(identity.byteSize)
+        }
+
+        init(_ evidence: BoundedFileEvidence) {
+            device = evidence.device
+            inode = evidence.inode
+            generation = evidence.generation
+            fileType = evidence.fileType
+            linkCount = evidence.linkCount
+            byteSize = evidence.byteSize
+        }
+
+        func matches(_ identity: FileIdentity) -> Bool {
+            self == RestorePersistedIdentity(identity)
+        }
+
+        func isSameNode(as identity: FileIdentity) -> Bool {
+            device == UInt64(truncatingIfNeeded: identity.device)
+                && inode == UInt64(truncatingIfNeeded: identity.inode)
+                && generation == identity.generation
+                && fileType == UInt32(identity.fileType)
+        }
+    }
+
+    private struct RestoreCoreMember: Codable, Equatable {
+        let liveName: String
+        let slotName: String
+        let identity: RestorePersistedIdentity
+        let sha256: String
+    }
+
+    private struct RestoreCoreNamespace: Codable, Equatable {
+        let database: RestoreCoreMember?
+        let wal: RestoreCoreMember?
+        let shm: RestoreCoreMember?
+
+        var members: [RestoreCoreMember] { [database, wal, shm].compactMap { $0 } }
+    }
+
+    private struct RestoreCoreSource: Codable, Equatable {
+        let path: String
+        let packageIdentity: RestorePersistedIdentity
+        let databaseIdentity: RestorePersistedIdentity
+        let databaseSHA256: String
+        let lineageIdentifier: String
+    }
+
+    private struct RestoreCoreState: Codable, Equatable {
+        enum Mode: String, Codable { case existing, absent }
+        enum Phase: String, Codable {
+            case planned
+            case staged
+            case originalsRetained
+            case published
+            case physicallyValidated
+            case reopened
+            case committed
+            case rollingBack
+        }
+
+        static let currentVersion = 1
+
+        let version: Int
+        let transactionID: String
+        let authority: RestorePersistedIdentity
+        let mode: Mode
+        let phase: Phase
+        let databaseName: String
+        let source: RestoreCoreSource
+        let initial: RestoreCoreNamespace
+        let staged: RestoreCoreMember?
+        let reopened: RestoreCoreNamespace?
+        let predecessorPhase: Phase?
+
+        func changing(
+            phase: Phase,
+            staged: RestoreCoreMember? = nil,
+            reopened: RestoreCoreNamespace? = nil
+        ) -> RestoreCoreState {
+            RestoreCoreState(
+                version: version,
+                transactionID: transactionID,
+                authority: authority,
+                mode: mode,
+                phase: phase,
+                databaseName: databaseName,
+                source: source,
+                initial: initial,
+                staged: staged ?? self.staged,
+                reopened: reopened ?? self.reopened,
+                predecessorPhase: phase == .rollingBack
+                    ? (self.phase == .rollingBack ? self.predecessorPhase : self.phase)
+                    : nil
+            )
+        }
+    }
+
+    private struct RestoreCoreDurabilityFailure: LocalizedError {
+        let detail: String
+        var errorDescription: String? { detail }
     }
 
     private struct PackageIdentity: Equatable {
@@ -2036,6 +2222,13 @@ final class DatabaseSafetyService {
     private let maximumAggregateTraversalDepth = 8
     private let ownershipLedgerAttribute = "com.cider.cid850.parent-ownership-ledger-v1"
     private let maximumOwnershipLedgerEntries = 32
+    private let restoreCoreAttribute = "com.cider.cid868.restore-transaction-v1"
+    private let restoreCoreStagingName = ".cid868-restore-staged.sqlite"
+    private let restoreCoreOriginalDatabaseName = ".cid868-restore-original.sqlite"
+    private let restoreCoreOriginalWALName = ".cid868-restore-original-wal"
+    private let restoreCoreOriginalSHMName = ".cid868-restore-original-shm"
+    private let restoreCoreReplacementWALName = ".cid868-restore-replacement-wal"
+    private let restoreCoreReplacementSHMName = ".cid868-restore-replacement-shm"
 
     init(
         fileManager: FileManager = .default,
@@ -2312,11 +2505,451 @@ final class DatabaseSafetyService {
     // MARK: - Restore compatibility (replacement policy remains CID-851)
 
     @discardableResult
+    func reconcileInterruptedRestore(
+        at databaseURL: URL
+    ) throws -> RestoreReconciliationResult {
+        let authority = try DatabaseStartupLock.acquire(for: databaseURL)
+        defer { authority.release() }
+        return try reconcileInterruptedRestore(
+            at: databaseURL,
+            namespaceAuthority: authority
+        )
+    }
+
+    @discardableResult
+    func reconcileInterruptedRestore(
+        at databaseURL: URL,
+        namespaceAuthority authority: DatabaseStartupLock
+    ) throws -> RestoreReconciliationResult {
+        let parent = try PinnedDirectory(
+            url: databaseURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+        return try reconcileRestoreCoreLocked(
+            at: databaseURL,
+            authority: authority,
+            parent: parent
+        )
+    }
+
+    private func restoreCurrentV2Backup(
+        from backupURL: URL,
+        into databaseURL: URL,
+        database: CiderDatabase?,
+        reopenDatabase: Bool
+    ) throws -> RestoreResult {
+        let authority = try DatabaseStartupLock.acquire(for: databaseURL)
+        defer { authority.release() }
+        let parent = try PinnedDirectory(
+            url: databaseURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+        _ = try reconcileRestoreCoreLocked(
+            at: databaseURL,
+            authority: authority,
+            parent: parent
+        )
+        try requireRestoreCoreSlotsAbsent(in: parent)
+
+        let destinationExists = try corePathExists(
+            named: databaseURL.lastPathComponent,
+            in: parent
+        )
+        if !destinationExists {
+            for suffix in ["-wal", "-shm"] where try corePathExists(
+                named: databaseURL.lastPathComponent + suffix,
+                in: parent
+            ) {
+                throw RestoreError.unhealthyBackup(
+                    backupURL,
+                    messages: ["The absent destination has an orphan SQLite sidecar."]
+                )
+            }
+        }
+
+        let destinationLineage: DatabaseSourceLineage?
+        let destinationObservation: DatabaseSourceLineageObservation?
+        if destinationExists {
+            let observation = try DatabaseSourceLineageObservation(databaseURL: databaseURL)
+            destinationLineage = try observation.validate()
+            destinationObservation = observation
+        } else {
+            destinationLineage = nil
+            destinationObservation = nil
+        }
+        let source = try pinRestoreSource(
+            at: backupURL,
+            expectedKind: .rolling,
+            expectedLineage: destinationLineage?.identifier,
+            legacyDestinationURL: databaseURL,
+            destinationExists: destinationExists
+        )
+        guard source.verification.state == .verified,
+              source.verification.isRecoveryEligible else {
+            throw RestoreError.unhealthyBackup(
+                backupURL,
+                messages: source.verification.messages
+            )
+        }
+        var sourceUse = try source.finalDatabaseData(service: self)
+        let sourceRecord = try restoreCoreSourceRecord(from: source)
+
+        let restoredBackup = SQLiteBackupInfo(
+            kind: .rolling,
+            url: backupURL,
+            createdAt: source.createdAt,
+            byteSize: (try? folderSize(at: backupURL)) ?? Int64(sourceUse.data.count),
+            verification: source.verification
+        )
+        let preRestoreSnapshotURL: URL?
+        if destinationExists {
+            preRestoreSnapshotURL = try capturePreOpenSnapshot(
+                databaseURL: databaseURL,
+                reason: "pre-restore",
+                authorityLeaseHeld: true
+            )
+        } else {
+            preRestoreSnapshotURL = nil
+        }
+        sourceUse = try source.finalDatabaseData(service: self)
+        try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+        if let destinationObservation, let destinationLineage {
+            guard try destinationObservation.validate() == destinationLineage else {
+                throw RestoreError.unhealthyBackup(
+                    backupURL,
+                    messages: ["The destination changed during restore qualification."]
+                )
+            }
+        }
+        if let database, database.isOpen, database.databaseURL == databaseURL {
+            database.close()
+        }
+
+        let initial = try observeRestoreCoreNamespace(
+            databaseURL: databaseURL,
+            in: parent
+        )
+        guard destinationExists == (initial.database != nil) else {
+            throw RestoreError.unhealthyBackup(
+                backupURL,
+                messages: ["The destination namespace changed before restore intent publication."]
+            )
+        }
+        var state = RestoreCoreState(
+            version: RestoreCoreState.currentVersion,
+            transactionID: UUID().uuidString.lowercased(),
+            authority: RestorePersistedIdentity(parent.identity),
+            mode: destinationExists ? .existing : .absent,
+            phase: .planned,
+            databaseName: databaseURL.lastPathComponent,
+            source: sourceRecord,
+            initial: initial,
+            staged: nil,
+            reopened: nil,
+            predecessorPhase: nil
+        )
+        try publishRestoreCoreState(
+            state,
+            in: parent,
+            authority: authority,
+            databaseURL: databaseURL,
+            creating: true
+        )
+
+        var committedResult: RestoreResult?
+        do {
+            let stagedDescriptor = try parent.createExclusiveRegularFile(
+                named: restoreCoreStagingName
+            )
+            defer { Darwin.close(stagedDescriptor) }
+            try write(
+                sourceUse.data,
+                to: stagedDescriptor,
+                artifactName: restoreCoreStagingName
+            )
+            _ = try verifySQLiteDatabase(data: sourceUse.data, descriptor: stagedDescriptor)
+            let staged = try requireRestoreCoreMember(
+                named: restoreCoreStagingName,
+                slotName: restoreCoreStagingName,
+                in: parent
+            )
+            guard staged.sha256 == sourceRecord.databaseSHA256 else {
+                throw RestoreError.recoveryRequired(
+                    "The private staged database differs from the qualified source.",
+                    artifactURL: parent.url.appendingPathComponent(restoreCoreStagingName)
+                )
+            }
+            state = state.changing(phase: .staged, staged: staged)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+
+            if state.mode == .existing {
+                for member in [state.initial.wal, state.initial.shm].compactMap({ $0 }) {
+                    try renameRestoreCoreMember(
+                        member,
+                        from: member.liveName,
+                        to: member.slotName,
+                        state: state,
+                        parent: parent,
+                        authority: authority,
+                        databaseURL: databaseURL
+                    )
+                }
+                state = state.changing(phase: .originalsRetained)
+                try publishRestoreCoreState(
+                    state,
+                    in: parent,
+                    authority: authority,
+                    databaseURL: databaseURL
+                )
+                guard let original = state.initial.database else {
+                    throw RestoreError.recoveryRequired(
+                        "The existing restore has no recorded original database.",
+                        artifactURL: nil
+                    )
+                }
+                _ = try swapRestoreCoreMembers(
+                    source: staged,
+                    sourceName: restoreCoreStagingName,
+                    destination: original,
+                    destinationName: state.databaseName,
+                    state: state,
+                    parent: parent,
+                    authority: authority,
+                    databaseURL: databaseURL
+                )
+            } else {
+                try renameRestoreCoreMember(
+                    staged,
+                    from: restoreCoreStagingName,
+                    to: state.databaseName,
+                    state: state,
+                    parent: parent,
+                    authority: authority,
+                    databaseURL: databaseURL
+                )
+            }
+            for name in [state.databaseName + "-wal", state.databaseName + "-shm"]
+            where corePathExistsUnchecked(named: name, in: parent) {
+                throw RestoreError.recoveryRequired(
+                    "An unrecorded SQLite sidecar appeared at the publication boundary and was preserved.",
+                    artifactURL: parent.url.appendingPathComponent(name)
+                )
+            }
+            state = state.changing(phase: .published)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+
+            try physicallyVerifyRestoreCoreDatabase(
+                named: state.databaseName,
+                expected: staged,
+                in: parent
+            )
+            state = state.changing(phase: .physicallyValidated)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+
+            if reopenDatabase, let database {
+                try database.open(at: databaseURL, namespaceAuthority: authority)
+                guard try database.integrityCheck().isHealthy else {
+                    throw RestoreError.recoveryRequired(
+                        "The production database reopen failed integrity validation.",
+                        artifactURL: nil
+                    )
+                }
+            }
+            let reopened = try observeRestoreCoreNamespace(
+                databaseURL: databaseURL,
+                in: parent,
+                databaseSlotName: restoreCoreStagingName,
+                walSlotName: restoreCoreReplacementWALName,
+                shmSlotName: restoreCoreReplacementSHMName
+            )
+            guard let reopenedDatabase = reopened.database,
+                  sameRestoreCoreObject(reopenedDatabase, staged) else {
+                throw RestoreError.recoveryRequired(
+                    "The live physical reopen did not retain the exact staged database inode.",
+                    artifactURL: databaseURL
+                )
+            }
+            try syncRestoreCoreNamespace(reopened, in: parent)
+            state = state.changing(phase: .reopened, reopened: reopened)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+
+            sourceUse = try source.finalDatabaseData(service: self)
+            try requireRestoreCoreNamespace(reopened, databaseURL: databaseURL, in: parent)
+            try physicallyVerifyRestoreCoreDatabase(
+                named: state.databaseName,
+                expected: reopenedDatabase,
+                in: parent
+            )
+            state = state.changing(phase: .committed)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+            committedResult = RestoreResult(
+                restoredBackup: restoredBackup,
+                preRestoreSnapshotURL: preRestoreSnapshotURL,
+                sourceReference: sourceUse.reference
+            )
+            try finishCommittedRestoreCore(
+                state: state,
+                databaseURL: databaseURL,
+                parent: parent,
+                authority: authority
+            )
+            try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+
+            logger.info("Restored current-v2 SQLite database from \(backupURL.lastPathComponent, privacy: .public)")
+            guard let committedResult else {
+                throw RestoreError.committedCleanupRequired(
+                    "The committed restore result could not be reconstructed.",
+                    artifactURL: parent.url
+                )
+            }
+            return committedResult
+        } catch {
+            if error is RestoreCoreDurabilityFailure,
+               let persisted = try restoreCoreState(in: parent) {
+                let durable = try rollbackRestoreCore(
+                    state: persisted.state,
+                    databaseURL: databaseURL,
+                    parent: parent,
+                    authority: authority,
+                    preserveReplacementEvidence: true
+                )
+                let durability = durable
+                    ? "The prior coherent database was restored, and the rollback namespace was flushed."
+                    : "The prior coherent database was restored, but the rollback parent-directory flush failed; crash durability is uncertain."
+                throw RestoreError.recoveryRequired(
+                    "\(error.localizedDescription) \(durability) The replacement remains retained in the fixed staging slot.",
+                    artifactURL: parent.url.appendingPathComponent(restoreCoreStagingName)
+                )
+            }
+            if let persisted = try restoreCoreState(in: parent) {
+                if persisted.state.phase == .committed {
+                    guard let committedResult else {
+                        throw RestoreError.committedCleanupRequired(
+                            "The canonical record proves commit, but the caller result is unavailable after cleanup failed: \(error.localizedDescription)",
+                            artifactURL: parent.url
+                        )
+                    }
+                    do {
+                        let reconciliation = try reconcileRestoreCoreLocked(
+                            at: databaseURL,
+                            authority: authority,
+                            parent: parent
+                        )
+                        guard reconciliation.state == .completedCommit
+                                || reconciliation.state == .none else {
+                            throw RestoreError.committedCleanupRequired(
+                                "Committed cleanup returned an impossible rollback outcome.",
+                                artifactURL: parent.url
+                            )
+                        }
+                        logger.info(
+                            "Restored current-v2 SQLite database from \(backupURL.lastPathComponent, privacy: .public); committed cleanup completed on retry"
+                        )
+                        return committedResult
+                    } catch let cleanup as RestoreError {
+                        if case .committedCleanupRequired = cleanup {
+                            throw cleanup
+                        }
+                        throw RestoreError.committedCleanupRequired(
+                            cleanup.localizedDescription,
+                            artifactURL: parent.url
+                        )
+                    } catch {
+                        throw RestoreError.committedCleanupRequired(
+                            error.localizedDescription,
+                            artifactURL: parent.url
+                        )
+                    }
+                }
+                if let database,
+                   database.isOpen,
+                   database.databaseURL == databaseURL {
+                    database.close()
+                }
+                do {
+                    let reconciliation = try reconcileRestoreCoreLocked(
+                        at: databaseURL,
+                        authority: authority,
+                        parent: parent
+                    )
+                    guard reconciliation.state != .completedCommit else {
+                        throw RestoreError.committedCleanupRequired(
+                            "A pre-commit failure reached a committed reconciliation outcome.",
+                            artifactURL: parent.url
+                        )
+                    }
+                } catch let recovery as RestoreError where recovery.requiresRecovery {
+                    throw recovery
+                } catch {
+                    throw RestoreError.recoveryRequired(
+                        "Automatic exact-original compensation could not be completed: \(error.localizedDescription)",
+                        artifactURL: parent.url
+                    )
+                }
+                throw RestoreError.recoveredFailure(error.localizedDescription)
+            }
+            throw error
+        }
+    }
+
+    @discardableResult
     func restoreRollingBackup(
         from backupURL: URL,
         into databaseURL: URL,
         database: CiderDatabase? = nil,
         reopenDatabase: Bool = false
+    ) throws -> RestoreResult {
+        guard fileManager.fileExists(atPath: backupURL.path) else {
+            throw RestoreError.missingBackup(backupURL)
+        }
+        if (try? manifest(at: backupURL).formatVersion) == BackupManifest.currentFormatVersion {
+            return try restoreCurrentV2Backup(
+                from: backupURL,
+                into: databaseURL,
+                database: database,
+                reopenDatabase: reopenDatabase
+            )
+        }
+        return try restoreLegacyCompatibleBackup(
+            from: backupURL,
+            into: databaseURL,
+            database: database,
+            reopenDatabase: reopenDatabase
+        )
+    }
+
+    private func restoreLegacyCompatibleBackup(
+        from backupURL: URL,
+        into databaseURL: URL,
+        database: CiderDatabase?,
+        reopenDatabase: Bool
     ) throws -> RestoreResult {
         guard fileManager.fileExists(atPath: backupURL.path) else {
             throw RestoreError.missingBackup(backupURL)
@@ -2426,6 +3059,1367 @@ final class DatabaseSafetyService {
 
     private func stateFileURL(for databaseURL: URL) -> URL {
         backupsRootDirectory(for: databaseURL).appendingPathComponent("state.json")
+    }
+
+    private func restoreCoreSourceRecord(
+        from source: RestoreSourceUse
+    ) throws -> RestoreCoreSource {
+        guard case .package(let package, let verified, _, _) = source.storage,
+              verified.verification.state == .verified,
+              let databaseIdentity = verified.identity.childrenByName[databaseFilename],
+              let databaseSHA256 = verified.fingerprint.contentSHA256ByName[databaseFilename] else {
+            throw RestoreError.unhealthyBackup(
+                source.url,
+                messages: ["The restore core accepts only a qualified current-v2 package capability."]
+            )
+        }
+        try package.validateUnchanged()
+        return RestoreCoreSource(
+            path: source.url.path,
+            packageIdentity: RestorePersistedIdentity(verified.identity.directory),
+            databaseIdentity: RestorePersistedIdentity(databaseIdentity),
+            databaseSHA256: databaseSHA256,
+            lineageIdentifier: verified.lineageIdentifier
+        )
+    }
+
+    private func canonicalRestoreCoreBytes(_ state: RestoreCoreState) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(state)
+    }
+
+    private func restoreCoreState(
+        in parent: PinnedDirectory
+    ) throws -> (state: RestoreCoreState, bytes: Data)? {
+        errno = 0
+        let size = fgetxattr(
+            parent.descriptor,
+            restoreCoreAttribute,
+            nil,
+            0,
+            0,
+            0
+        )
+        if size < 0 {
+            guard errno == ENOATTR else {
+                throw RestoreError.recoveryRequired(
+                    "The canonical restore record could not be inspected.",
+                    artifactURL: nil
+                )
+            }
+            return nil
+        }
+        guard size > 0, size <= 64 * 1_024 else {
+            throw RestoreError.recoveryRequired(
+                "The canonical restore record is empty or unbounded.",
+                artifactURL: nil
+            )
+        }
+        var bytes = Data(count: size)
+        let read = bytes.withUnsafeMutableBytes { buffer in
+            fgetxattr(
+                parent.descriptor,
+                restoreCoreAttribute,
+                buffer.baseAddress,
+                buffer.count,
+                0,
+                0
+            )
+        }
+        guard read == size,
+              let state = try? JSONDecoder().decode(RestoreCoreState.self, from: bytes),
+              try canonicalRestoreCoreBytes(state) == bytes else {
+            throw RestoreError.recoveryRequired(
+                "The canonical restore record is invalid or changed during read.",
+                artifactURL: nil
+            )
+        }
+        return (state, bytes)
+    }
+
+    private func validRestoreCoreState(
+        _ state: RestoreCoreState,
+        databaseURL: URL,
+        parent: PinnedDirectory
+    ) -> Bool {
+        func isDigest(_ value: String) -> Bool {
+            value.count == 64 && value.allSatisfy { character in
+                character.isNumber || ("a"..."f").contains(character)
+            }
+        }
+        func validIdentity(
+            _ identity: RestorePersistedIdentity,
+            fileType: mode_t,
+            requireSingleLink: Bool
+        ) -> Bool {
+            identity.fileType == UInt32(fileType)
+                && identity.byteSize >= 0
+                && (!requireSingleLink || identity.linkCount == 1)
+        }
+        func hasRole(
+            _ member: RestoreCoreMember?,
+            liveName: String,
+            slotName: String
+        ) -> Bool {
+            guard let member else { return true }
+            return member.liveName == liveName
+                && member.slotName == slotName
+                && validIdentity(member.identity, fileType: S_IFREG, requireSingleLink: true)
+                && isDigest(member.sha256)
+        }
+        func identityKey(_ identity: RestorePersistedIdentity) -> String {
+            "\(identity.device):\(identity.inode):"
+                + "\(identity.generation):\(identity.fileType)"
+        }
+        func identityKey(_ member: RestoreCoreMember) -> String {
+            identityKey(member.identity)
+        }
+        func sameNode(
+            _ lhs: RestorePersistedIdentity,
+            _ rhs: RestorePersistedIdentity
+        ) -> Bool {
+            identityKey(lhs) == identityKey(rhs)
+        }
+
+        let databaseName = databaseURL.lastPathComponent
+        guard state.version == RestoreCoreState.currentVersion,
+              UUID(uuidString: state.transactionID)?.uuidString.lowercased() == state.transactionID,
+              state.authority.isSameNode(as: parent.identity),
+              state.databaseName == databaseName,
+              state.source.path.hasPrefix("/"),
+              validIdentity(
+                state.source.packageIdentity,
+                fileType: S_IFDIR,
+                requireSingleLink: false
+              ),
+              validIdentity(
+                state.source.databaseIdentity,
+                fileType: S_IFREG,
+                requireSingleLink: true
+              ),
+              state.source.databaseIdentity.byteSize > 0,
+              isDigest(state.source.databaseSHA256),
+              isDigest(state.source.lineageIdentifier),
+              !sameNode(state.source.packageIdentity, state.authority),
+              hasRole(
+                state.initial.database,
+                liveName: databaseName,
+                slotName: restoreCoreOriginalDatabaseName
+              ),
+              hasRole(
+                state.initial.wal,
+                liveName: databaseName + "-wal",
+                slotName: restoreCoreOriginalWALName
+              ),
+              hasRole(
+                state.initial.shm,
+                liveName: databaseName + "-shm",
+                slotName: restoreCoreOriginalSHMName
+              ),
+              hasRole(
+                state.staged,
+                liveName: restoreCoreStagingName,
+                slotName: restoreCoreStagingName
+              ),
+              hasRole(
+                state.reopened?.database,
+                liveName: databaseName,
+                slotName: restoreCoreStagingName
+              ),
+              hasRole(
+                state.reopened?.wal,
+                liveName: databaseName + "-wal",
+                slotName: restoreCoreReplacementWALName
+              ),
+              hasRole(
+                state.reopened?.shm,
+                liveName: databaseName + "-shm",
+                slotName: restoreCoreReplacementSHMName
+              ) else {
+            return false
+        }
+
+        switch state.mode {
+        case .existing:
+            guard state.initial.database != nil else { return false }
+        case .absent:
+            guard state.initial.members.isEmpty else { return false }
+        }
+
+        switch state.phase {
+        case .planned:
+            guard state.staged == nil, state.reopened == nil,
+                  state.predecessorPhase == nil else { return false }
+        case .staged, .originalsRetained, .published, .physicallyValidated:
+            guard let staged = state.staged,
+                  staged.sha256 == state.source.databaseSHA256,
+                  staged.identity.byteSize == state.source.databaseIdentity.byteSize,
+                  state.reopened == nil,
+                  state.predecessorPhase == nil else { return false }
+        case .reopened, .committed:
+            guard let staged = state.staged,
+                  let reopened = state.reopened,
+                  let reopenedDatabase = reopened.database,
+                  staged.sha256 == state.source.databaseSHA256,
+                  staged.identity.byteSize == state.source.databaseIdentity.byteSize,
+                  sameRestoreCoreObject(staged, reopenedDatabase),
+                  state.predecessorPhase == nil else { return false }
+        case .rollingBack:
+            guard let staged = state.staged,
+                  staged.sha256 == state.source.databaseSHA256,
+                  staged.identity.byteSize == state.source.databaseIdentity.byteSize,
+                  let predecessor = state.predecessorPhase,
+                  [
+                    RestoreCoreState.Phase.staged,
+                    .originalsRetained,
+                    .published,
+                    .physicallyValidated,
+                    .reopened,
+                  ].contains(predecessor),
+                  predecessor == .reopened || state.reopened == nil else { return false }
+            if predecessor == .reopened {
+                guard let staged = state.staged,
+                      let reopenedDatabase = state.reopened?.database,
+                      sameRestoreCoreObject(staged, reopenedDatabase) else { return false }
+            }
+        }
+
+        var identities = Set([identityKey(state.source.databaseIdentity)])
+        let distinctMembers = state.initial.members
+            + [state.staged].compactMap { $0 }
+            + [state.reopened?.wal, state.reopened?.shm].compactMap { $0 }
+        for member in distinctMembers where !identities.insert(identityKey(member)).inserted {
+            return false
+        }
+        return true
+    }
+
+    private func requireRestoreCoreAuthority(
+        _ authority: DatabaseStartupLock,
+        parent: PinnedDirectory,
+        databaseURL: URL
+    ) throws {
+        try authority.validate(for: databaseURL)
+        try parent.validatePath()
+        guard authority.coversDirectory(
+            device: parent.identity.device,
+            inode: parent.identity.inode,
+            generation: parent.identity.generation
+        ) else {
+            throw RestoreError.recoveryRequired(
+                "The restore lost its descriptor-bound parent and transaction authority.",
+                artifactURL: nil
+            )
+        }
+    }
+
+    private func requireRestoreCoreCapability(
+        state: RestoreCoreState,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock,
+        databaseURL: URL
+    ) throws {
+        try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+        guard validRestoreCoreState(state, databaseURL: databaseURL, parent: parent),
+              let persisted = try restoreCoreState(in: parent),
+              persisted.state == state else {
+            throw RestoreError.recoveryRequired(
+                "The restore lost its exact canonical transaction capability.",
+                artifactURL: nil
+            )
+        }
+    }
+
+    private func publishRestoreCoreState(
+        _ state: RestoreCoreState,
+        in parent: PinnedDirectory,
+        authority: DatabaseStartupLock,
+        databaseURL: URL,
+        creating: Bool = false
+    ) throws {
+        try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+        guard validRestoreCoreState(state, databaseURL: databaseURL, parent: parent) else {
+            throw RestoreError.recoveryRequired(
+                "A restore state transition is outside the fixed transaction graph.",
+                artifactURL: nil
+            )
+        }
+        if creating {
+            guard try restoreCoreState(in: parent) == nil else {
+                throw RestoreError.recoveryRequired(
+                    "A canonical restore transaction is already active.",
+                    artifactURL: nil
+                )
+            }
+            try requireRestoreCoreSlotsAbsent(in: parent)
+        }
+        let bytes = try canonicalRestoreCoreBytes(state)
+        let result = bytes.withUnsafeBytes { buffer in
+            fsetxattr(
+                parent.descriptor,
+                restoreCoreAttribute,
+                buffer.baseAddress,
+                buffer.count,
+                0,
+                creating ? XATTR_CREATE : XATTR_REPLACE
+            )
+        }
+        guard result == 0,
+              fsync(parent.descriptor) == 0,
+              let persisted = try restoreCoreState(in: parent),
+              persisted.state == state,
+              persisted.bytes == bytes else {
+            throw RestoreError.recoveryRequired(
+                "The restore state transition was not durably recorded and verified.",
+                artifactURL: nil
+            )
+        }
+    }
+
+    private func removeRestoreCoreState(
+        _ state: RestoreCoreState,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock,
+        databaseURL: URL
+    ) throws {
+        try requireRestoreCoreCapability(
+            state: state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+        try requireRestoreCoreSlotsAbsent(in: parent)
+        guard fremovexattr(parent.descriptor, restoreCoreAttribute, 0) == 0,
+              fsync(parent.descriptor) == 0,
+              try restoreCoreState(in: parent) == nil else {
+            throw RestoreError.recoveryRequired(
+                "The completed restore record could not be removed durably.",
+                artifactURL: nil
+            )
+        }
+    }
+
+    private var restoreCoreSlotNames: [String] {
+        [
+            restoreCoreStagingName,
+            restoreCoreOriginalDatabaseName,
+            restoreCoreOriginalWALName,
+            restoreCoreOriginalSHMName,
+            restoreCoreReplacementWALName,
+            restoreCoreReplacementSHMName,
+        ]
+    }
+
+    private func requireRestoreCoreSlotsAbsent(in parent: PinnedDirectory) throws {
+        for name in restoreCoreSlotNames {
+            var value = stat()
+            if fstatat(parent.descriptor, name, &value, AT_SYMLINK_NOFOLLOW) == 0 {
+                throw RestoreError.recoveryRequired(
+                    "A fixed restore slot is occupied without authority; every occupant was preserved.",
+                    artifactURL: parent.url.appendingPathComponent(name)
+                )
+            }
+            guard errno == ENOENT else {
+                throw RestoreError.recoveryRequired(
+                    "A fixed restore slot could not be inspected safely.",
+                    artifactURL: parent.url.appendingPathComponent(name)
+                )
+            }
+        }
+    }
+
+    private func corePathExists(named name: String, in parent: PinnedDirectory) throws -> Bool {
+        var value = stat()
+        if fstatat(parent.descriptor, name, &value, AT_SYMLINK_NOFOLLOW) == 0 {
+            return true
+        }
+        guard errno == ENOENT else {
+            throw RestoreError.recoveryRequired(
+                "A restore namespace member could not be inspected.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        return false
+    }
+
+    private func observeRestoreCoreMember(
+        named name: String,
+        slotName: String,
+        in parent: PinnedDirectory
+    ) throws -> RestoreCoreMember? {
+        let descriptor = Darwin.openat(
+            parent.descriptor,
+            name,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC
+        )
+        if descriptor < 0 {
+            if errno == ENOENT { return nil }
+            throw RestoreError.recoveryRequired(
+                "A restore namespace member could not be pinned as a regular file.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        defer { Darwin.close(descriptor) }
+        let evidence = try Self.boundedFileEvidence(
+            descriptor: descriptor,
+            maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024)
+        )
+        _ = try Self.readBoundedStableFile(
+            descriptor: descriptor,
+            expected: evidence,
+            maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024),
+            artifactName: name
+        )
+        var reachable = stat()
+        guard fstatat(parent.descriptor, name, &reachable, AT_SYMLINK_NOFOLLOW) == 0,
+              RestorePersistedIdentity(evidence) == RestorePersistedIdentity(
+                FileIdentity(
+                    device: reachable.st_dev,
+                    inode: reachable.st_ino,
+                    generation: reachable.st_gen,
+                    fileType: reachable.st_mode & S_IFMT,
+                    linkCount: reachable.st_nlink,
+                    byteSize: reachable.st_size
+                )
+              ) else {
+            throw RestoreError.recoveryRequired(
+                "A restore namespace member changed between descriptor and path proof.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        return RestoreCoreMember(
+            liveName: name,
+            slotName: slotName,
+            identity: RestorePersistedIdentity(evidence),
+            sha256: evidence.sha256
+        )
+    }
+
+    private func requireRestoreCoreMember(
+        named name: String,
+        slotName: String,
+        in parent: PinnedDirectory
+    ) throws -> RestoreCoreMember {
+        guard let member = try observeRestoreCoreMember(
+            named: name,
+            slotName: slotName,
+            in: parent
+        ) else {
+            throw RestoreError.recoveryRequired(
+                "A required restore member is absent.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        return member
+    }
+
+    private func observeRestoreCoreNamespace(
+        databaseURL: URL,
+        in parent: PinnedDirectory,
+        databaseSlotName: String? = nil,
+        walSlotName: String? = nil,
+        shmSlotName: String? = nil
+    ) throws -> RestoreCoreNamespace {
+        RestoreCoreNamespace(
+            database: try observeRestoreCoreMember(
+                named: databaseURL.lastPathComponent,
+                slotName: databaseSlotName ?? restoreCoreOriginalDatabaseName,
+                in: parent
+            ),
+            wal: try observeRestoreCoreMember(
+                named: databaseURL.lastPathComponent + "-wal",
+                slotName: walSlotName ?? restoreCoreOriginalWALName,
+                in: parent
+            ),
+            shm: try observeRestoreCoreMember(
+                named: databaseURL.lastPathComponent + "-shm",
+                slotName: shmSlotName ?? restoreCoreOriginalSHMName,
+                in: parent
+            )
+        )
+    }
+
+    private func sameRestoreCoreObject(
+        _ lhs: RestoreCoreMember,
+        _ rhs: RestoreCoreMember
+    ) -> Bool {
+        lhs.identity == rhs.identity && lhs.sha256 == rhs.sha256
+    }
+
+    private func observedRestoreCoreMember(
+        named name: String,
+        matches expected: RestoreCoreMember,
+        in parent: PinnedDirectory
+    ) throws -> Bool {
+        guard let observed = try observeRestoreCoreMember(
+            named: name,
+            slotName: expected.slotName,
+            in: parent
+        ) else { return false }
+        return sameRestoreCoreObject(observed, expected)
+    }
+
+    private func requireRestoreCoreNamespace(
+        _ expected: RestoreCoreNamespace,
+        databaseURL: URL,
+        in parent: PinnedDirectory
+    ) throws {
+        let observed = try observeRestoreCoreNamespace(databaseURL: databaseURL, in: parent)
+        guard expected.members.count == observed.members.count,
+              expected.members.allSatisfy({ member in
+                  observed.members.contains { sameRestoreCoreObject($0, member) }
+              }) else {
+            throw RestoreError.recoveryRequired(
+                "The live DB/WAL/SHM namespace differs from the recorded transaction state.",
+                artifactURL: databaseURL
+            )
+        }
+    }
+
+    private func pinRestoreCoreMember(
+        _ expected: RestoreCoreMember,
+        named name: String,
+        in parent: PinnedDirectory
+    ) throws -> (descriptor: Int32, evidence: BoundedFileEvidence) {
+        let descriptor = Darwin.openat(
+            parent.descriptor,
+            name,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw RestoreError.recoveryRequired(
+                "A restore member could not be pinned immediately before mutation.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        do {
+            let evidence = try Self.boundedFileEvidence(
+                descriptor: descriptor,
+                maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024)
+            )
+            guard RestorePersistedIdentity(evidence) == expected.identity,
+                  evidence.sha256 == expected.sha256 else {
+                throw RestoreError.recoveryRequired(
+                    "A restore member changed before destructive mutation.",
+                    artifactURL: parent.url.appendingPathComponent(name)
+                )
+            }
+            return (descriptor, evidence)
+        } catch {
+            Darwin.close(descriptor)
+            throw error
+        }
+    }
+
+    private func requirePinnedRestoreCoreMember(
+        descriptor: Int32,
+        evidence: BoundedFileEvidence,
+        named name: String,
+        in parent: PinnedDirectory
+    ) throws {
+        _ = try Self.readBoundedStableFile(
+            descriptor: descriptor,
+            expected: evidence,
+            maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024),
+            artifactName: name
+        )
+        var reachable = stat()
+        guard fstatat(parent.descriptor, name, &reachable, AT_SYMLINK_NOFOLLOW) == 0,
+              RestorePersistedIdentity(evidence).matches(
+                FileIdentity(
+                    device: reachable.st_dev,
+                    inode: reachable.st_ino,
+                    generation: reachable.st_gen,
+                    fileType: reachable.st_mode & S_IFMT,
+                    linkCount: reachable.st_nlink,
+                    byteSize: reachable.st_size
+                )
+              ) else {
+            throw RestoreError.recoveryRequired(
+                "A restore member changed at the syscall-adjacent mutation boundary.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+    }
+
+    private func renameRestoreCoreMember(
+        _ member: RestoreCoreMember,
+        from sourceName: String,
+        to destinationName: String,
+        state: RestoreCoreState,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock,
+        databaseURL: URL
+    ) throws {
+        try requireRestoreCoreCapability(
+            state: state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+        guard !corePathExistsUnchecked(named: destinationName, in: parent) else {
+            throw RestoreError.recoveryRequired(
+                "A fixed restore transition destination is occupied.",
+                artifactURL: parent.url.appendingPathComponent(destinationName)
+            )
+        }
+        let pinned = try pinRestoreCoreMember(member, named: sourceName, in: parent)
+        defer { Darwin.close(pinned.descriptor) }
+        try requirePinnedRestoreCoreMember(
+            descriptor: pinned.descriptor,
+            evidence: pinned.evidence,
+            named: sourceName,
+            in: parent
+        )
+        guard renameatx_np(
+            parent.descriptor,
+            sourceName,
+            parent.descriptor,
+            destinationName,
+            UInt32(RENAME_EXCL)
+        ) == 0,
+        try observedRestoreCoreMember(
+            named: destinationName,
+            matches: member,
+            in: parent
+        ),
+        fsync(parent.descriptor) == 0 else {
+            throw RestoreError.recoveryRequired(
+                "A descriptor-bound restore rename was not durably proven.",
+                artifactURL: parent.url.appendingPathComponent(destinationName)
+            )
+        }
+    }
+
+    private func swapRestoreCoreMembers(
+        source: RestoreCoreMember,
+        sourceName: String,
+        destination: RestoreCoreMember,
+        destinationName: String,
+        state: RestoreCoreState,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock,
+        databaseURL: URL,
+        tolerateDurabilityFailure: Bool = false
+    ) throws -> Bool {
+        try requireRestoreCoreCapability(
+            state: state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+        let pinnedSource = try pinRestoreCoreMember(source, named: sourceName, in: parent)
+        defer { Darwin.close(pinnedSource.descriptor) }
+        let pinnedDestination = try pinRestoreCoreMember(
+            destination,
+            named: destinationName,
+            in: parent
+        )
+        defer { Darwin.close(pinnedDestination.descriptor) }
+        try requirePinnedRestoreCoreMember(
+            descriptor: pinnedSource.descriptor,
+            evidence: pinnedSource.evidence,
+            named: sourceName,
+            in: parent
+        )
+        try requirePinnedRestoreCoreMember(
+            descriptor: pinnedDestination.descriptor,
+            evidence: pinnedDestination.evidence,
+            named: destinationName,
+            in: parent
+        )
+        guard renameatx_np(
+            parent.descriptor,
+            sourceName,
+            parent.descriptor,
+            destinationName,
+            UInt32(RENAME_SWAP)
+        ) == 0,
+        try observedRestoreCoreMember(named: sourceName, matches: destination, in: parent),
+        try observedRestoreCoreMember(named: destinationName, matches: source, in: parent) else {
+            throw RestoreError.recoveryRequired(
+                "The descriptor-bound restore swap did not select both recorded inodes.",
+                artifactURL: nil
+            )
+        }
+        let durable = fsync(parent.descriptor) == 0
+        if !durable, !tolerateDurabilityFailure {
+            throw RestoreCoreDurabilityFailure(
+                detail: "The atomic restore namespace update could not be flushed."
+            )
+        }
+        return durable
+    }
+
+    private func corePathExistsUnchecked(named name: String, in parent: PinnedDirectory) -> Bool {
+        var value = stat()
+        return fstatat(parent.descriptor, name, &value, AT_SYMLINK_NOFOLLOW) == 0
+    }
+
+    private func physicallyVerifyRestoreCoreDatabase(
+        named name: String,
+        expected: RestoreCoreMember,
+        in parent: PinnedDirectory
+    ) throws {
+        let pinned = try pinRestoreCoreMember(expected, named: name, in: parent)
+        defer { Darwin.close(pinned.descriptor) }
+        let data = try Self.readBoundedStableFile(
+            descriptor: pinned.descriptor,
+            expected: pinned.evidence,
+            maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024),
+            artifactName: name
+        )
+        _ = try verifySQLiteDatabase(data: data, descriptor: pinned.descriptor)
+        try requirePinnedRestoreCoreMember(
+            descriptor: pinned.descriptor,
+            evidence: pinned.evidence,
+            named: name,
+            in: parent
+        )
+    }
+
+    private func syncRestoreCoreNamespace(
+        _ namespace: RestoreCoreNamespace,
+        in parent: PinnedDirectory
+    ) throws {
+        for member in namespace.members {
+            let pinned = try pinRestoreCoreMember(member, named: member.liveName, in: parent)
+            defer { Darwin.close(pinned.descriptor) }
+            try requirePinnedRestoreCoreMember(
+                descriptor: pinned.descriptor,
+                evidence: pinned.evidence,
+                named: member.liveName,
+                in: parent
+            )
+            guard fsync(pinned.descriptor) == 0 else {
+                throw RestoreError.recoveryRequired(
+                    "A live restore member could not be made durable.",
+                    artifactURL: parent.url.appendingPathComponent(member.liveName)
+                )
+            }
+        }
+        guard fsync(parent.descriptor) == 0 else {
+            throw RestoreError.recoveryRequired(
+                "The live restore namespace directory could not be made durable.",
+                artifactURL: parent.url
+            )
+        }
+    }
+
+    private func unlinkExactRestoreCoreMember(
+        _ member: RestoreCoreMember,
+        named name: String,
+        state: RestoreCoreState,
+        databaseURL: URL,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock
+    ) throws {
+        try requireRestoreCoreCapability(
+            state: state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+        guard try observedRestoreCoreMember(named: name, matches: member, in: parent) else {
+            if !corePathExistsUnchecked(named: name, in: parent) { return }
+            throw RestoreError.recoveryRequired(
+                "A retained restore member was reoccupied or mutated; it was preserved.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        let pinned = try pinRestoreCoreMember(member, named: name, in: parent)
+        defer { Darwin.close(pinned.descriptor) }
+        try requirePinnedRestoreCoreMember(
+            descriptor: pinned.descriptor,
+            evidence: pinned.evidence,
+            named: name,
+            in: parent
+        )
+        guard unlinkat(
+            parent.descriptor,
+            name,
+            AT_SYMLINK_NOFOLLOW_ANY | AT_UNIQUE
+        ) == 0,
+        !corePathExistsUnchecked(named: name, in: parent),
+        fsync(parent.descriptor) == 0 else {
+            throw RestoreError.recoveryRequired(
+                "An exact restore member could not be removed durably.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+    }
+
+    private func requireCommittedRestoreCoreNamespace(
+        state: RestoreCoreState,
+        databaseURL: URL,
+        parent: PinnedDirectory
+    ) throws -> RestoreCoreNamespace {
+        guard state.phase == .committed,
+              let reopened = state.reopened,
+              let reopenedDatabase = reopened.database else {
+            throw RestoreError.recoveryRequired(
+                "Restore completion lacks a committed reopened namespace.",
+                artifactURL: nil
+            )
+        }
+        let observed = try observeRestoreCoreNamespace(databaseURL: databaseURL, in: parent)
+        func compatible(
+            expected: RestoreCoreMember?,
+            observed: RestoreCoreMember?
+        ) -> Bool {
+            guard let expected else { return observed == nil }
+            guard let observed else { return true }
+            return sameRestoreCoreObject(expected, observed)
+        }
+        guard observed.database.map({ sameRestoreCoreObject(reopenedDatabase, $0) }) == true,
+              compatible(expected: reopened.wal, observed: observed.wal),
+              compatible(expected: reopened.shm, observed: observed.shm) else {
+            throw RestoreError.recoveryRequired(
+                "The committed live database is no longer proven; retained originals were preserved.",
+                artifactURL: databaseURL
+            )
+        }
+        try physicallyVerifyRestoreCoreDatabase(
+            named: state.databaseName,
+            expected: reopenedDatabase,
+            in: parent
+        )
+        return observed
+    }
+
+    private func finishCommittedRestoreCore(
+        state: RestoreCoreState,
+        databaseURL: URL,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock
+    ) throws {
+        let observed = try requireCommittedRestoreCoreNamespace(
+            state: state,
+            databaseURL: databaseURL,
+            parent: parent
+        )
+        try syncRestoreCoreNamespace(observed, in: parent)
+        if state.mode == .existing, let original = state.initial.database {
+            _ = try requireCommittedRestoreCoreNamespace(
+                state: state,
+                databaseURL: databaseURL,
+                parent: parent
+            )
+            try unlinkExactRestoreCoreMember(
+                original,
+                named: restoreCoreStagingName,
+                state: state,
+                databaseURL: databaseURL,
+                parent: parent,
+                authority: authority
+            )
+        }
+        for member in [state.initial.wal, state.initial.shm].compactMap({ $0 }) {
+            _ = try requireCommittedRestoreCoreNamespace(
+                state: state,
+                databaseURL: databaseURL,
+                parent: parent
+            )
+            try unlinkExactRestoreCoreMember(
+                member,
+                named: member.slotName,
+                state: state,
+                databaseURL: databaseURL,
+                parent: parent,
+                authority: authority
+            )
+        }
+        _ = try requireCommittedRestoreCoreNamespace(
+            state: state,
+            databaseURL: databaseURL,
+            parent: parent
+        )
+        try removeRestoreCoreState(
+            state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+    }
+
+    private func requireRestoreCorePhaseNamespace(
+        _ state: RestoreCoreState,
+        databaseURL: URL,
+        parent: PinnedDirectory
+    ) throws {
+        // A rolling-back record carries its exact predecessor phase. Rollback
+        // syscalls are independently identity-checked and idempotent, so a
+        // retry may legitimately observe any already-completed prefix.
+        guard state.phase != .rollingBack else { return }
+
+        let names = [
+            state.databaseName,
+            state.databaseName + "-wal",
+            state.databaseName + "-shm",
+        ] + restoreCoreSlotNames
+        func namespaceMatches(_ phase: RestoreCoreState.Phase) throws -> Bool {
+            var expected: [String: RestoreCoreMember] = [:]
+            var mayBeAbsent = Set<String>()
+            var mayBeUnexpectedAtLiveSidecar = Set<String>()
+            func record(_ member: RestoreCoreMember?, at name: String) {
+                if let member { expected[name] = member }
+            }
+            func recordInitialLive() {
+                record(state.initial.database, at: state.databaseName)
+                record(state.initial.wal, at: state.databaseName + "-wal")
+                record(state.initial.shm, at: state.databaseName + "-shm")
+            }
+            func recordRetainedOriginals() {
+                if state.mode == .existing {
+                    record(state.initial.database, at: restoreCoreStagingName)
+                }
+                record(state.initial.wal, at: restoreCoreOriginalWALName)
+                record(state.initial.shm, at: restoreCoreOriginalSHMName)
+            }
+
+            switch phase {
+            case .planned:
+                recordInitialLive()
+            case .staged:
+                recordInitialLive()
+                record(state.staged, at: restoreCoreStagingName)
+            case .originalsRetained:
+                record(state.initial.database, at: state.databaseName)
+                record(state.initial.wal, at: restoreCoreOriginalWALName)
+                record(state.initial.shm, at: restoreCoreOriginalSHMName)
+                record(state.staged, at: restoreCoreStagingName)
+            case .published, .physicallyValidated:
+                record(state.staged, at: state.databaseName)
+                recordRetainedOriginals()
+                if state.phase == .originalsRetained, phase == .published {
+                    // The database exchange precedes publication of the
+                    // successor phase. A sidecar can race into its live name
+                    // at that exact seam while the recorded original remains
+                    // pinned in its fixed slot. Admit only that transition so
+                    // rollback can restore the original database inode; the
+                    // conflicting sidecar and retained evidence stay intact.
+                    mayBeUnexpectedAtLiveSidecar.insert(state.databaseName + "-wal")
+                    mayBeUnexpectedAtLiveSidecar.insert(state.databaseName + "-shm")
+                }
+            case .reopened, .committed:
+                record(state.reopened?.database, at: state.databaseName)
+                record(state.reopened?.wal, at: state.databaseName + "-wal")
+                record(state.reopened?.shm, at: state.databaseName + "-shm")
+                recordRetainedOriginals()
+                if state.reopened?.wal != nil { mayBeAbsent.insert(state.databaseName + "-wal") }
+                if state.reopened?.shm != nil { mayBeAbsent.insert(state.databaseName + "-shm") }
+                if phase == .committed {
+                    mayBeAbsent.formUnion([
+                        restoreCoreStagingName,
+                        restoreCoreOriginalWALName,
+                        restoreCoreOriginalSHMName,
+                    ])
+                }
+            case .rollingBack:
+                return true
+            }
+
+            for name in names {
+                if let member = expected[name] {
+                    if try observedRestoreCoreMember(named: name, matches: member, in: parent) {
+                        continue
+                    }
+                    if mayBeAbsent.contains(name), !corePathExistsUnchecked(named: name, in: parent) {
+                        continue
+                    }
+                    return false
+                }
+                if mayBeUnexpectedAtLiveSidecar.contains(name),
+                   corePathExistsUnchecked(named: name, in: parent) {
+                    continue
+                }
+                if corePathExistsUnchecked(named: name, in: parent) { return false }
+            }
+            return true
+        }
+
+        var acceptedPhases = [state.phase]
+        // Namespace syscalls precede publication of their successor state.
+        // An interruption in that narrow interval is valid only for the exact
+        // single successor shown here; later or role-mismatched states remain
+        // fail-closed.
+        if state.phase == .staged {
+            acceptedPhases.append(state.mode == .existing ? .originalsRetained : .published)
+        }
+        if state.phase == .originalsRetained { acceptedPhases.append(.published) }
+        for phase in acceptedPhases where try namespaceMatches(phase) { return }
+        throw RestoreError.recoveryRequired(
+            "The restore phase does not match its exact recorded predecessor namespace; no occupant was modified.",
+            artifactURL: databaseURL
+        )
+    }
+
+    private func reconcileRestoreCoreLocked(
+        at databaseURL: URL,
+        authority: DatabaseStartupLock,
+        parent: PinnedDirectory
+    ) throws -> RestoreReconciliationResult {
+        try requireRestoreCoreAuthority(authority, parent: parent, databaseURL: databaseURL)
+        guard let persisted = try restoreCoreState(in: parent) else {
+            try requireRestoreCoreSlotsAbsent(in: parent)
+            return RestoreReconciliationResult(state: .none, recoveryArtifactURL: nil)
+        }
+        var state = persisted.state
+        guard validRestoreCoreState(state, databaseURL: databaseURL, parent: parent) else {
+            throw RestoreError.recoveryRequired(
+                "The canonical restore state is invalid; no occupant was modified.",
+                artifactURL: nil
+            )
+        }
+        if state.mode == .absent,
+           state.phase == .planned,
+           state.staged == nil,
+           corePathExistsUnchecked(named: restoreCoreStagingName, in: parent) {
+            let staged = try requireRestoreCoreMember(
+                named: restoreCoreStagingName,
+                slotName: restoreCoreStagingName,
+                in: parent
+            )
+            guard staged.sha256 == state.source.databaseSHA256,
+                  staged.identity.byteSize == state.source.databaseIdentity.byteSize else {
+                throw RestoreError.recoveryRequired(
+                    "The unrecorded absent-destination staging occupant does not match the canonical source; it was preserved.",
+                    artifactURL: parent.url.appendingPathComponent(restoreCoreStagingName)
+                )
+            }
+            state = state.changing(phase: .staged, staged: staged)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+        }
+        try requireRestoreCorePhaseNamespace(state, databaseURL: databaseURL, parent: parent)
+        if state.phase == .committed {
+            try finishCommittedRestoreCore(
+                state: state,
+                databaseURL: databaseURL,
+                parent: parent,
+                authority: authority
+            )
+            return RestoreReconciliationResult(
+                state: .completedCommit,
+                recoveryArtifactURL: nil
+            )
+        }
+
+        if state.phase == .planned, state.staged == nil {
+            try requireRestoreCoreNamespace(
+                state.initial,
+                databaseURL: databaseURL,
+                in: parent
+            )
+            try removeRestoreCoreState(
+                state,
+                parent: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+            return RestoreReconciliationResult(state: .rolledBack, recoveryArtifactURL: nil)
+        }
+
+        if state.phase != .rollingBack {
+            state = state.changing(phase: .rollingBack)
+            try publishRestoreCoreState(
+                state,
+                in: parent,
+                authority: authority,
+                databaseURL: databaseURL
+            )
+        }
+        _ = try rollbackRestoreCore(
+            state: state,
+            databaseURL: databaseURL,
+            parent: parent,
+            authority: authority
+        )
+        try removeRestoreCoreState(
+            state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+        return RestoreReconciliationResult(state: .rolledBack, recoveryArtifactURL: nil)
+    }
+
+    private func rollbackRestoreCore(
+        state: RestoreCoreState,
+        databaseURL: URL,
+        parent: PinnedDirectory,
+        authority: DatabaseStartupLock,
+        preserveReplacementEvidence: Bool = false
+    ) throws -> Bool {
+        var durabilityEstablished = true
+        try requireRestoreCoreCapability(
+            state: state,
+            parent: parent,
+            authority: authority,
+            databaseURL: databaseURL
+        )
+        let liveName = state.databaseName
+        let replacementSidecars = [state.reopened?.wal, state.reopened?.shm]
+            .compactMap { $0 }
+        for member in replacementSidecars {
+            if try observedRestoreCoreMember(
+                named: member.liveName,
+                matches: member,
+                in: parent
+            ) {
+                guard !corePathExistsUnchecked(named: member.slotName, in: parent) else {
+                    throw RestoreError.recoveryRequired(
+                        "A replacement sidecar evidence slot was unexpectedly occupied.",
+                        artifactURL: parent.url.appendingPathComponent(member.slotName)
+                    )
+                }
+                try renameRestoreCoreMember(
+                    member,
+                    from: member.liveName,
+                    to: member.slotName,
+                    state: state,
+                    parent: parent,
+                    authority: authority,
+                    databaseURL: databaseURL
+                )
+                continue
+            }
+            if try observedRestoreCoreMember(
+                named: member.slotName,
+                matches: member,
+                in: parent
+            ) {
+                continue
+            }
+            let originalAtLive = [state.initial.wal, state.initial.shm]
+                .compactMap { $0 }
+                .contains { original in
+                    original.liveName == member.liveName
+                        && (try? observedRestoreCoreMember(
+                            named: original.liveName,
+                            matches: original,
+                            in: parent
+                        )) == true
+                }
+            guard originalAtLive
+                    || (!corePathExistsUnchecked(named: member.liveName, in: parent)
+                        && !corePathExistsUnchecked(named: member.slotName, in: parent)) else {
+                throw RestoreError.recoveryRequired(
+                    "Rollback preserved an unknown or mixed replacement sidecar.",
+                    artifactURL: parent.url.appendingPathComponent(member.liveName)
+                )
+            }
+        }
+        if state.mode == .existing {
+            guard let original = state.initial.database else {
+                throw RestoreError.recoveryRequired(
+                    "The original database capability is absent from rollback state.",
+                    artifactURL: nil
+                )
+            }
+            let liveIsOriginal = try observedRestoreCoreMember(
+                named: liveName,
+                matches: original,
+                in: parent
+            )
+            if !liveIsOriginal {
+                guard let staged = state.staged,
+                      try observedRestoreCoreMember(
+                        named: restoreCoreStagingName,
+                        matches: original,
+                        in: parent
+                      ),
+                      try observedRestoreCoreMember(
+                        named: liveName,
+                        matches: staged,
+                        in: parent
+                      ) else {
+                    throw RestoreError.recoveryRequired(
+                        "Rollback refused an unrecorded, reoccupied, or mixed database inode.",
+                        artifactURL: databaseURL
+                    )
+                }
+                durabilityEstablished = try swapRestoreCoreMembers(
+                    source: original,
+                    sourceName: restoreCoreStagingName,
+                    destination: staged,
+                    destinationName: liveName,
+                    state: state,
+                    parent: parent,
+                    authority: authority,
+                    databaseURL: databaseURL,
+                    tolerateDurabilityFailure: true
+                )
+            }
+            for member in [state.initial.wal, state.initial.shm].compactMap({ $0 }) {
+                if try observedRestoreCoreMember(
+                    named: member.liveName,
+                    matches: member,
+                    in: parent
+                ) { continue }
+                guard !corePathExistsUnchecked(named: member.liveName, in: parent),
+                      try observedRestoreCoreMember(
+                        named: member.slotName,
+                        matches: member,
+                        in: parent
+                      ) else {
+                    throw RestoreError.recoveryRequired(
+                        "Rollback refused an unknown or mixed SQLite sidecar occupant.",
+                        artifactURL: parent.url.appendingPathComponent(member.liveName)
+                    )
+                }
+                try renameRestoreCoreMember(
+                    member,
+                    from: member.slotName,
+                    to: member.liveName,
+                    state: state,
+                    parent: parent,
+                    authority: authority,
+                    databaseURL: databaseURL
+                )
+            }
+            let originallyAbsentNames = [
+                state.initial.wal == nil ? liveName + "-wal" : nil,
+                state.initial.shm == nil ? liveName + "-shm" : nil,
+            ].compactMap { $0 }
+            for name in originallyAbsentNames where corePathExistsUnchecked(named: name, in: parent) {
+                throw RestoreError.recoveryRequired(
+                    "Rollback preserved an unrecorded SQLite sidecar inode.",
+                    artifactURL: parent.url.appendingPathComponent(name)
+                )
+            }
+            let restored = try observeRestoreCoreNamespace(databaseURL: databaseURL, in: parent)
+            guard restored.members.count == state.initial.members.count,
+                  state.initial.members.allSatisfy({ expected in
+                      restored.members.contains { sameRestoreCoreObject($0, expected) }
+                  }) else {
+                throw RestoreError.recoveryRequired(
+                    "Rollback could not prove the exact original DB/WAL/SHM namespace.",
+                    artifactURL: databaseURL
+                )
+            }
+            let inspection = try DatabaseStartupPreflight.establishExistingDatabaseHealth(
+                at: databaseURL
+            )
+            inspection.close()
+            try syncRestoreCoreNamespace(restored, in: parent)
+            if !preserveReplacementEvidence,
+               let staged = state.staged,
+               try observedRestoreCoreMember(
+                named: restoreCoreStagingName,
+                matches: staged,
+                in: parent
+               ) {
+                try unlinkExactRestoreCoreMember(
+                    staged,
+                    named: restoreCoreStagingName,
+                    state: state,
+                    databaseURL: databaseURL,
+                    parent: parent,
+                    authority: authority
+                )
+            }
+        } else {
+            guard state.initial.members.isEmpty else {
+                throw RestoreError.recoveryRequired(
+                    "An absent-destination rollback has an invalid initial namespace.",
+                    artifactURL: nil
+                )
+            }
+            if corePathExistsUnchecked(named: liveName, in: parent) {
+                guard let staged = state.staged,
+                      try observedRestoreCoreMember(
+                        named: liveName,
+                        matches: staged,
+                        in: parent
+                      ),
+                      !corePathExistsUnchecked(named: restoreCoreStagingName, in: parent) else {
+                    throw RestoreError.recoveryRequired(
+                        "Absent-destination rollback preserved an unrecorded database inode.",
+                        artifactURL: databaseURL
+                    )
+                }
+                try renameRestoreCoreMember(
+                    staged,
+                    from: liveName,
+                    to: restoreCoreStagingName,
+                    state: state,
+                    parent: parent,
+                    authority: authority,
+                    databaseURL: databaseURL
+                )
+            }
+            for name in [liveName + "-wal", liveName + "-shm"] where corePathExistsUnchecked(
+                named: name,
+                in: parent
+            ) {
+                throw RestoreError.recoveryRequired(
+                    "Absent-destination rollback preserved an unrecorded SQLite sidecar.",
+                    artifactURL: parent.url.appendingPathComponent(name)
+                )
+            }
+            if !preserveReplacementEvidence,
+               let staged = state.staged,
+               try observedRestoreCoreMember(
+                named: restoreCoreStagingName,
+                matches: staged,
+                in: parent
+               ) {
+                try unlinkExactRestoreCoreMember(
+                    staged,
+                    named: restoreCoreStagingName,
+                    state: state,
+                    databaseURL: databaseURL,
+                    parent: parent,
+                    authority: authority
+                )
+            }
+            guard !corePathExistsUnchecked(named: liveName, in: parent) else {
+                throw RestoreError.recoveryRequired(
+                    "Absent-destination rollback did not restore the empty namespace.",
+                    artifactURL: databaseURL
+                )
+            }
+        }
+        if !preserveReplacementEvidence {
+            for member in replacementSidecars {
+                try unlinkExactRestoreCoreMember(
+                    member,
+                    named: member.slotName,
+                    state: state,
+                    databaseURL: databaseURL,
+                    parent: parent,
+                    authority: authority
+                )
+            }
+        }
+        for name in restoreCoreSlotNames where corePathExistsUnchecked(named: name, in: parent) {
+            if preserveReplacementEvidence,
+               ((name == restoreCoreStagingName
+                    && state.staged.map {
+                        (try? observedRestoreCoreMember(named: name, matches: $0, in: parent)) == true
+                    } == true)
+                || replacementSidecars.contains {
+                    $0.slotName == name
+                        && (try? observedRestoreCoreMember(
+                            named: name,
+                            matches: $0,
+                            in: parent
+                        )) == true
+                }) {
+                    continue
+            }
+            throw RestoreError.recoveryRequired(
+                "Rollback retained an unexpected fixed-slot occupant.",
+                artifactURL: parent.url.appendingPathComponent(name)
+            )
+        }
+        return durabilityEstablished
     }
 
     private func restoreIntoNewDestination(
@@ -5745,17 +7739,111 @@ final class DatabaseSafetyService {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func data(from descriptor: Int32, artifactName: String) throws -> Data {
-        guard lseek(descriptor, 0, SEEK_SET) >= 0 else {
-            throw BackupError.verification("The pinned \(artifactName) descriptor could not be rewound.")
-        }
-        do {
-            return try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).readToEnd() ?? Data()
-        } catch {
-            throw BackupError.verification(
-                "The pinned \(artifactName) descriptor could not be read: \(error.localizedDescription)"
+    static func boundedFileEvidence(
+        descriptor: Int32,
+        maximumBytes: Int64
+    ) throws -> BoundedFileEvidence {
+        var before = stat()
+        guard maximumBytes >= 0,
+              fstat(descriptor, &before) == 0,
+              before.st_mode & S_IFMT == S_IFREG,
+              before.st_nlink == 1,
+              before.st_size >= 0,
+              before.st_size <= maximumBytes else {
+            throw RestoreError.recoveryRequired(
+                "A bounded descriptor is not a single-link regular file within the byte limit.",
+                artifactURL: nil
             )
         }
+        let data = try readExactDescriptorBytes(
+            descriptor: descriptor,
+            byteCount: Int(before.st_size)
+        )
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let evidence = BoundedFileEvidence(stat: before, sha256: digest)
+        var after = stat()
+        guard fstat(descriptor, &after) == 0, evidence.matches(after) else {
+            throw RestoreError.recoveryRequired(
+                "A bounded descriptor changed identity, type, size, or metadata while it was read.",
+                artifactURL: nil
+            )
+        }
+        return evidence
+    }
+
+    static func readBoundedStableFile(
+        descriptor: Int32,
+        expected: BoundedFileEvidence,
+        maximumBytes: Int64,
+        artifactName: String
+    ) throws -> Data {
+        var before = stat()
+        guard expected.fileType == UInt32(S_IFREG),
+              expected.linkCount == 1,
+              expected.byteSize >= 0,
+              expected.byteSize <= maximumBytes,
+              fstat(descriptor, &before) == 0,
+              expected.matches(before) else {
+            throw RestoreError.recoveryRequired(
+                "The pinned \(artifactName) changed before its bounded read.",
+                artifactURL: nil
+            )
+        }
+        let data = try readExactDescriptorBytes(
+            descriptor: descriptor,
+            byteCount: Int(expected.byteSize)
+        )
+        var after = stat()
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard fstat(descriptor, &after) == 0,
+              expected.matches(after),
+              digest == expected.sha256 else {
+            throw RestoreError.recoveryRequired(
+                "The pinned \(artifactName) changed during its bounded content proof.",
+                artifactURL: nil
+            )
+        }
+        return data
+    }
+
+    private static func readExactDescriptorBytes(
+        descriptor: Int32,
+        byteCount: Int
+    ) throws -> Data {
+        var data = Data(count: byteCount)
+        var offset = 0
+        while offset < byteCount {
+            let count = data.withUnsafeMutableBytes { bytes in
+                Darwin.pread(
+                    descriptor,
+                    bytes.baseAddress?.advanced(by: offset),
+                    byteCount - offset,
+                    off_t(offset)
+                )
+            }
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else {
+                throw RestoreError.recoveryRequired(
+                    "A bounded descriptor ended before its recorded byte count.",
+                    artifactURL: nil
+                )
+            }
+            offset += count
+        }
+        return data
+    }
+
+    private func data(from descriptor: Int32, artifactName: String) throws -> Data {
+        let evidence = try Self.boundedFileEvidence(
+            descriptor: descriptor,
+            maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024)
+        )
+        return try Self.readBoundedStableFile(
+            descriptor: descriptor,
+            expected: evidence,
+            maximumBytes: max(maximumPolicyBytes, 8 * 1_024 * 1_024 * 1_024),
+            artifactName: artifactName
+        )
     }
 
     private func write(_ data: Data, to descriptor: Int32, artifactName: String) throws {

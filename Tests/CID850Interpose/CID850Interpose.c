@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/clonefile.h>
@@ -23,6 +24,13 @@ enum cid850_attack_kind {
     CID850_ATTACK_RENAMEATX,
     CID850_ATTACK_RENAMEATX_SOURCE,
     CID850_ATTACK_RENAMEATX_CRASH,
+    CID850_ATTACK_RENAMEATX_CRASH_AFTER,
+    CID868_ATTACK_RESTORE_STATE_CRASH,
+    CID868_ATTACK_RESTORE_REOPEN_FAILURE,
+    CID868_ATTACK_RESTORE_INTEGRITY_FAILURE,
+    CID868_ATTACK_FINAL_SOURCE_MUTATION,
+    CID868_ATTACK_COMMITTED_CLEANUP_FAILURE,
+    CID868_ATTACK_PARENT_SWAP_SQLITE_OPEN,
     CID850_ATTACK_LSEEK,
     CID850_ATTACK_FTRUNCATE,
     CID850_ATTACK_SIDECAR_BEFORE_SWAP,
@@ -42,6 +50,9 @@ static char cid850_held_name[256];
 static bool cid850_did_attack_value = false;
 static int cid850_lseek_ordinal = 0;
 static int cid850_lseek_seen = 0;
+static int cid868_restore_state_ordinal = 0;
+static int cid868_restore_state_seen = 0;
+static bool cid868_restore_state_after = false;
 static _Thread_local bool cid850_inside_interposer = false;
 static int cid850_flock_probe_role = 0;
 static int cid850_flock_exclusive_seen = 0;
@@ -52,8 +63,14 @@ static char cid850_result_path[PATH_MAX];
 static int cid850_fsync_failures_remaining = 0;
 static bool cid850_post_swap_fsync_armed = false;
 static bool cid850_post_swap_seen = false;
+static bool cid868_committed_cleanup_armed = false;
+static bool cid868_committed_cleanup_persistent = false;
 static char cid850_ownership_ready_path[PATH_MAX];
 static char cid850_ownership_release_path[PATH_MAX];
+static char cid868_source_database_path[PATH_MAX];
+static char cid868_database_path[PATH_MAX];
+static char cid868_database_parent_path[PATH_MAX];
+static char cid868_decoy_parent_path[PATH_MAX];
 
 static void cid850_configure(
     enum cid850_attack_kind kind,
@@ -106,6 +123,40 @@ static int cid850_real_fsetxattr(
     );
 }
 
+static int cid850_real_unlinkat(int directory, const char *name, int flags) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return (int)syscall(SYS_unlinkat, directory, name, flags);
+#pragma clang diagnostic pop
+}
+
+static int cid850_real_open(const char *path, int flags, mode_t mode) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return (int)syscall(SYS_open, path, flags, mode);
+#pragma clang diagnostic pop
+}
+
+static int cid850_real_renameatx_np(
+    int source_directory,
+    const char *source_name,
+    int destination_directory,
+    const char *destination_name,
+    unsigned int flags
+) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return (int)syscall(
+        SYS_renameatx_np,
+        source_directory,
+        source_name,
+        destination_directory,
+        destination_name,
+        flags
+    );
+#pragma clang diagnostic pop
+}
+
 #pragma clang diagnostic pop
 
 static bool cid850_matches(const char *name, enum cid850_attack_kind kind, char *held_name) {
@@ -133,6 +184,9 @@ void cid850_interpose_reset(void) {
     cid850_did_attack_value = false;
     cid850_lseek_ordinal = 0;
     cid850_lseek_seen = 0;
+    cid868_restore_state_ordinal = 0;
+    cid868_restore_state_seen = 0;
+    cid868_restore_state_after = false;
     cid850_flock_probe_role = 0;
     cid850_flock_exclusive_seen = 0;
     cid850_flock_probe_reported = false;
@@ -142,8 +196,14 @@ void cid850_interpose_reset(void) {
     cid850_fsync_failures_remaining = 0;
     cid850_post_swap_fsync_armed = false;
     cid850_post_swap_seen = false;
+    cid868_committed_cleanup_armed = false;
+    cid868_committed_cleanup_persistent = false;
     cid850_ownership_ready_path[0] = '\0';
     cid850_ownership_release_path[0] = '\0';
+    cid868_source_database_path[0] = '\0';
+    cid868_database_path[0] = '\0';
+    cid868_database_parent_path[0] = '\0';
+    cid868_decoy_parent_path[0] = '\0';
     pthread_mutex_unlock(&cid850_lock);
 }
 
@@ -305,6 +365,61 @@ void cid850_interpose_replace_before_renameatx_np(const char *suffix, const char
 
 void cid850_interpose_crash_before_renameatx_np(const char *suffix) {
     cid850_configure(CID850_ATTACK_RENAMEATX_CRASH, suffix, "");
+}
+
+void cid850_interpose_crash_after_renameatx_np(const char *suffix) {
+    cid850_configure(CID850_ATTACK_RENAMEATX_CRASH_AFTER, suffix, "");
+}
+
+void cid868_interpose_crash_restore_state(int ordinal, bool after_write) {
+    cid850_configure(CID868_ATTACK_RESTORE_STATE_CRASH, "", "");
+    pthread_mutex_lock(&cid850_lock);
+    cid868_restore_state_ordinal = ordinal;
+    cid868_restore_state_seen = 0;
+    cid868_restore_state_after = after_write;
+    pthread_mutex_unlock(&cid850_lock);
+}
+
+void cid868_interpose_fail_restore_reopen(void) {
+    cid850_configure(CID868_ATTACK_RESTORE_REOPEN_FAILURE, "", "");
+}
+
+void cid868_interpose_fail_restore_integrity(void) {
+    cid850_configure(CID868_ATTACK_RESTORE_INTEGRITY_FAILURE, "", "");
+}
+
+void cid868_interpose_mutate_source_after_reopened(const char *source_database_path) {
+    cid850_configure(CID868_ATTACK_FINAL_SOURCE_MUTATION, "", "");
+    pthread_mutex_lock(&cid850_lock);
+    strlcpy(cid868_source_database_path, source_database_path, sizeof(cid868_source_database_path));
+    pthread_mutex_unlock(&cid850_lock);
+}
+
+void cid868_interpose_fail_committed_cleanup_once(void) {
+    cid850_configure(CID868_ATTACK_COMMITTED_CLEANUP_FAILURE, "", "");
+}
+
+void cid868_interpose_fail_committed_cleanup_persistently(void) {
+    cid850_configure(CID868_ATTACK_COMMITTED_CLEANUP_FAILURE, "", "");
+    pthread_mutex_lock(&cid850_lock);
+    cid868_committed_cleanup_persistent = true;
+    pthread_mutex_unlock(&cid850_lock);
+}
+
+void cid868_interpose_swap_parent_during_sqlite_open(
+    const char *database_path,
+    const char *decoy_parent_path
+) {
+    cid850_configure(CID868_ATTACK_PARENT_SWAP_SQLITE_OPEN, "", "");
+    pthread_mutex_lock(&cid850_lock);
+    strlcpy(cid868_database_path, database_path, sizeof(cid868_database_path));
+    strlcpy(cid868_database_parent_path, database_path, sizeof(cid868_database_parent_path));
+    char *separator = strrchr(cid868_database_parent_path, '/');
+    if (separator != NULL) {
+        *separator = '\0';
+    }
+    strlcpy(cid868_decoy_parent_path, decoy_parent_path, sizeof(cid868_decoy_parent_path));
+    pthread_mutex_unlock(&cid850_lock);
 }
 
 void cid850_interpose_replace_before_lseek(
@@ -599,8 +714,35 @@ static int cid850_renameatx_np(
     );
 #pragma clang diagnostic pop
     int saved_errno = errno;
+    if (result == 0 && !cid850_inside_interposer) {
+        char unused_name[256];
+        if (cid850_matches(source_name, CID850_ATTACK_RENAMEATX_CRASH_AFTER, unused_name)) {
+            _exit(87);
+        }
+    }
     if (result == 0 && !cid850_inside_interposer && (flags & RENAME_SWAP) != 0) {
         pthread_mutex_lock(&cid850_lock);
+        if (cid850_kind == CID868_ATTACK_RESTORE_REOPEN_FAILURE
+                || cid850_kind == CID868_ATTACK_RESTORE_INTEGRITY_FAILURE) {
+            cid850_did_attack_value = true;
+            cid850_inside_interposer = true;
+            int live = openat(
+                destination_directory,
+                destination_name,
+                O_RDWR | O_NOFOLLOW | O_CLOEXEC
+            );
+            if (live >= 0) {
+                if (cid850_kind == CID868_ATTACK_RESTORE_REOPEN_FAILURE) {
+                    (void)fchmod(live, 0);
+                } else {
+                    unsigned char damage[256] = {0};
+                    (void)pwrite(live, damage, sizeof(damage), 100);
+                }
+                (void)fsync(live);
+                close(live);
+            }
+            cid850_inside_interposer = false;
+        }
         if (cid850_kind == CID850_ATTACK_POST_SWAP_FSYNC
                 && !cid850_post_swap_seen
                 && destination_name != NULL) {
@@ -799,6 +941,24 @@ static int cid850_fsetxattr(
     u_int32_t position,
     int options
 ) {
+    bool crash_before = false;
+    bool crash_after = false;
+    if (!cid850_inside_interposer && name != NULL
+            && strcmp(name, "com.cider.cid868.restore-transaction-v1") == 0) {
+        pthread_mutex_lock(&cid850_lock);
+        if (cid850_kind == CID868_ATTACK_RESTORE_STATE_CRASH) {
+            cid868_restore_state_seen += 1;
+            if (cid868_restore_state_seen == cid868_restore_state_ordinal) {
+                cid850_did_attack_value = true;
+                crash_before = !cid868_restore_state_after;
+                crash_after = cid868_restore_state_after;
+            }
+        }
+        pthread_mutex_unlock(&cid850_lock);
+    }
+    if (crash_before) {
+        _exit(91);
+    }
     int result = cid850_real_fsetxattr(
         descriptor,
         name,
@@ -807,6 +967,60 @@ static int cid850_fsetxattr(
         position,
         options
     );
+    if (result == 0 && crash_after) {
+        _exit(92);
+    }
+    if (result == 0 && !cid850_inside_interposer && name != NULL
+            && strcmp(name, "com.cider.cid868.restore-transaction-v1") == 0) {
+        bool mutate_source = false;
+        pthread_mutex_lock(&cid850_lock);
+        if (cid850_kind == CID868_ATTACK_FINAL_SOURCE_MUTATION
+                && !cid850_did_attack_value
+                && memmem(
+                    value,
+                    size,
+                    "\"phase\":\"reopened\"",
+                    strlen("\"phase\":\"reopened\"")
+                ) != NULL) {
+            mutate_source = true;
+        }
+        if (cid850_kind == CID868_ATTACK_COMMITTED_CLEANUP_FAILURE
+                && !cid850_did_attack_value
+                && memmem(
+                    value,
+                    size,
+                    "\"phase\":\"committed\"",
+                    strlen("\"phase\":\"committed\"")
+                ) != NULL) {
+            cid868_committed_cleanup_armed = true;
+        }
+        pthread_mutex_unlock(&cid850_lock);
+        if (mutate_source) {
+            cid850_inside_interposer = true;
+            int source = open(
+                cid868_source_database_path,
+                O_RDWR | O_NOFOLLOW | O_CLOEXEC
+            );
+            if (source >= 0) {
+                struct stat metadata;
+                const char marker[] = "cid868-final-source-mutation";
+                if (fstat(source, &metadata) == 0
+                        && pwrite(
+                            source,
+                            marker,
+                            sizeof(marker) - 1,
+                            metadata.st_size
+                        ) == sizeof(marker) - 1
+                        && fsync(source) == 0) {
+                    pthread_mutex_lock(&cid850_lock);
+                    cid850_did_attack_value = true;
+                    pthread_mutex_unlock(&cid850_lock);
+                }
+                close(source);
+            }
+            cid850_inside_interposer = false;
+        }
+    }
     if (result != 0 || cid850_inside_interposer || name == NULL
             || strcmp(name, "com.cider.cid850.package-owner-v1") != 0) {
         return result;
@@ -839,6 +1053,81 @@ static int cid850_fsetxattr(
     return result;
 }
 
+static int cid850_unlinkat(int directory, const char *name, int flags) {
+    bool should_fail = false;
+    pthread_mutex_lock(&cid850_lock);
+    if (!cid850_inside_interposer
+            && cid850_kind == CID868_ATTACK_COMMITTED_CLEANUP_FAILURE
+            && cid868_committed_cleanup_armed
+            && (!cid850_did_attack_value || cid868_committed_cleanup_persistent)) {
+        cid850_did_attack_value = true;
+        if (!cid868_committed_cleanup_persistent) {
+            cid868_committed_cleanup_armed = false;
+        }
+        should_fail = true;
+    }
+    pthread_mutex_unlock(&cid850_lock);
+    if (should_fail) {
+        errno = EIO;
+        return -1;
+    }
+    return cid850_real_unlinkat(directory, name, flags);
+}
+
+static int cid850_open(const char *path, int flags, ...) {
+    mode_t mode = 0;
+    if ((flags & O_CREAT) != 0) {
+        va_list arguments;
+        va_start(arguments, flags);
+        mode = (mode_t)va_arg(arguments, int);
+        va_end(arguments);
+    }
+    bool should_swap = false;
+    char parent_path[PATH_MAX] = {0};
+    char decoy_path[PATH_MAX] = {0};
+    pthread_mutex_lock(&cid850_lock);
+    if (!cid850_inside_interposer
+            && !cid850_did_attack_value
+            && cid850_kind == CID868_ATTACK_PARENT_SWAP_SQLITE_OPEN
+            && path != NULL
+            && strcmp(path, cid868_database_path) == 0) {
+        strlcpy(parent_path, cid868_database_parent_path, sizeof(parent_path));
+        strlcpy(decoy_path, cid868_decoy_parent_path, sizeof(decoy_path));
+        should_swap = true;
+    }
+    pthread_mutex_unlock(&cid850_lock);
+
+    if (!should_swap) {
+        return cid850_real_open(path, flags, mode);
+    }
+
+    cid850_inside_interposer = true;
+    bool swapped = cid850_real_renameatx_np(
+        AT_FDCWD,
+        parent_path,
+        AT_FDCWD,
+        decoy_path,
+        RENAME_SWAP
+    ) == 0;
+    if (swapped) {
+        pthread_mutex_lock(&cid850_lock);
+        cid850_did_attack_value = true;
+        pthread_mutex_unlock(&cid850_lock);
+    }
+    int result = cid850_real_open(path, flags, mode);
+    if (swapped) {
+        (void)cid850_real_renameatx_np(
+            AT_FDCWD,
+            parent_path,
+            AT_FDCWD,
+            decoy_path,
+            RENAME_SWAP
+        );
+    }
+    cid850_inside_interposer = false;
+    return result;
+}
+
 struct cid850_interpose_pair {
     const void *replacement;
     const void *replacee;
@@ -856,4 +1145,6 @@ static struct cid850_interpose_pair cid850_interposers[]
         { (const void *)cid850_flock, (const void *)flock },
         { (const void *)cid850_fsync, (const void *)fsync },
         { (const void *)cid850_fsetxattr, (const void *)fsetxattr },
+        { (const void *)cid850_unlinkat, (const void *)unlinkat },
+        { (const void *)cid850_open, (const void *)open },
     };

@@ -1596,8 +1596,8 @@ struct DatabaseBackupSafetyTests {
         }
     }
 
-    @Test("restore cannot delete a replacement installed at the final live mutation boundary")
-    func restorePreservesLivePathReplacement() throws {
+    @Test("descriptor-bound restore does not invoke FileManager live-path mutation callbacks")
+    func restoreDoesNotUseFileManagerLivePathCallbacks() throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let backup = try observedURL(
@@ -1608,17 +1608,15 @@ struct DatabaseBackupSafetyTests {
         let manager = RestoreLivePathReplacementFileManager(databaseURL: fixture.databaseURL)
         let service = DatabaseSafetyService(fileManager: manager)
 
-        do {
-            _ = try service.restoreRollingBackup(
-                from: backup,
-                into: fixture.databaseURL,
-                database: fixture.database
-            )
-            Issue.record("Expected final live-path replacement to abort restore")
-        } catch {
-            #expect(manager.didReplace)
-            #expect(try Data(contentsOf: fixture.databaseURL) == manager.replacementData)
-        }
+        _ = try service.restoreRollingBackup(
+            from: backup,
+            into: fixture.databaseURL,
+            database: fixture.database,
+            reopenDatabase: true
+        )
+        #expect(!manager.didReplace)
+        #expect(fixture.database.isOpen)
+        #expect(try fixture.database.integrityCheck().isHealthy)
     }
 
     @Test("a WAL appearing immediately before the database swap is preserved and aborts restore")
@@ -1633,6 +1631,711 @@ struct DatabaseBackupSafetyTests {
         #expect(!result.reopened)
     }
 
+    @Test("a WAL at the publication seam preserves a DB-only original set and recovery evidence")
+    func walAppearanceAtSwapSeamWithDBOnlyOriginalFailsClosed() throws {
+        let result = try runCID850RestoreSidecarHarness(
+            "restore-sidecar-before-wal-db-only"
+        )
+
+        #expect(result.didAttack)
+        #expect(result.initialSidecarsAbsent)
+        #expect(result.restoreFailed)
+        #expect(result.databaseRolledBack)
+        #expect(result.unexpectedOccupantPreserved)
+        #expect(result.replacementEvidencePreserved)
+        #expect(result.transactionRecordRetained)
+        #expect(!result.reopened)
+    }
+
+    @Test("bounded descriptor proof rejects same-inode same-size in-place mutation")
+    func boundedReadRejectsSameSizeSameInodeMutation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cid868-bounded-read-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        let url = root.appendingPathComponent("member.sqlite")
+        let original = Data("0123456789abcdef".utf8)
+        let changed = Data("fedcba9876543210".utf8)
+        try original.write(to: url)
+        let descriptor = Darwin.open(url.path, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+        #expect(descriptor >= 0)
+        defer { if descriptor >= 0 { Darwin.close(descriptor) } }
+
+        let evidence = try DatabaseSafetyService.boundedFileEvidence(
+            descriptor: descriptor,
+            maximumBytes: 1_024
+        )
+        #expect(changed.withUnsafeBytes {
+            Darwin.pwrite(descriptor, $0.baseAddress, $0.count, 0)
+        } == changed.count)
+        #expect(Darwin.fsync(descriptor) == 0)
+
+        #expect(throws: DatabaseSafetyService.RestoreError.self) {
+            _ = try DatabaseSafetyService.readBoundedStableFile(
+                descriptor: descriptor,
+                expected: evidence,
+                maximumBytes: 1_024,
+                artifactName: url.lastPathComponent
+            )
+        }
+        var value = stat()
+        #expect(fstat(descriptor, &value) == 0)
+        #expect(UInt64(value.st_ino) == evidence.inode)
+        #expect(Int64(value.st_size) == Int64(original.count))
+        #expect(try Data(contentsOf: url) == changed)
+    }
+
+    @Test("restart never adopts an unrecorded same-content replacement inode")
+    func restartRejectsUnrecordedSameContentReplacementInode() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-unrecorded-inode",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('cid868-live', 'Live', '#112233', 'custom', 1, 1);
+            """)
+        try fixture.database.checkpointWal()
+        fixture.database.close()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+        process.arguments = [
+            "cid868-restore-crash-after-swap",
+            backup.path,
+            fixture.databaseURL.path,
+        ]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 87)
+
+        let publishedBytes = try Data(contentsOf: fixture.databaseURL)
+        var recorded = stat()
+        #expect(lstat(fixture.databaseURL.path, &recorded) == 0)
+        let displaced = fixture.root.appendingPathComponent("unrecorded-displaced.sqlite")
+        try FileManager.default.moveItem(at: fixture.databaseURL, to: displaced)
+        try publishedBytes.write(to: fixture.databaseURL, options: .withoutOverwriting)
+        var replacement = stat()
+        #expect(lstat(fixture.databaseURL.path, &replacement) == 0)
+        #expect(recorded.st_ino != replacement.st_ino)
+
+        for _ in 0..<2 {
+            #expect(throws: DatabaseSafetyService.RestoreError.self) {
+                _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+            }
+            #expect(try Data(contentsOf: fixture.databaseURL) == publishedBytes)
+            var after = stat()
+            #expect(lstat(fixture.databaseURL.path, &after) == 0)
+            #expect(after.st_ino == replacement.st_ino)
+        }
+    }
+
+    @Test("every canonical state write boundary reconciles deterministically after process interruption")
+    func restoreStateInterruptionMatrixConverges() throws {
+        for ordinal in 1...7 {
+            for position in ["before", "after"] {
+                let fixture = try Fixture()
+                defer { fixture.remove() }
+                let backup = try observedURL(
+                    for: fixture.service.createRollingBackup(
+                        reason: "cid868-state-\(ordinal)-\(position)",
+                        database: fixture.database
+                    ),
+                    service: fixture.service,
+                    databaseURL: fixture.databaseURL
+                )
+                let sourceBefore = try fingerprintTree(backup)
+                try fixture.database.runSQL("""
+                    INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+                    VALUES ('cid868-interrupted-live', 'Interrupted', '#334455', 'custom', 1, 1);
+                    """)
+                try fixture.database.checkpointWal()
+                fixture.database.close()
+                let original = try sqliteSetFingerprint(fixture.databaseURL)
+
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+                process.arguments = [
+                    "cid868-restore-state-crash",
+                    backup.path,
+                    fixture.databaseURL.path,
+                    String(ordinal),
+                    position,
+                ]
+                let output = Pipe()
+                process.standardOutput = output
+                process.standardError = output
+                try process.run()
+                process.waitUntilExit()
+                #expect(process.terminationStatus == (position == "before" ? 91 : 92))
+
+                if ordinal == 2, position == "before" {
+                    let afterCrash = try fingerprintTree(fixture.root)
+                    for _ in 0..<2 {
+                        #expect(throws: DatabaseSafetyService.RestoreError.self) {
+                            _ = try fixture.service.reconcileInterruptedRestore(
+                                at: fixture.databaseURL
+                            )
+                        }
+                        #expect(try fingerprintTree(fixture.root) == afterCrash)
+                    }
+                } else {
+                    let first: DatabaseSafetyService.RestoreReconciliationResult
+                    do {
+                        first = try fixture.service.reconcileInterruptedRestore(
+                            at: fixture.databaseURL
+                        )
+                    } catch {
+                        throw NSError(
+                            domain: "CID868StateInterruption-\(ordinal)-\(position)",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: error.localizedDescription]
+                        )
+                    }
+                    let second = try fixture.service.reconcileInterruptedRestore(
+                        at: fixture.databaseURL
+                    )
+                    #expect(second.state == .none)
+                    if ordinal == 7 && position == "after" {
+                        #expect(first.state == .completedCommit)
+                        #expect(try scalarInt(
+                            databaseURL: fixture.databaseURL,
+                            sql: "SELECT count(*) FROM labels WHERE id = 'cid868-interrupted-live';"
+                        ) == 0)
+                    } else if ordinal == 1, position == "before" {
+                        #expect(first.state == .none)
+                        #expect(try sqliteSetFingerprint(fixture.databaseURL) == original)
+                    } else {
+                        #expect(first.state == .rolledBack)
+                        #expect(try sqliteSetFingerprint(fixture.databaseURL) == original)
+                    }
+                }
+                #expect(try fingerprintTree(backup) == sourceBefore)
+            }
+        }
+    }
+
+    @Test("absent-destination canonical boundaries reconcile the staged publication transition")
+    func absentDestinationRestoreStateInterruptionMatrixConverges() throws {
+        for ordinal in 1...6 {
+            for position in ["before", "after"] {
+                let fixture = try Fixture()
+                defer { fixture.remove() }
+                let backup = try observedURL(
+                    for: fixture.service.createRollingBackup(
+                        reason: "cid868-absent-state-\(ordinal)-\(position)",
+                        database: fixture.database
+                    ),
+                    service: fixture.service,
+                    databaseURL: fixture.databaseURL
+                )
+                let sourceBefore = try fingerprintTree(backup)
+                fixture.database.close()
+                for suffix in ["", "-wal", "-shm"] {
+                    let member = URL(fileURLWithPath: fixture.databaseURL.path + suffix)
+                    if FileManager.default.fileExists(atPath: member.path) {
+                        try FileManager.default.removeItem(at: member)
+                    }
+                }
+
+                let process = Process()
+                process.executableURL = URL(
+                    fileURLWithPath: FileManager.default.currentDirectoryPath
+                ).appendingPathComponent(".build/debug/CID850BoundaryHarness")
+                process.arguments = [
+                    "cid868-restore-state-crash",
+                    backup.path,
+                    fixture.databaseURL.path,
+                    String(ordinal),
+                    position,
+                ]
+                let output = Pipe()
+                process.standardOutput = output
+                process.standardError = output
+                try process.run()
+                process.waitUntilExit()
+                #expect(process.terminationStatus == (position == "before" ? 91 : 92))
+
+                let first = try fixture.service.reconcileInterruptedRestore(
+                    at: fixture.databaseURL
+                )
+                let second = try fixture.service.reconcileInterruptedRestore(
+                    at: fixture.databaseURL
+                )
+                #expect(second.state == .none)
+                if ordinal == 6, position == "after" {
+                    #expect(first.state == .completedCommit)
+                    #expect(FileManager.default.fileExists(atPath: fixture.databaseURL.path))
+                } else {
+                    #expect(first.state == (ordinal == 1 && position == "before" ? .none : .rolledBack))
+                    #expect(try sqliteSetFingerprint(fixture.databaseURL) == [
+                        "db": "absent",
+                        "wal": "absent",
+                        "shm": "absent",
+                    ])
+                }
+                #expect(try fingerprintTree(backup) == sourceBefore)
+            }
+        }
+    }
+
+    @Test("ordinary database startup reconciles every relevant restore phase before SQLite opens")
+    func ordinaryStartupReconcilesPublishedRestoreBeforeSQLiteMutation() throws {
+        for ordinal in [1, 2, 4, 6, 7] {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            let backup = try observedURL(
+                for: fixture.service.createRollingBackup(
+                    reason: "cid868-startup-reconciliation-\(ordinal)",
+                    database: fixture.database
+                ),
+                service: fixture.service,
+                databaseURL: fixture.databaseURL
+            )
+            try fixture.database.runSQL("""
+                INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+                VALUES ('cid868-startup-original', 'Original', '#123456', 'custom', 1, 1);
+                """)
+            try fixture.database.checkpointWal()
+            fixture.database.close()
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+            process.arguments = [
+                "cid868-restore-state-crash",
+                backup.path,
+                fixture.databaseURL.path,
+                String(ordinal),
+                "after",
+            ]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 92)
+
+            for _ in 0..<2 {
+                let startup = CiderDatabase()
+                try startup.open(at: fixture.databaseURL)
+                startup.close()
+                let originalMarkerCount = try scalarInt(
+                    databaseURL: fixture.databaseURL,
+                    sql: "SELECT count(*) FROM labels WHERE id = 'cid868-startup-original';"
+                )
+                #expect(originalMarkerCount == (ordinal == 7 ? 0 : 1))
+            }
+            #expect(
+                try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL).state
+                    == .none
+            )
+        }
+    }
+
+    @Test("canonical role-swapped restore records fail closed without namespace mutation")
+    func canonicalRoleSwappedRestoreStateFailsClosed() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-role-swapped-state",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        fixture.database.close()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+        process.arguments = [
+            "cid868-restore-state-crash",
+            backup.path,
+            fixture.databaseURL.path,
+            "2",
+            "after",
+        ]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let diagnostic = String(
+            decoding: output.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        #expect(process.terminationStatus == 92, "\(diagnostic)")
+
+        try rewriteCID868CanonicalState(in: fixture.root) { state in
+            var initial = try #require(state["initial"] as? [String: Any])
+            var original = try #require(initial["database"] as? [String: Any])
+            var staged = try #require(state["staged"] as? [String: Any])
+            original["liveName"] = ".cid868-restore-staged.sqlite"
+            staged["liveName"] = fixture.databaseURL.lastPathComponent
+            initial["database"] = original
+            state["initial"] = initial
+            state["staged"] = staged
+        }
+        let before = try fingerprintTree(fixture.root)
+
+        for _ in 0..<2 {
+            #expect(throws: DatabaseSafetyService.RestoreError.self) {
+                _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+            }
+            #expect(try fingerprintTree(fixture.root) == before)
+        }
+    }
+
+    @Test("malformed and stale canonical restore records preserve every occupant")
+    func malformedAndStaleCanonicalRestoreStatesFailClosed() throws {
+        for boundary in [
+            "duplicate-identity",
+            "invalid-sidecar-combination",
+            "invalid-phase-relationship",
+            "stale-predecessor",
+        ] {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            let backup = try observedURL(
+                for: fixture.service.createRollingBackup(
+                    reason: "cid868-schema-\(boundary)",
+                    database: fixture.database
+                ),
+                service: fixture.service,
+                databaseURL: fixture.databaseURL
+            )
+            fixture.database.close()
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+            process.arguments = [
+                "cid868-restore-state-crash",
+                backup.path,
+                fixture.databaseURL.path,
+                "2",
+                "after",
+            ]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 92)
+
+            try rewriteCID868CanonicalState(in: fixture.root) { state in
+                var initial = try #require(state["initial"] as? [String: Any])
+                let original = try #require(initial["database"] as? [String: Any])
+                var staged = try #require(state["staged"] as? [String: Any])
+                switch boundary {
+                case "duplicate-identity":
+                    staged["identity"] = original["identity"]
+                    state["staged"] = staged
+                case "invalid-sidecar-combination":
+                    var shm = original
+                    var identity = try #require(shm["identity"] as? [String: Any])
+                    let inode = try #require(identity["inode"] as? NSNumber)
+                    identity["inode"] = inode.uint64Value + 100_000
+                    shm["liveName"] = fixture.databaseURL.lastPathComponent + "-shm"
+                    shm["slotName"] = ".cid868-restore-original-shm"
+                    shm["identity"] = identity
+                    initial["shm"] = shm
+                    state["initial"] = initial
+                case "invalid-phase-relationship":
+                    state["phase"] = "planned"
+                case "stale-predecessor":
+                    state["phase"] = "published"
+                default:
+                    Issue.record("Unknown malformed-state boundary \(boundary)")
+                }
+            }
+            let before = try fingerprintTree(fixture.root)
+            for _ in 0..<2 {
+                #expect(throws: DatabaseSafetyService.RestoreError.self) {
+                    _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+                }
+                #expect(try fingerprintTree(fixture.root) == before)
+            }
+        }
+    }
+
+    @Test("canonical source and staged evidence contradictions fail closed in every cleanup retry")
+    func canonicalSourceStageContradictionsPreserveCommittedEvidence() throws {
+        for contradiction in [
+            "source-digest",
+            "source-size",
+            "source-database-identity",
+            "source-package-identity",
+        ] {
+            let fixture = try Fixture()
+            defer { fixture.remove() }
+            let backup = try observedURL(
+                for: fixture.service.createRollingBackup(
+                    reason: "cid868-cross-binding-\(contradiction)",
+                    database: fixture.database
+                ),
+                service: fixture.service,
+                databaseURL: fixture.databaseURL
+            )
+            try fixture.database.runSQL("""
+                INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+                VALUES ('cid868-cross-binding-original', 'Original', '#765432', 'custom', 1, 1);
+                """)
+            try fixture.database.checkpointWal()
+            fixture.database.close()
+
+            let process = Process()
+            process.executableURL = URL(
+                fileURLWithPath: FileManager.default.currentDirectoryPath
+            ).appendingPathComponent(".build/debug/CID850BoundaryHarness")
+            process.arguments = [
+                "cid868-restore-state-crash",
+                backup.path,
+                fixture.databaseURL.path,
+                "7",
+                "after",
+            ]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 92)
+
+            try rewriteCID868CanonicalState(in: fixture.root) { state in
+                var source = try #require(state["source"] as? [String: Any])
+                let initial = try #require(state["initial"] as? [String: Any])
+                let original = try #require(initial["database"] as? [String: Any])
+                switch contradiction {
+                case "source-digest":
+                    let digest = try #require(source["databaseSHA256"] as? String)
+                    source["databaseSHA256"] = digest.first == "0"
+                        ? String(repeating: "1", count: 64)
+                        : String(repeating: "0", count: 64)
+                case "source-size":
+                    var identity = try #require(source["databaseIdentity"] as? [String: Any])
+                    let size = try #require(identity["byteSize"] as? NSNumber)
+                    identity["byteSize"] = size.int64Value + 1
+                    source["databaseIdentity"] = identity
+                case "source-database-identity":
+                    source["databaseIdentity"] = original["identity"]
+                case "source-package-identity":
+                    source["packageIdentity"] = state["authority"]
+                default:
+                    Issue.record("Unknown cross-binding contradiction \(contradiction)")
+                }
+                state["source"] = source
+            }
+            let originalEvidence = fixture.root.appendingPathComponent(
+                ".cid868-restore-staged.sqlite"
+            )
+            #expect(FileManager.default.fileExists(atPath: originalEvidence.path))
+            let before = try fingerprintTree(fixture.root)
+            for _ in 0..<2 {
+                do {
+                    _ = try fixture.service.reconcileInterruptedRestore(at: fixture.databaseURL)
+                    Issue.record("Expected canonical cross-binding contradiction to fail closed")
+                } catch {
+                    #expect(
+                        (error as? DatabaseSafetyService.RestoreError)?.requiresRecovery == true
+                    )
+                }
+                #expect(try fingerprintTree(fixture.root) == before)
+                #expect(FileManager.default.fileExists(atPath: originalEvidence.path))
+            }
+        }
+    }
+
+    @Test("final source stability remains a commit gate after production reopen")
+    func finalSourceMutationAfterReopenRestoresExactOriginal() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-final-source-gate",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('cid868-truthful-original', 'Original', '#654321', 'custom', 1, 1);
+            """)
+        try fixture.database.checkpointWal()
+        fixture.database.close()
+
+        let result = try runCID868TruthfulRestoreHarness(
+            "final-source",
+            backupURL: backup,
+            databaseURL: fixture.databaseURL
+        )
+        #expect(result.didAttack)
+        #expect(!result.restoreSucceeded)
+        #expect(result.recoveredFailure)
+        #expect(result.originalRestored)
+        #expect(!result.replacementCommitted)
+        #expect(!result.databaseOpenAfterCall)
+        #expect(!result.transactionRecordRetained)
+        #expect(result.evidenceNames.isEmpty)
+        #expect(result.failureMessage.localizedCaseInsensitiveContains("original"))
+    }
+
+    @Test("a one-time cleanup failure after commit reports committed success truthfully")
+    func cleanupFailureAfterCommitReportsCommittedOutcome() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-committed-cleanup",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('cid868-truthful-original', 'Original', '#654321', 'custom', 1, 1);
+            """)
+        try fixture.database.checkpointWal()
+        fixture.database.close()
+
+        let result = try runCID868TruthfulRestoreHarness(
+            "committed-cleanup",
+            backupURL: backup,
+            databaseURL: fixture.databaseURL
+        )
+        #expect(result.didAttack)
+        #expect(result.restoreSucceeded)
+        #expect(!result.typedRecoveryRequired)
+        #expect(!result.recoveredFailure)
+        #expect(!result.originalRestored)
+        #expect(result.replacementCommitted)
+        #expect(result.databaseOpenAfterCall)
+        #expect(!result.transactionRecordRetained)
+        #expect(result.evidenceNames.isEmpty)
+        #expect(result.failureMessage.isEmpty)
+    }
+
+    @Test("committed cleanup tolerates recorded WAL and SHM removal after the connection closes")
+    func committedCleanupAfterReopenedSidecarsDisappearConvergesOnStartup() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-committed-sidecars-disappear",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('cid868-truthful-original', 'Original', '#654321', 'custom', 1, 1);
+            """)
+        try fixture.database.checkpointWal()
+        fixture.database.close()
+
+        let result = try runCID868CommittedCleanupRestartHarness(
+            backupURL: backup,
+            databaseURL: fixture.databaseURL
+        )
+        #expect(result.didAttack)
+        #expect(result.initialFailureWasCommittedCleanup)
+        #expect(result.databaseOpenAfterFailure)
+        #expect(result.recordedWALBeforeClose)
+        #expect(result.recordedSHMBeforeClose)
+        #expect(result.walAbsentAfterClose)
+        #expect(result.shmAbsentAfterClose)
+        #expect(result.ordinaryStartupSucceeded)
+        #expect(result.replacementRemainedCommitted)
+        #expect(result.repeatedReconciliationWasNone)
+        #expect(result.transactionRecordRemoved)
+        #expect(result.retainedEvidenceRemoved)
+        #expect(!result.failureMessage.localizedCaseInsensitiveContains("rollback"))
+        #expect(!result.failureMessage.localizedCaseInsensitiveContains("rolled back"))
+    }
+
+    @Test("parent replacement around SQLite open cannot produce false restore success")
+    func parentReplacementAroundSQLiteOpenProvesActualHandleLineage() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-opened-lineage",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('cid868-lineage-original', 'Original', '#abcdef', 'custom', 1, 1);
+            """)
+        try fixture.database.checkpointWal()
+        fixture.database.close()
+
+        let result = try runCID868OpenedLineageHarness(
+            backupURL: backup,
+            databaseURL: fixture.databaseURL
+        )
+        #expect(result.didAttack)
+        #expect(!result.restoreSucceeded)
+        #expect(!result.actualHandleReadDecoy)
+        #expect(result.originalRestored || result.typedRecoveryRequired)
+        #expect(!result.failureMessage.isEmpty)
+    }
+
+    @Test(
+        "post-publication physical validation failures retain exact recovery evidence",
+        arguments: ["reopen", "integrity"]
+    )
+    func postPublicationValidationFailureCompensatesExactly(_ boundary: String) throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let backup = try observedURL(
+            for: fixture.service.createRollingBackup(
+                reason: "cid868-validation-\(boundary)",
+                database: fixture.database
+            ),
+            service: fixture.service,
+            databaseURL: fixture.databaseURL
+        )
+        try fixture.database.runSQL("""
+            INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+            VALUES ('cid868-validation-live', 'Live', '#556677', 'custom', 1, 1);
+            """)
+        try fixture.database.checkpointWal()
+        fixture.database.close()
+
+        let result = try runCID868RestoreValidationFailureHarness(
+            boundary,
+            backupURL: backup,
+            databaseURL: fixture.databaseURL
+        )
+        #expect(result.didAttack)
+        #expect(result.restoreFailed)
+        #expect(result.typedRecoveryRequired)
+        #expect(result.exactOriginalRetained)
+        #expect(result.fixedEvidenceRetained)
+        #expect(result.repeatedReconciliationRequiresRecovery)
+        #expect(result.evidenceStableAcrossReconciliation)
+        #expect(result.sourceUnchanged)
+        #expect(!result.failureMessage.isEmpty)
+    }
+
     @Test("an SHM appearing immediately after the database swap is preserved and rolls back restore")
     func shmAppearanceAtActualSwapSeamRollsBackWithoutDeletion() throws {
         let result = try runCID850RestoreSidecarHarness("restore-sidecar-after-shm")
@@ -1642,6 +2345,22 @@ struct DatabaseBackupSafetyTests {
         #expect(result.databaseRolledBack)
         #expect(result.unexpectedOccupantPreserved)
         #expect(result.quarantinedOriginalPreserved)
+        #expect(!result.reopened)
+    }
+
+    @Test("an SHM at the publication seam preserves a DB-only original set and recovery evidence")
+    func shmAppearanceAfterSwapSeamWithDBOnlyOriginalFailsClosed() throws {
+        let result = try runCID850RestoreSidecarHarness(
+            "restore-sidecar-after-shm-db-only"
+        )
+
+        #expect(result.didAttack)
+        #expect(result.initialSidecarsAbsent)
+        #expect(result.restoreFailed)
+        #expect(result.databaseRolledBack)
+        #expect(result.unexpectedOccupantPreserved)
+        #expect(result.replacementEvidencePreserved)
+        #expect(result.transactionRecordRetained)
         #expect(!result.reopened)
     }
 
@@ -2953,6 +3672,9 @@ private struct CID850RestoreSidecarResult: Decodable {
     let unexpectedOccupantPreserved: Bool
     let quarantinedOriginalPreserved: Bool
     let reopened: Bool
+    let initialSidecarsAbsent: Bool
+    let replacementEvidencePreserved: Bool
+    let transactionRecordRetained: Bool
 }
 
 private struct CID850RestoreFsyncResult: Decodable {
@@ -2975,6 +3697,56 @@ private struct CID850CrashPublicationAttempt {
 private struct CID850ReceiptSpecialResult: Decodable {
     let completedWithoutWriter: Bool
     let rejected: Bool
+}
+
+private struct CID868RestoreValidationFailureResult: Decodable {
+    let didAttack: Bool
+    let restoreFailed: Bool
+    let typedRecoveryRequired: Bool
+    let exactOriginalRetained: Bool
+    let fixedEvidenceRetained: Bool
+    let repeatedReconciliationRequiresRecovery: Bool
+    let evidenceStableAcrossReconciliation: Bool
+    let sourceUnchanged: Bool
+    let failureMessage: String
+}
+
+private struct CID868TruthfulRestoreResult: Decodable {
+    let didAttack: Bool
+    let restoreSucceeded: Bool
+    let typedRecoveryRequired: Bool
+    let recoveredFailure: Bool
+    let originalRestored: Bool
+    let replacementCommitted: Bool
+    let databaseOpenAfterCall: Bool
+    let transactionRecordRetained: Bool
+    let evidenceNames: [String]
+    let failureMessage: String
+}
+
+private struct CID868OpenedLineageResult: Decodable {
+    let didAttack: Bool
+    let restoreSucceeded: Bool
+    let typedRecoveryRequired: Bool
+    let actualHandleReadDecoy: Bool
+    let originalRestored: Bool
+    let failureMessage: String
+}
+
+private struct CID868CommittedCleanupRestartResult: Decodable {
+    let didAttack: Bool
+    let initialFailureWasCommittedCleanup: Bool
+    let databaseOpenAfterFailure: Bool
+    let recordedWALBeforeClose: Bool
+    let recordedSHMBeforeClose: Bool
+    let walAbsentAfterClose: Bool
+    let shmAbsentAfterClose: Bool
+    let ordinaryStartupSucceeded: Bool
+    let replacementRemainedCommitted: Bool
+    let repeatedReconciliationWasNone: Bool
+    let transactionRecordRemoved: Bool
+    let retainedEvidenceRemoved: Bool
+    let failureMessage: String
 }
 
 private struct CID850SharedCreatorExecution {
@@ -3049,6 +3821,117 @@ private func runCID850RestoreFsyncHarness(_ boundary: String) throws -> CID850Re
 
 private func runCID850ReceiptSpecialHarness(_ boundary: String) throws -> CID850ReceiptSpecialResult {
     try runCID850Harness(boundary, as: CID850ReceiptSpecialResult.self)
+}
+
+private func runCID868RestoreValidationFailureHarness(
+    _ boundary: String,
+    backupURL: URL,
+    databaseURL: URL
+) throws -> CID868RestoreValidationFailureResult {
+    let executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = [
+        "cid868-restore-validation-failure",
+        boundary,
+        backupURL.path,
+        databaseURL.path,
+    ]
+    let output = Pipe()
+    let error = Pipe()
+    process.standardOutput = output
+    process.standardError = error
+    try process.run()
+    process.waitUntilExit()
+    let outputData = output.fileHandleForReading.readDataToEndOfFile()
+    let errorData = error.fileHandleForReading.readDataToEndOfFile()
+    guard process.terminationStatus == 0 else {
+        throw NSError(
+            domain: "CID868RestoreValidationFailureHarness",
+            code: Int(process.terminationStatus),
+            userInfo: [
+                NSLocalizedDescriptionKey: String(decoding: errorData + outputData, as: UTF8.self),
+            ]
+        )
+    }
+    return try JSONDecoder().decode(
+        CID868RestoreValidationFailureResult.self,
+        from: outputData
+    )
+}
+
+private func runCID868TruthfulRestoreHarness(
+    _ boundary: String,
+    backupURL: URL,
+    databaseURL: URL
+) throws -> CID868TruthfulRestoreResult {
+    try runCID868Harness(
+        arguments: [
+            "cid868-truthful-restore",
+            boundary,
+            backupURL.path,
+            databaseURL.path,
+        ],
+        as: CID868TruthfulRestoreResult.self
+    )
+}
+
+private func runCID868OpenedLineageHarness(
+    backupURL: URL,
+    databaseURL: URL
+) throws -> CID868OpenedLineageResult {
+    try runCID868Harness(
+        arguments: [
+            "cid868-opened-lineage",
+            backupURL.path,
+            databaseURL.path,
+        ],
+        as: CID868OpenedLineageResult.self
+    )
+}
+
+private func runCID868CommittedCleanupRestartHarness(
+    backupURL: URL,
+    databaseURL: URL
+) throws -> CID868CommittedCleanupRestartResult {
+    try runCID868Harness(
+        arguments: [
+            "cid868-committed-cleanup-restart",
+            backupURL.path,
+            databaseURL.path,
+        ],
+        as: CID868CommittedCleanupRestartResult.self
+    )
+}
+
+private func runCID868Harness<Result: Decodable>(
+    arguments: [String],
+    as type: Result.Type
+) throws -> Result {
+    let executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build/debug/CID850BoundaryHarness")
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = arguments
+    let output = Pipe()
+    let error = Pipe()
+    process.standardOutput = output
+    process.standardError = error
+    try process.run()
+    process.waitUntilExit()
+    let outputData = output.fileHandleForReading.readDataToEndOfFile()
+    let errorData = error.fileHandleForReading.readDataToEndOfFile()
+    guard process.terminationStatus == 0 else {
+        throw NSError(
+            domain: "CID868BoundaryHarness",
+            code: Int(process.terminationStatus),
+            userInfo: [
+                NSLocalizedDescriptionKey: String(decoding: errorData + outputData, as: UTF8.self),
+            ]
+        )
+    }
+    return try JSONDecoder().decode(type, from: outputData)
 }
 
 private func runCID850Harness<Result: Decodable>(
@@ -3340,6 +4223,34 @@ private func sqliteSetFingerprint(_ databaseURL: URL) throws -> [String: String]
         }
     }
     return result
+}
+
+private func rewriteCID868CanonicalState(
+    in parent: URL,
+    mutation: (inout [String: Any]) throws -> Void
+) throws {
+    let descriptor = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard descriptor >= 0 else { throw CocoaError(.fileReadNoPermission) }
+    defer { Darwin.close(descriptor) }
+    let attribute = "com.cider.cid868.restore-transaction-v1"
+    let size = fgetxattr(descriptor, attribute, nil, 0, 0, 0)
+    guard size > 0 else { throw CocoaError(.fileReadCorruptFile) }
+    var bytes = Data(count: size)
+    let read = bytes.withUnsafeMutableBytes { buffer in
+        fgetxattr(descriptor, attribute, buffer.baseAddress, buffer.count, 0, 0)
+    }
+    guard read == size,
+          var state = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
+        throw CocoaError(.fileReadCorruptFile)
+    }
+    try mutation(&state)
+    let rewritten = try JSONSerialization.data(withJSONObject: state, options: [.sortedKeys])
+    let result = rewritten.withUnsafeBytes { buffer in
+        fsetxattr(descriptor, attribute, buffer.baseAddress, buffer.count, 0, XATTR_REPLACE)
+    }
+    guard result == 0, fsync(descriptor) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
 }
 
 private func sqliteSetByteUpperBound(_ databaseURL: URL) throws -> Int64 {
