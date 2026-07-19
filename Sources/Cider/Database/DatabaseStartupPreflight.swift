@@ -23,10 +23,21 @@ fileprivate struct DatabaseSourceContinuityToken: Equatable {
 }
 
 final class DatabaseStartupLock {
-    private let descriptor: Int32
+    private var descriptor: Int32
+    private let parentDevice: dev_t
+    private let parentInode: ino_t
+    private let parentGeneration: UInt32
 
-    private init(descriptor: Int32) {
+    private init(
+        descriptor: Int32,
+        parentDevice: dev_t,
+        parentInode: ino_t,
+        parentGeneration: UInt32
+    ) {
         self.descriptor = descriptor
+        self.parentDevice = parentDevice
+        self.parentInode = parentInode
+        self.parentGeneration = parentGeneration
     }
 
     static func acquire(for databaseURL: URL, timeout: TimeInterval = 5) throws -> DatabaseStartupLock {
@@ -53,12 +64,73 @@ final class DatabaseStartupLock {
             }
             Thread.sleep(forTimeInterval: 0.05)
         }
-        return DatabaseStartupLock(descriptor: descriptor)
+        var value = stat()
+        guard fstat(descriptor, &value) == 0,
+              value.st_mode & S_IFMT == S_IFDIR else {
+            flock(descriptor, LOCK_UN)
+            Darwin.close(descriptor)
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .unreadable,
+                detail: "The database parent authority changed while its startup lock was acquired."
+            )
+        }
+        return DatabaseStartupLock(
+            descriptor: descriptor,
+            parentDevice: value.st_dev,
+            parentInode: value.st_ino,
+            parentGeneration: value.st_gen
+        )
     }
 
     func release() {
+        guard descriptor >= 0 else { return }
         flock(descriptor, LOCK_UN)
         Darwin.close(descriptor)
+        descriptor = -1
+    }
+
+    func validate(for databaseURL: URL) throws {
+        guard descriptor >= 0 else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .concurrentStartup,
+                detail: "The held database namespace authority was already released."
+            )
+        }
+        var held = stat()
+        var reachable = stat()
+        let parentPath = databaseURL.deletingLastPathComponent().path
+        guard fstat(descriptor, &held) == 0,
+              lstat(parentPath, &reachable) == 0,
+              held.st_mode & S_IFMT == S_IFDIR,
+              reachable.st_mode & S_IFMT == S_IFDIR,
+              held.st_dev == parentDevice,
+              held.st_ino == parentInode,
+              held.st_gen == parentGeneration,
+              reachable.st_dev == parentDevice,
+              reachable.st_ino == parentInode,
+              reachable.st_gen == parentGeneration else {
+            throw CiderDatabaseError.startupPreflightFailed(
+                kind: .changedDuringRead,
+                detail: "The held database namespace authority no longer matches the reachable parent directory."
+            )
+        }
+    }
+
+    func coversDirectory(device: dev_t, inode: ino_t, generation: UInt32) -> Bool {
+        guard descriptor >= 0 else { return false }
+        var held = stat()
+        return fstat(descriptor, &held) == 0
+            && held.st_mode & S_IFMT == S_IFDIR
+            && held.st_dev == parentDevice
+            && held.st_ino == parentInode
+            && held.st_gen == parentGeneration
+            && device == parentDevice
+            && inode == parentInode
+            && generation == parentGeneration
+    }
+
+    deinit {
+        release()
     }
 }
 
@@ -447,6 +519,61 @@ enum DatabaseStartupPreflight {
             .appendingPathComponent("sqlite", isDirectory: true)
             .appendingPathComponent("migration-safety", isDirectory: true)
             .appendingPathComponent(sourceDatabaseURL.lastPathComponent, isDirectory: true)
+    }
+
+    /// Proves the default VFS main file still occupies the pathname SQLite
+    /// opened. SQLITE_FCNTL_HAS_MOVED is evaluated by the actual main
+    /// sqlite3_file, so a parent swap-and-restore cannot be hidden by a later
+    /// pathname check that happens to see the original directory again.
+    static func validateOpenedMainFileLineage(
+        _ handle: OpaquePointer,
+        databaseURL: URL,
+        expected: DatabaseSourceLineage
+    ) throws {
+        guard let filename = sqlite3_db_filename(handle, "main") else {
+            throw CiderDatabaseError.open(
+                "SQLite did not expose the opened main database pathname for lineage proof."
+            )
+        }
+        let openedPath = URL(fileURLWithPath: String(cString: filename))
+            .standardizedFileURL.path
+        guard openedPath == databaseURL.standardizedFileURL.path else {
+            throw CiderDatabaseError.open(
+                "SQLite opened a main database pathname outside the recorded live database."
+            )
+        }
+
+        var hasMoved: Int32 = 1
+        let controlResult = sqlite3_file_control(
+            handle,
+            "main",
+            SQLITE_FCNTL_HAS_MOVED,
+            &hasMoved
+        )
+        guard controlResult == SQLITE_OK, hasMoved == 0 else {
+            throw CiderDatabaseError.open(
+                "SQLite could not prove that its actual main file remains the recorded live database."
+            )
+        }
+
+        var source = stat()
+        var parent = stat()
+        guard lstat(databaseURL.path, &source) == 0,
+              lstat(databaseURL.deletingLastPathComponent().path, &parent) == 0,
+              source.st_mode & S_IFMT == S_IFREG,
+              parent.st_mode & S_IFMT == S_IFDIR,
+              source.st_dev == expected.source.device,
+              source.st_ino == expected.source.inode,
+              source.st_uid == expected.source.owner,
+              source.st_mode & mode_t(0o7777) == expected.source.mode,
+              parent.st_dev == expected.parent.device,
+              parent.st_ino == expected.parent.inode,
+              parent.st_uid == expected.parent.owner,
+              parent.st_mode & mode_t(0o7777) == expected.parent.mode else {
+            throw CiderDatabaseError.open(
+                "The opened SQLite main file does not match the pinned source and parent identities."
+            )
+        }
     }
 
     static func validatePostOpenDatabase(_ handle: OpaquePointer) throws {

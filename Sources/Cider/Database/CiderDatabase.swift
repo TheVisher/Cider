@@ -276,7 +276,7 @@ final class CiderDatabase {
     /// Creates the file if it does not exist. Existing sources are validated
     /// without mutation before open; older healthy sources receive a mandatory
     /// verified SQLite safety artifact before migrations can write.
-    func open(at url: URL) throws {
+    func open(at url: URL, namespaceAuthority: DatabaseStartupLock? = nil) throws {
         let path = url.path
         // Refuse double-open — a second call would leak the prior handle and
         // potentially point at a different file. Callers must close() first if
@@ -287,8 +287,19 @@ final class CiderDatabase {
         lastMigrationSafetyArtifactURL = nil
         logger.info("Opening database at \(path)")
 
-        let startupLock = try DatabaseStartupLock.acquire(for: url)
-        defer { startupLock.release() }
+        let startupLock = try namespaceAuthority ?? DatabaseStartupLock.acquire(for: url)
+        let ownsStartupLock = namespaceAuthority == nil
+        defer {
+            if ownsStartupLock { startupLock.release() }
+        }
+        try startupLock.validate(for: url)
+        if ownsStartupLock {
+            _ = try DatabaseSafetyService().reconcileInterruptedRestore(
+                at: url,
+                namespaceAuthority: startupLock
+            )
+            try startupLock.validate(for: url)
+        }
 
         // Freshness is authoritative only after Cider startup serialization,
         // and remains provisional until the SQLite VFS atomically reserves the
@@ -370,6 +381,15 @@ final class CiderDatabase {
             guard let handle else {
                 throw CiderDatabaseError.open("SQLite returned no database handle")
             }
+            guard let sourceLineageObservation else {
+                throw CiderDatabaseError.open("The open database has no pinned source lineage.")
+            }
+            let openedLineage = try sourceLineageObservation.validate()
+            try DatabaseStartupPreflight.validateOpenedMainFileLineage(
+                handle,
+                databaseURL: url,
+                expected: openedLineage
+            )
             sqlite3_busy_timeout(handle, 5000)
             // Enable foreign key enforcement
             try runSQL("PRAGMA foreign_keys=ON;", on: handle)
@@ -407,10 +427,7 @@ final class CiderDatabase {
             // validation confirms the migrated/current database is usable.
             try DatabaseStartupPreflight.validatePostOpenDatabase(handle)
 
-            let sourceLineage = try sourceLineageObservation?.validate()
-            guard let sourceLineage else {
-                throw CiderDatabaseError.open("The open database has no verified source lineage.")
-            }
+            let sourceLineage = try sourceLineageObservation.validate()
             db = handle
             databaseURL = url
             backupSourceLineage = sourceLineage

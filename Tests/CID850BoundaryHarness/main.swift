@@ -26,6 +26,56 @@ private struct BoundaryResult: Encodable {
     let destinationExists: Bool
 }
 
+private struct CID868RestoreValidationFailureResult: Encodable {
+    let didAttack: Bool
+    let restoreFailed: Bool
+    let typedRecoveryRequired: Bool
+    let exactOriginalRetained: Bool
+    let fixedEvidenceRetained: Bool
+    let repeatedReconciliationRequiresRecovery: Bool
+    let evidenceStableAcrossReconciliation: Bool
+    let sourceUnchanged: Bool
+    let failureMessage: String
+}
+
+private struct CID868TruthfulRestoreResult: Encodable {
+    let didAttack: Bool
+    let restoreSucceeded: Bool
+    let typedRecoveryRequired: Bool
+    let recoveredFailure: Bool
+    let originalRestored: Bool
+    let replacementCommitted: Bool
+    let databaseOpenAfterCall: Bool
+    let transactionRecordRetained: Bool
+    let evidenceNames: [String]
+    let failureMessage: String
+}
+
+private struct CID868OpenedLineageResult: Encodable {
+    let didAttack: Bool
+    let restoreSucceeded: Bool
+    let typedRecoveryRequired: Bool
+    let actualHandleReadDecoy: Bool
+    let originalRestored: Bool
+    let failureMessage: String
+}
+
+private struct CID868CommittedCleanupRestartResult: Encodable {
+    let didAttack: Bool
+    let initialFailureWasCommittedCleanup: Bool
+    let databaseOpenAfterFailure: Bool
+    let recordedWALBeforeClose: Bool
+    let recordedSHMBeforeClose: Bool
+    let walAbsentAfterClose: Bool
+    let shmAbsentAfterClose: Bool
+    let ordinaryStartupSucceeded: Bool
+    let replacementRemainedCommitted: Bool
+    let repeatedReconciliationWasNone: Bool
+    let transactionRecordRemoved: Bool
+    let retainedEvidenceRemoved: Bool
+    let failureMessage: String
+}
+
 @MainActor
 private func runBoundary(_ boundary: String) throws -> BoundaryResult {
     let root = FileManager.default.temporaryDirectory
@@ -198,6 +248,9 @@ private struct RestoreSidecarResult: Encodable {
     let unexpectedOccupantPreserved: Bool
     let quarantinedOriginalPreserved: Bool
     let reopened: Bool
+    let initialSidecarsAbsent: Bool
+    let replacementEvidencePreserved: Bool
+    let transactionRecordRetained: Bool
 }
 
 private struct RestoreFsyncResult: Encodable {
@@ -239,28 +292,41 @@ private func runRestoreSidecarBoundary(_ boundary: String) throws -> RestoreSide
         VALUES ('live-after-backup', 'Live', '#775533', 'custom', 1, 1);
         """)
 
+    let dbOnly = boundary.hasSuffix("-db-only")
     var writer: OpaquePointer?
-    guard sqlite3_open_v2(
-        databaseURL.path,
-        &writer,
-        SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
-        nil
-    ) == SQLITE_OK, let writer else {
-        sqlite3_close_v2(writer)
-        throw CocoaError(.fileReadCorruptFile)
+    if dbOnly {
+        try database.checkpointWal()
+        database.close()
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: databaseURL.path + suffix)
+            if FileManager.default.fileExists(atPath: sidecar.path) {
+                try FileManager.default.removeItem(at: sidecar)
+            }
+        }
+    } else {
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &writer,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK, let writer else {
+            sqlite3_close_v2(writer)
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        try execute(writer, "PRAGMA journal_mode=WAL;")
+        try execute(writer, "BEGIN IMMEDIATE;")
+        try execute(writer, "COMMIT;")
     }
     defer { sqlite3_close_v2(writer) }
-    try execute(writer, "PRAGMA journal_mode=WAL;")
-    try execute(writer, "BEGIN IMMEDIATE;")
-    try execute(writer, "COMMIT;")
     let before = try sqliteSetFingerprint(databaseURL)
+    let initialSidecarsAbsent = before["wal"] == "absent" && before["shm"] == "absent"
     let attackedSuffix: String
     cid850_interpose_reset()
     switch boundary {
-    case "restore-sidecar-before-wal":
+    case "restore-sidecar-before-wal", "restore-sidecar-before-wal-db-only":
         attackedSuffix = "-wal"
         cid850_interpose_create_sidecar_before_swap("cider.db", attackedSuffix)
-    case "restore-sidecar-after-shm":
+    case "restore-sidecar-after-shm", "restore-sidecar-after-shm-db-only":
         attackedSuffix = "-shm"
         cid850_interpose_create_sidecar_after_swap("cider.db", attackedSuffix)
     default:
@@ -287,7 +353,8 @@ private func runRestoreSidecarBoundary(_ boundary: String) throws -> RestoreSide
         includingPropertiesForKeys: nil,
         options: []
     ))?.filter {
-        $0.lastPathComponent.hasPrefix(".cid850-restore-")
+        ($0.lastPathComponent.hasPrefix(".cid850-restore-")
+            || $0.lastPathComponent.hasPrefix(".cid868-restore-"))
             && $0.lastPathComponent.hasSuffix(attackedSuffix)
     } ?? []
     let originalHash = before[String(attackedSuffix.dropFirst())]
@@ -298,13 +365,33 @@ private func runRestoreSidecarBoundary(_ boundary: String) throws -> RestoreSide
     let databaseRolledBack = (try? Data(contentsOf: databaseURL)).map {
         SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined()
     } == before["db"]
+    let replacementEvidencePreserved = FileManager.default.fileExists(
+        atPath: root.appendingPathComponent(".cid868-restore-staged.sqlite").path
+    )
+    let parentDescriptor = Darwin.open(
+        root.path,
+        O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+    )
+    let transactionRecordRetained = parentDescriptor >= 0
+        && fgetxattr(
+            parentDescriptor,
+            "com.cider.cid868.restore-transaction-v1",
+            nil,
+            0,
+            0,
+            0
+        ) >= 0
+    if parentDescriptor >= 0 { Darwin.close(parentDescriptor) }
     return RestoreSidecarResult(
         didAttack: didAttack,
         restoreFailed: restoreFailed,
         databaseRolledBack: databaseRolledBack,
         unexpectedOccupantPreserved: unexpectedOccupantPreserved,
         quarantinedOriginalPreserved: quarantinedOriginalPreserved,
-        reopened: database.isOpen
+        reopened: database.isOpen,
+        initialSidecarsAbsent: initialSidecarsAbsent,
+        replacementEvidencePreserved: replacementEvidencePreserved,
+        transactionRecordRetained: transactionRecordRetained
     )
 }
 
@@ -379,7 +466,8 @@ private func runRestoreFsyncBoundary(failureCount: Int) throws -> RestoreFsyncRe
         options: []
     )
     let replacementRetained = entries.contains { entry in
-        guard entry.lastPathComponent.hasPrefix(".cid850-restore-"),
+        guard (entry.lastPathComponent.hasPrefix(".cid850-restore-")
+                || entry.lastPathComponent.hasPrefix(".cid868-restore-")),
               entry.pathExtension == "sqlite",
               let data = try? Data(contentsOf: entry) else { return false }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -854,9 +942,440 @@ private func sqliteSetFingerprint(_ databaseURL: URL) throws -> [String: String]
     return result
 }
 
+@MainActor
+private func runCID868RestoreCrashAfterSwap(backupPath: String, databasePath: String) throws {
+    let backupURL = URL(fileURLWithPath: backupPath)
+    let databaseURL = URL(fileURLWithPath: databasePath)
+    cid850_interpose_reset()
+    cid850_interpose_crash_after_renameatx_np(".cid868-restore-staged.sqlite")
+    _ = try DatabaseSafetyService().restoreRollingBackup(
+        from: backupURL,
+        into: databaseURL,
+        database: nil,
+        reopenDatabase: false
+    )
+    throw CocoaError(.validationMissingMandatoryProperty)
+}
+
+@MainActor
+private func runCID868RestoreStateCrash(
+    backupPath: String,
+    databasePath: String,
+    ordinal: Int32,
+    afterWrite: Bool
+) throws {
+    let backupURL = URL(fileURLWithPath: backupPath)
+    let databaseURL = URL(fileURLWithPath: databasePath)
+    cid850_interpose_reset()
+    cid868_interpose_crash_restore_state(ordinal, afterWrite)
+    _ = try DatabaseSafetyService().restoreRollingBackup(
+        from: backupURL,
+        into: databaseURL,
+        database: nil,
+        reopenDatabase: false
+    )
+    throw CocoaError(.validationMissingMandatoryProperty)
+}
+
+@MainActor
+private func runCID868RestoreValidationFailure(
+    boundary: String,
+    backupPath: String,
+    databasePath: String
+) throws -> CID868RestoreValidationFailureResult {
+    let backupURL = URL(fileURLWithPath: backupPath)
+    let databaseURL = URL(fileURLWithPath: databasePath)
+    let parent = databaseURL.deletingLastPathComponent()
+    let original = try sqliteSetFingerprint(databaseURL)
+    let sourceBefore = try fingerprintTree(backupURL)
+    let service = DatabaseSafetyService()
+    cid850_interpose_reset()
+    if boundary == "reopen" {
+        cid868_interpose_fail_restore_reopen()
+    } else if boundary == "integrity" {
+        cid868_interpose_fail_restore_integrity()
+    } else {
+        throw CocoaError(.validationMissingMandatoryProperty)
+    }
+    var restoreFailed = false
+    var typedRecoveryRequired = false
+    var failureMessage = ""
+    do {
+        _ = try service.restoreRollingBackup(
+            from: backupURL,
+            into: databaseURL,
+            database: nil,
+            reopenDatabase: false
+        )
+    } catch {
+        restoreFailed = true
+        typedRecoveryRequired = (error as? DatabaseSafetyService.RestoreError)?.requiresRecovery == true
+        failureMessage = error.localizedDescription
+    }
+    let didAttack = cid850_interpose_did_attack()
+    cid850_interpose_reset()
+    let names = try FileManager.default.contentsOfDirectory(atPath: parent.path)
+    let evidenceNames = names.filter { $0.hasPrefix(".cid868-restore-") }.sorted()
+    func evidenceFingerprint() throws -> [String: String] {
+        try Dictionary(uniqueKeysWithValues: evidenceNames.map { name in
+            let data = try Data(contentsOf: parent.appendingPathComponent(name))
+            return (
+                name,
+                SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            )
+        })
+    }
+    let evidenceBefore = try evidenceFingerprint()
+    var repeatedRecoveryRequired = true
+    for _ in 0..<2 {
+        do {
+            _ = try service.reconcileInterruptedRestore(at: databaseURL)
+            repeatedRecoveryRequired = false
+        } catch {
+            repeatedRecoveryRequired = repeatedRecoveryRequired
+                && (error as? DatabaseSafetyService.RestoreError)?.requiresRecovery == true
+        }
+    }
+    let evidenceAfter = try evidenceFingerprint()
+    let exactOriginalRetained = evidenceBefore[".cid868-restore-staged.sqlite"] == original["db"]
+        && (original["wal"] == "absent"
+            || evidenceBefore[".cid868-restore-original-wal"] == original["wal"])
+        && (original["shm"] == "absent"
+            || evidenceBefore[".cid868-restore-original-shm"] == original["shm"])
+    return CID868RestoreValidationFailureResult(
+        didAttack: didAttack,
+        restoreFailed: restoreFailed,
+        typedRecoveryRequired: typedRecoveryRequired,
+        exactOriginalRetained: exactOriginalRetained,
+        fixedEvidenceRetained: !evidenceNames.isEmpty,
+        repeatedReconciliationRequiresRecovery: repeatedRecoveryRequired,
+        evidenceStableAcrossReconciliation: evidenceBefore == evidenceAfter,
+        sourceUnchanged: try fingerprintTree(backupURL) == sourceBefore,
+        failureMessage: failureMessage
+    )
+}
+
+@MainActor
+private func runCID868TruthfulRestore(
+    boundary: String,
+    backupPath: String,
+    databasePath: String
+) throws -> CID868TruthfulRestoreResult {
+    let backupURL = URL(fileURLWithPath: backupPath)
+    let databaseURL = URL(fileURLWithPath: databasePath)
+    let parent = databaseURL.deletingLastPathComponent()
+    let service = DatabaseSafetyService()
+    let database = CiderDatabase()
+    cid850_interpose_reset()
+    if boundary == "final-source" {
+        cid868_interpose_mutate_source_after_reopened(
+            backupURL.appendingPathComponent("database.sqlite").path
+        )
+    } else if boundary == "committed-cleanup" {
+        cid868_interpose_fail_committed_cleanup_once()
+    } else {
+        throw CocoaError(.validationMissingMandatoryProperty)
+    }
+
+    var restoreSucceeded = false
+    var typedRecoveryRequired = false
+    var recoveredFailure = false
+    var failureMessage = ""
+    do {
+        _ = try service.restoreRollingBackup(
+            from: backupURL,
+            into: databaseURL,
+            database: database,
+            reopenDatabase: true
+        )
+        restoreSucceeded = true
+    } catch {
+        if let restoreError = error as? DatabaseSafetyService.RestoreError {
+            typedRecoveryRequired = restoreError.requiresRecovery
+            if case .recoveredFailure = restoreError {
+                recoveredFailure = true
+            }
+        }
+        failureMessage = error.localizedDescription
+    }
+    let databaseOpenAfterCall = database.isOpen
+    database.close()
+    let didAttack = cid850_interpose_did_attack()
+    cid850_interpose_reset()
+
+    let originalCount = try scalarInt(
+        databaseURL: databaseURL,
+        sql: "SELECT count(*) FROM labels WHERE id = 'cid868-truthful-original';"
+    )
+    let attribute = "com.cider.cid868.restore-transaction-v1"
+    let parentDescriptor = Darwin.open(
+        parent.path,
+        O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+    )
+    let transactionRecordRetained: Bool
+    if parentDescriptor >= 0 {
+        transactionRecordRetained = fgetxattr(
+            parentDescriptor,
+            attribute,
+            nil,
+            0,
+            0,
+            0
+        ) >= 0
+        Darwin.close(parentDescriptor)
+    } else {
+        transactionRecordRetained = false
+    }
+    let evidenceNames = try FileManager.default.contentsOfDirectory(atPath: parent.path)
+        .filter { $0.hasPrefix(".cid868-restore-") }
+        .sorted()
+    return CID868TruthfulRestoreResult(
+        didAttack: didAttack,
+        restoreSucceeded: restoreSucceeded,
+        typedRecoveryRequired: typedRecoveryRequired,
+        recoveredFailure: recoveredFailure,
+        originalRestored: originalCount == 1,
+        replacementCommitted: originalCount == 0,
+        databaseOpenAfterCall: databaseOpenAfterCall,
+        transactionRecordRetained: transactionRecordRetained,
+        evidenceNames: evidenceNames,
+        failureMessage: failureMessage
+    )
+}
+
+@MainActor
+private func runCID868CommittedCleanupRestart(
+    backupPath: String,
+    databasePath: String
+) throws -> CID868CommittedCleanupRestartResult {
+    let backupURL = URL(fileURLWithPath: backupPath)
+    let databaseURL = URL(fileURLWithPath: databasePath)
+    let parent = databaseURL.deletingLastPathComponent()
+    let service = DatabaseSafetyService()
+    let database = CiderDatabase()
+    cid850_interpose_reset()
+    cid868_interpose_fail_committed_cleanup_persistently()
+
+    var initialFailureWasCommittedCleanup = false
+    var failureMessage = ""
+    do {
+        _ = try service.restoreRollingBackup(
+            from: backupURL,
+            into: databaseURL,
+            database: database,
+            reopenDatabase: true
+        )
+    } catch {
+        if let restoreError = error as? DatabaseSafetyService.RestoreError,
+           case .committedCleanupRequired = restoreError {
+            initialFailureWasCommittedCleanup = true
+        }
+        failureMessage = error.localizedDescription
+    }
+    let databaseOpenAfterFailure = database.isOpen
+    let recordedWALBeforeClose = FileManager.default.fileExists(atPath: databaseURL.path + "-wal")
+    let recordedSHMBeforeClose = FileManager.default.fileExists(atPath: databaseURL.path + "-shm")
+    let didAttack = cid850_interpose_did_attack()
+    cid850_interpose_reset()
+    database.close()
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = URL(fileURLWithPath: databaseURL.path + suffix)
+        if FileManager.default.fileExists(atPath: sidecar.path) {
+            try FileManager.default.removeItem(at: sidecar)
+        }
+    }
+    let walAbsentAfterClose = !FileManager.default.fileExists(atPath: databaseURL.path + "-wal")
+    let shmAbsentAfterClose = !FileManager.default.fileExists(atPath: databaseURL.path + "-shm")
+
+    let startup = CiderDatabase()
+    var ordinaryStartupSucceeded = false
+    do {
+        try startup.open(at: databaseURL)
+        ordinaryStartupSucceeded = true
+    } catch {
+        if failureMessage.isEmpty { failureMessage = error.localizedDescription }
+    }
+    startup.close()
+    let replacementRemainedCommitted = (try? scalarInt(
+        databaseURL: databaseURL,
+        sql: "SELECT count(*) FROM labels WHERE id = 'cid868-truthful-original';"
+    )) == 0
+    var repeatedReconciliationWasNone = true
+    for _ in 0..<2 {
+        do {
+            let reconciliation = try service.reconcileInterruptedRestore(at: databaseURL)
+            repeatedReconciliationWasNone = repeatedReconciliationWasNone
+                && reconciliation.state == .none
+        } catch {
+            repeatedReconciliationWasNone = false
+            if failureMessage.isEmpty { failureMessage = error.localizedDescription }
+        }
+    }
+
+    let parentDescriptor = Darwin.open(
+        parent.path,
+        O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+    )
+    let transactionRecordRemoved = parentDescriptor >= 0
+        && fgetxattr(
+            parentDescriptor,
+            "com.cider.cid868.restore-transaction-v1",
+            nil,
+            0,
+            0,
+            0
+        ) < 0
+        && errno == ENOATTR
+    if parentDescriptor >= 0 { Darwin.close(parentDescriptor) }
+    let retainedEvidenceRemoved = try FileManager.default.contentsOfDirectory(atPath: parent.path)
+        .allSatisfy { !$0.hasPrefix(".cid868-restore-") }
+    return CID868CommittedCleanupRestartResult(
+        didAttack: didAttack,
+        initialFailureWasCommittedCleanup: initialFailureWasCommittedCleanup,
+        databaseOpenAfterFailure: databaseOpenAfterFailure,
+        recordedWALBeforeClose: recordedWALBeforeClose,
+        recordedSHMBeforeClose: recordedSHMBeforeClose,
+        walAbsentAfterClose: walAbsentAfterClose,
+        shmAbsentAfterClose: shmAbsentAfterClose,
+        ordinaryStartupSucceeded: ordinaryStartupSucceeded,
+        replacementRemainedCommitted: replacementRemainedCommitted,
+        repeatedReconciliationWasNone: repeatedReconciliationWasNone,
+        transactionRecordRemoved: transactionRecordRemoved,
+        retainedEvidenceRemoved: retainedEvidenceRemoved,
+        failureMessage: failureMessage
+    )
+}
+
+@MainActor
+private func runCID868OpenedLineage(
+    backupPath: String,
+    databasePath: String
+) throws -> CID868OpenedLineageResult {
+    let backupURL = URL(fileURLWithPath: backupPath)
+    let databaseURL = URL(fileURLWithPath: databasePath)
+    let decoyParent = FileManager.default.temporaryDirectory
+        .appendingPathComponent("cid868-open-decoy-\(UUID().uuidString)", isDirectory: true)
+    let decoyDatabaseURL = decoyParent.appendingPathComponent(databaseURL.lastPathComponent)
+    try FileManager.default.createDirectory(
+        at: decoyParent,
+        withIntermediateDirectories: false
+    )
+    defer { try? FileManager.default.removeItem(at: decoyParent) }
+    let decoy = CiderDatabase()
+    try decoy.open(at: decoyDatabaseURL)
+    try decoy.runSQL("""
+        INSERT INTO labels (id, name, color_hex, kind, created_at, updated_at)
+        VALUES ('cid868-opened-decoy', 'Decoy', '#aa00aa', 'custom', 1, 1);
+        """)
+    try decoy.checkpointWal()
+    decoy.close()
+
+    let database = CiderDatabase()
+    let service = DatabaseSafetyService()
+    cid850_interpose_reset()
+    cid868_interpose_swap_parent_during_sqlite_open(
+        databaseURL.path,
+        decoyParent.path
+    )
+    var restoreSucceeded = false
+    var typedRecoveryRequired = false
+    var actualHandleReadDecoy = false
+    var failureMessage = ""
+    do {
+        _ = try service.restoreRollingBackup(
+            from: backupURL,
+            into: databaseURL,
+            database: database,
+            reopenDatabase: true
+        )
+        restoreSucceeded = true
+        let statement = try database.prepare(
+            "SELECT count(*) FROM labels WHERE id = 'cid868-opened-decoy';"
+        )
+        if try statement.step() {
+            actualHandleReadDecoy = statement.int64(at: 0) == 1
+        }
+    } catch {
+        typedRecoveryRequired = (error as? DatabaseSafetyService.RestoreError)?
+            .requiresRecovery == true
+        failureMessage = error.localizedDescription
+    }
+    database.close()
+    let didAttack = cid850_interpose_did_attack()
+    cid850_interpose_reset()
+    let originalCount = try scalarInt(
+        databaseURL: databaseURL,
+        sql: "SELECT count(*) FROM labels WHERE id = 'cid868-lineage-original';"
+    )
+    return CID868OpenedLineageResult(
+        didAttack: didAttack,
+        restoreSucceeded: restoreSucceeded,
+        typedRecoveryRequired: typedRecoveryRequired,
+        actualHandleReadDecoy: actualHandleReadDecoy,
+        originalRestored: originalCount == 1,
+        failureMessage: failureMessage
+    )
+}
+
 do {
     let boundary = CommandLine.arguments.dropFirst().first ?? ""
-    if boundary == "shared-create" {
+    if boundary == "cid868-restore-validation-failure" {
+        let arguments = Array(CommandLine.arguments.dropFirst(2))
+        FileHandle.standardOutput.write(
+            try JSONEncoder().encode(
+                runCID868RestoreValidationFailure(
+                    boundary: arguments[0],
+                    backupPath: arguments[1],
+                    databasePath: arguments[2]
+                )
+            )
+        )
+    } else if boundary == "cid868-truthful-restore" {
+        let arguments = Array(CommandLine.arguments.dropFirst(2))
+        FileHandle.standardOutput.write(
+            try JSONEncoder().encode(
+                runCID868TruthfulRestore(
+                    boundary: arguments[0],
+                    backupPath: arguments[1],
+                    databasePath: arguments[2]
+                )
+            )
+        )
+    } else if boundary == "cid868-committed-cleanup-restart" {
+        let arguments = Array(CommandLine.arguments.dropFirst(2))
+        FileHandle.standardOutput.write(
+            try JSONEncoder().encode(
+                runCID868CommittedCleanupRestart(
+                    backupPath: arguments[0],
+                    databasePath: arguments[1]
+                )
+            )
+        )
+    } else if boundary == "cid868-opened-lineage" {
+        let arguments = Array(CommandLine.arguments.dropFirst(2))
+        FileHandle.standardOutput.write(
+            try JSONEncoder().encode(
+                runCID868OpenedLineage(
+                    backupPath: arguments[0],
+                    databasePath: arguments[1]
+                )
+            )
+        )
+    } else if boundary == "cid868-restore-state-crash" {
+        let arguments = Array(CommandLine.arguments.dropFirst(2))
+        try runCID868RestoreStateCrash(
+            backupPath: arguments[0],
+            databasePath: arguments[1],
+            ordinal: Int32(arguments[2]) ?? 0,
+            afterWrite: arguments[3] == "after"
+        )
+    } else if boundary == "cid868-restore-crash-after-swap" {
+        let arguments = Array(CommandLine.arguments.dropFirst(2))
+        try runCID868RestoreCrashAfterSwap(
+            backupPath: arguments[0],
+            databasePath: arguments[1]
+        )
+    } else if boundary == "shared-create" {
         let databasePath = CommandLine.arguments.dropFirst(2).first ?? ""
         FileHandle.standardOutput.write(try JSONEncoder().encode(runSharedCreation(databasePath: databasePath)))
     } else if boundary == "shared-create-lock-probe" {
