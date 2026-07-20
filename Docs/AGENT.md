@@ -70,13 +70,25 @@ Agents should be conservative operators over real Cider data:
 - Treat the file-backed domain contracts in `Docs/STORAGE.md` as authority: legacy memory files and folder-kanban YAML are not first-class second-brain truth unless rebuilt through canonical item, routing, and provenance services.
 - Do not build clever auto-filing that hides uncertainty from the user. Low-confidence decisions belong in review.
 
-## Plans And Specs
+## Plans, Living Product Notebooks, And Specs
 
 Plans and specs are temporary work products. Repo docs are not a scratchpad.
 
-Project-scoped feature plans may live as Markdown artifacts inside the Cider vault while they are being shaped:
+For a substantial feature expected to produce multiple deliverables, use this default hierarchy:
+
+1. **Living Product Notebook:** the rich, evolving source for product vision, possibilities, screenshots, inspiration, research, concerns, open questions, rejected paths, and source discussion. Keep exploration visibly separate from accepted direction.
+2. **Standalone milestone:** the concise current control surface containing accepted direction, an exploration list, non-goals, the linked-card rollup, overall progress, and the next product decision or engineering boundary.
+3. **Child Kanban cards:** create these only after a coherent implementation slice is selected. Children own scoped coding, tests, QA evidence, commits, blockers, and handoffs.
+4. **Graph and Kanban projections:** as the Project Graph matures, these should visualize and operate over the same canonical milestone, cards, evidence, status, and history rather than creating a competing work system.
+
+Promote an existing card into the milestone when it already owns the feature boundary; do not create a duplicate milestone. Preserve existing attachments, inspiration, source discussions, and related work when promoting it. Small ideas that do not imply multiple deliverables should remain ordinary backlog ideas rather than receiving a notebook and milestone.
+
+Apply this model by default to major Universal Cider Test-app features so broad product exploration can continue without turning every possibility into an implementation requirement or flooding Kanban with speculative cards.
+
+Project-scoped feature plans and Living Product Notebooks may live as Markdown artifacts inside the Cider vault while they are being shaped:
 
 - `~/CiderVault/Projects/<Project>/Plans/`
+- `~/CiderVault/Projects/<Feature>/<Feature> — Living Product Notebook.md`
 
 Project-scoped QA and audit reports may live as Markdown artifacts inside the Cider vault while they are being triaged:
 
