@@ -31,6 +31,33 @@ capture -> enrich -> route -> review -> link -> recall -> resurface -> act
 
 Every major feature should either strengthen that loop or deliberately stay out of the way.
 
+## Whole-Life Planning And Time Sovereignty
+
+Cider's long-term value is not merely remembering separate facts about work, money, plans, messages, browsing, and daily life. It should connect those facts into a source-backed model that helps the user make better decisions while protecting the resource that matters most: personal time.
+
+With explicit authorization and appropriate privacy boundaries, Cider should be able to combine:
+
+- paystubs, timecards, hourly rates, lead premiums, overtime and double-time rules, taxes, withholding, and observed take-home pay;
+- bank and credit-card balances and transactions, recurring bills, rent, debt, savings, and financial obligations;
+- email receipts, statements, purchase notices, travel confirmations, and other source evidence;
+- Journal entries and conversations about goals, purchases, trips, stress, work tolerance, family plans, and changing priorities;
+- bookmarks and browsing context for products, hotels, flights, parks, restaurants, media, vehicles, and places;
+- current web research for real prices, availability, schedules, and options.
+
+The target experience is a grounded planning conversation. If the user says, “I want to take a ten-day Disneyland trip in six months,” or “I want to buy this item while working as little overtime as possible,” Cider should be able to:
+
+1. Research and itemize the likely total cost with dated sources and uncertainty ranges.
+2. Read the user's current cash flow, debt, bills, balances, and expected income from authorized sources.
+3. Estimate future checks from confirmed wage rules and observed pay history without presenting guesses as payroll truth.
+4. Compare scenarios such as no overtime, one overtime weekend, faster debt payoff, or a later goal date.
+5. Explain the minimum extra hours or shifts, per-paycheck savings target, and timing needed to keep bills paid and reach the goal.
+6. Recalculate when a paystub, timecard, transaction, bill, price, or plan changes.
+7. Show which facts are confirmed, inferred, stale, missing, or user-adjustable.
+
+This is not a generic budgeting dashboard and not an excuse for hidden financial automation. The Finance surface remains a clear dashboard over canonical data; Main Brain provides the reasoning and scenario conversation. Recommendations must be explainable, reversible, source-backed, privacy-bounded, and conservative about tax, payroll, and future-price uncertainty.
+
+The human outcome is **time sovereignty**. Cider should help the user get debt and obligations under control, protect savings and family goals, and then minimize unwanted overtime. More income is not automatically the objective; the objective is the least work and sacrifice needed to achieve the life the user actually wants.
+
 ## Primary Interaction And Capture Parity
 
 Conversation and voice-driven Journal capture are Cider's primary everyday front door. The user should be able to talk naturally, explicitly ask Cider to remember or create something, and later recall it with source-backed accuracy even when the native Mac app has not been opened for days.
@@ -129,6 +156,7 @@ Agents should:
 - promote only durable product, architecture, storage, CLI, QA, design, convention, or agent-behavior decisions into core docs;
 - keep user-facing summaries concise and practical;
 - use voice/TTS when the user is interacting by voice and likely driving or walking.
+- keep the conversational head available by dispatching long coding, research, machine-operation, and broad-verification work to named executors early, returning a durable receipt, and ending the head turn promptly.
 
 Agents should not:
 
