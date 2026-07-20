@@ -76,9 +76,9 @@ Plans and specs are temporary work products. Repo docs are not a scratchpad.
 
 For a substantial feature expected to produce multiple deliverables, use this default hierarchy:
 
-1. **Living Product Notebook:** the rich, evolving source for product vision, possibilities, screenshots, inspiration, research, concerns, open questions, rejected paths, and source discussion. Keep exploration visibly separate from accepted direction.
-2. **Standalone milestone:** the concise current control surface containing accepted direction, an exploration list, non-goals, the linked-card rollup, overall progress, and the next product decision or engineering boundary.
-3. **Child Kanban cards:** create these only after a coherent implementation slice is selected. Children own scoped coding, tests, QA evidence, commits, blockers, and handoffs.
+1. **Living Product Notebook:** the editable narrative for the feature's evolving product vision, possibilities, research synthesis, concerns, open questions, rejected paths, decisions, and current MVP shape. Keep exploration visibly separate from accepted direction, and revise the notebook as product shaping and development teach us more.
+2. **Standalone milestone:** the feature's permanent home/container. It owns the Living Product Notebook, attached screenshots, inspiration, research, source discussions, references, concise accepted direction, exploration list, non-goals, linked-work rollup, overall progress, and next product decision or engineering boundary.
+3. **Child Kanban cards / Project Graph items:** create these only after the notebook and milestone have converged on a credible MVP and a coherent implementation slice is selected. Children own scoped coding, tests, QA evidence, commits, blockers, and handoffs.
 4. **Graph and Kanban projections:** as the Project Graph matures, these should visualize and operate over the same canonical milestone, cards, evidence, status, and history rather than creating a competing work system.
 
 Promote an existing card into the milestone when it already owns the feature boundary; do not create a duplicate milestone. Preserve existing attachments, inspiration, source discussions, and related work when promoting it. Small ideas that do not imply multiple deliverables should remain ordinary backlog ideas rather than receiving a notebook and milestone.
