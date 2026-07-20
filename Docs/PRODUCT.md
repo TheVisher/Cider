@@ -42,7 +42,8 @@ The core loop is:
 - Review is a contextual trust workflow for uncertain routing, metadata, duplicates, reminders, and agent suggestions.
 - Library opens to the complete visual collection with calm type, state, and Space/entity filtering.
 - Spaces are entity-aware semantic hubs/lenses under Library, not top-level silos or mere saved filters.
-- Projects opens to a calm cross-project summary; entering a project opens its Kanban Board.
+- Projects opens to a calm cross-project summary; entering a project opens its Kanban Board plus project-owned milestones, Living Product Notebooks, references, screenshots, inspiration, research, and other attached source artifacts.
+- Project-owned attachments remain canonical and searchable in their Project/feature context without automatically appearing as loose top-level Library items. Promote one into Library only when it becomes an intentionally reusable personal or domain entity; promotion preserves provenance and does not duplicate the underlying artifact.
 - Kanban is the product and development operating layer for roadmap work, QA, bugs, and agent handoff memory.
 - CLI is the agent-facing command surface for reliable inspection and mutation.
 
