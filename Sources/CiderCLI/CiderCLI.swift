@@ -207,6 +207,19 @@ struct CiderCLI {
             return true
         }
 
+        if command == "board",
+           subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
+            switch subcommand {
+            case "show", "cards":
+                printBoardShowUsage()
+            case "comment":
+                print(boardCommentUsage())
+            default:
+                printUsage()
+            }
+            return true
+        }
+
         if command == "routing" || command == "route",
            subcommand == nil || subcommand == "help" || subcommand == "--help" || subcommand == "-h" || hasHelpArg(args) {
             printRoutingHelp()
@@ -1021,6 +1034,28 @@ struct CiderCLI {
             }
         }
         CiderUsageAuditService.shared.recordCLI(command: command, subcommand: subcommand)
+
+        // Board commands and canonical Kanban-card reads only need
+        // KanbanStorage and/or the already-open canonical database. Do not
+        // initialize unrelated app stores: VaultBookmarkService.shared starts
+        // asynchronous enrichment, including Vision/CoreML work, that can still
+        // be compiling when this short-lived process exits. On large real vaults
+        // that teardown race surfaced as SIGSEGV/139 after otherwise successful
+        // board commands and Kanban-card `item get` calls.
+        let normalizedCommandForBootstrap = command.lowercased()
+        if normalizedCommandForBootstrap == "board" {
+            handleBoard(subcommand: subcommand, args: remaining)
+            return
+        }
+        let canonicalItemType = remaining.first?
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+        if normalizedCommandForBootstrap == "item",
+           subcommand?.lowercased() == "get",
+           ["kanban", "kanban_card", "card"].contains(canonicalItemType ?? "") {
+            handleItem(subcommand: subcommand, args: remaining)
+            return
+        }
 
         if command == "db" {
             handleDatabase(subcommand: subcommand, args: remaining)
@@ -11911,9 +11946,14 @@ struct CiderCLI {
                 let commentDict = kanbanCommentToDict(appended)
                 var dict: [String: Any] = [
                     "ok": true,
+                    "command": "board.comment.add",
+                    "action": "commented",
+                    "readOnly": false,
+                    "changed": true,
                     "board": board.id,
                     "card": resolvedCard.id,
                     "comment": commentDict,
+                    "safeVerificationCommands": boardVerificationCommands(board: board, card: resolvedCard),
                 ]
                 if let refreshed = storage.findCard(id: resolvedCard.id)?.card {
                     dict["commentCount"] = refreshed.comments.count
