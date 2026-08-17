@@ -10,6 +10,8 @@ APP_NAME="Cider"
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
+source "$ROOT_DIR/script/cider_process_control.sh"
+
 VERIFY=0
 STREAM_LOGS=0
 TELEMETRY=0
@@ -42,16 +44,7 @@ for arg in "$@"; do
 done
 
 stop_app() {
-  local repo_app_pattern="$ROOT_DIR/.*/$APP_NAME.app/Contents/MacOS/$APP_NAME"
-
-  if pgrep -f "$repo_app_pattern" >/dev/null; then
-    pkill -f "$repo_app_pattern" || true
-    sleep 1
-  fi
-
-  if pgrep -f "$repo_app_pattern" >/dev/null; then
-    pkill -9 -f "$repo_app_pattern" || true
-  fi
+  stop_native_cider_processes
 }
 
 remove_stale_app_bundles() {
@@ -184,7 +177,7 @@ fi
 
 if [[ "$TELEMETRY" -eq 1 ]]; then
   if [[ "$QA_VISIBLE" -eq 1 ]]; then
-    /usr/bin/open \
+    launch_cider_app \
       --stdout "$LOG_DIR/stdout.log" \
       --stderr "$LOG_DIR/stderr.log" \
       --env "CIDER_PERF_MONITOR=1" \
@@ -193,7 +186,7 @@ if [[ "$TELEMETRY" -eq 1 ]]; then
       "$APP_PATH"
   else
     if [[ "$VERIFY" -eq 1 ]]; then
-      /usr/bin/open \
+      launch_cider_app \
         --stdout "$LOG_DIR/stdout.log" \
         --stderr "$LOG_DIR/stderr.log" \
         --env "CIDER_PERF_MONITOR=1" \
@@ -201,7 +194,7 @@ if [[ "$TELEMETRY" -eq 1 ]]; then
         --env "CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH" \
         "$APP_PATH"
     else
-      /usr/bin/open \
+      launch_cider_app \
         --stdout "$LOG_DIR/stdout.log" \
         --stderr "$LOG_DIR/stderr.log" \
         --env "CIDER_PERF_MONITOR=1" \
@@ -211,13 +204,13 @@ if [[ "$TELEMETRY" -eq 1 ]]; then
   fi
 else
   if [[ "$QA_VISIBLE" -eq 1 ]]; then
-    /usr/bin/open --env "CIDER_QA_VISIBLE_WINDOW=1" "$APP_PATH"
+    launch_cider_app --env "CIDER_QA_VISIBLE_WINDOW=1" "$APP_PATH"
   elif [[ "$VERIFY" -eq 1 ]]; then
-    /usr/bin/open \
+    launch_cider_app \
       --env "CIDER_VERIFY_WINDOW_STATUS_PATH=$VERIFY_WINDOW_STATUS_PATH" \
       "$APP_PATH"
   else
-    /usr/bin/open "$APP_PATH"
+    launch_cider_app "$APP_PATH"
   fi
 fi
 
