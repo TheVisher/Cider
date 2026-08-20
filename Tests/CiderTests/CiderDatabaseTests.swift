@@ -170,8 +170,8 @@ struct CiderDatabaseTests {
         }
     }
 
-    @Test("v29 to v30 migration preserves representative existing rows")
-    func v30MigrationPreservesV29Rows() throws {
+    @Test("v29 through latest migration preserves representative existing rows")
+    func latestMigrationPreservesV29Rows() throws {
         let url = makeTempDBURL()
         defer { cleanup(url) }
 
@@ -197,7 +197,7 @@ struct CiderDatabaseTests {
 
         let version = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
         #expect(try version.step())
-        #expect(version.int(at: 0) == 30)
+        #expect(version.int(at: 0) == DatabaseMigrations.latestVersion)
 
         let project = try migrated.prepare("SELECT title, subtitle, updated_at FROM projects WHERE id = 'preserved-project';")
         #expect(try project.step())
@@ -206,6 +206,12 @@ struct CiderDatabaseTests {
         #expect(project.double(at: 2) == 2)
 
         for table in ["conversation_rooms", "conversation_runtime_bindings", "conversation_turns", "conversation_messages"] {
+            let statement = try migrated.prepare("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?;")
+            statement.bind(table, at: 1)
+            #expect(try statement.step())
+            #expect(statement.int(at: 0) == 1)
+        }
+        for table in ["project_graph_states", "project_nodes", "project_primary_path_memberships", "project_node_events"] {
             let statement = try migrated.prepare("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?;")
             statement.bind(table, at: 1)
             #expect(try statement.step())

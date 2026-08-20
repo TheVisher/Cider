@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 30
+    static let latestVersion: Int = 31
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -70,7 +70,8 @@ enum DatabaseMigrations {
             if currentVersion < 27 { try migrateToV27(db); currentVersion = try readVersion(db) }
             if currentVersion < 28 { try migrateToV28(db); currentVersion = try readVersion(db) }
             if currentVersion < 29 { try migrateToV29(db); currentVersion = try readVersion(db) }
-            if currentVersion < 30 { try migrateToV30(db) }
+            if currentVersion < 30 { try migrateToV30(db); currentVersion = try readVersion(db) }
+            if currentVersion < 31 { try migrateToV31(db) }
 
             try runOnDB(db, "COMMIT;")
         } catch {
@@ -83,6 +84,26 @@ enum DatabaseMigrations {
     static func currentVersion(on db: OpaquePointer) throws -> Int {
         guard try tableExists(db, table: "schema_version") else { return 0 }
         return try readVersion(db)
+    }
+
+    // MARK: - V30 -> V31: Durable project-intake graph foundation
+
+    private static func migrateToV31(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 31...")
+
+        try withTransaction(db) {
+            try runOnDB(db, CiderSchema.createProjectGraphStates)
+            try runOnDB(db, CiderSchema.createProjectNodes)
+            try runOnDB(db, CiderSchema.createProjectPrimaryPathMemberships)
+            try runOnDB(db, CiderSchema.createProjectNodeEvents)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_nodes_project ON project_nodes(project_id, lifecycle_state, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_node_events_node ON project_node_events(node_id, created_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_primary_path_order ON project_primary_path_memberships(project_id, ordinal);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (31);")
+        }
+
+        logger.info("Migration to v31 complete")
     }
 
     // MARK: - V29 -> V30: Conversation shadow archive foundation

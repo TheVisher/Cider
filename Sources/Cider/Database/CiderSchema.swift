@@ -244,6 +244,77 @@ enum CiderSchema {
         );
         """
 
+    static let createProjectGraphStates = """
+        CREATE TABLE IF NOT EXISTS project_graph_states (
+            project_id                 TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            graph_revision             INTEGER NOT NULL DEFAULT 0 CHECK (graph_revision >= 0),
+            primary_path_revision      INTEGER NOT NULL DEFAULT 0 CHECK (primary_path_revision >= 0),
+            canonical_summary_revision INTEGER NOT NULL DEFAULT 0 CHECK (canonical_summary_revision >= 0),
+            intake_summary             TEXT NOT NULL DEFAULT '',
+            active_intake_count         INTEGER NOT NULL DEFAULT 0 CHECK (active_intake_count >= 0),
+            updated_at                  REAL NOT NULL
+        );
+        """
+
+    static let createProjectNodes = """
+        CREATE TABLE IF NOT EXISTS project_nodes (
+            id                TEXT PRIMARY KEY,
+            project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            node_kind         TEXT NOT NULL DEFAULT 'idea'
+                                CHECK (node_kind IN ('idea', 'feature', 'milestone')),
+            title             TEXT NOT NULL,
+            concise_summary   TEXT NOT NULL,
+            lifecycle_state   TEXT NOT NULL
+                                CHECK (lifecycle_state IN ('captured', 'reviewed', 'integrated', 'deferred', 'rejected')),
+            placement_kind    TEXT NOT NULL
+                                CHECK (placement_kind IN ('intake', 'primary')),
+            intake_visibility TEXT NOT NULL DEFAULT 'active'
+                                CHECK (intake_visibility IN ('active', 'deferred', 'archived')),
+            request_id        TEXT NOT NULL UNIQUE,
+            capture_key       TEXT NOT NULL UNIQUE,
+            schema_version    INTEGER NOT NULL DEFAULT 1,
+            node_revision     INTEGER NOT NULL DEFAULT 1 CHECK (node_revision >= 1),
+            created_at        REAL NOT NULL,
+            updated_at        REAL NOT NULL,
+            integrated_at     REAL,
+            CHECK (
+                (lifecycle_state = 'integrated' AND placement_kind = 'primary' AND integrated_at IS NOT NULL)
+                OR
+                (lifecycle_state <> 'integrated' AND placement_kind = 'intake' AND integrated_at IS NULL)
+            )
+        );
+        """
+
+    static let createProjectPrimaryPathMemberships = """
+        CREATE TABLE IF NOT EXISTS project_primary_path_memberships (
+            project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            node_id           TEXT NOT NULL UNIQUE REFERENCES project_nodes(id) ON DELETE CASCADE,
+            ordinal           INTEGER NOT NULL CHECK (ordinal >= 0),
+            approval_event_id TEXT NOT NULL,
+            integrated_at     REAL NOT NULL,
+            PRIMARY KEY (project_id, node_id),
+            UNIQUE (project_id, ordinal)
+        );
+        """
+
+    static let createProjectNodeEvents = """
+        CREATE TABLE IF NOT EXISTS project_node_events (
+            id                    TEXT PRIMARY KEY,
+            node_id               TEXT NOT NULL REFERENCES project_nodes(id) ON DELETE CASCADE,
+            operation_id          TEXT NOT NULL,
+            event_kind            TEXT NOT NULL,
+            from_state            TEXT,
+            to_state              TEXT,
+            actor_type            TEXT NOT NULL,
+            actor_id              TEXT,
+            authority_revision    INTEGER,
+            primary_path_revision INTEGER,
+            payload_json          TEXT NOT NULL DEFAULT '{}',
+            created_at            REAL NOT NULL,
+            UNIQUE (node_id, operation_id)
+        );
+        """
+
     static let createOwnerLabelIndex = """
         CREATE TABLE IF NOT EXISTS owner_label_index (
             owner_type              TEXT NOT NULL,
@@ -830,6 +901,9 @@ enum CiderSchema {
         "CREATE INDEX IF NOT EXISTS idx_owner_relations_target ON owner_relations(target_owner_type, target_owner_id, relation_type, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_owner_relations_type ON owner_relations(relation_type, updated_at);",
         "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, updated_at);",
+        "CREATE INDEX IF NOT EXISTS idx_project_nodes_project ON project_nodes(project_id, lifecycle_state, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_project_node_events_node ON project_node_events(node_id, created_at);",
+        "CREATE INDEX IF NOT EXISTS idx_project_primary_path_order ON project_primary_path_memberships(project_id, ordinal);",
         "CREATE INDEX IF NOT EXISTS idx_owner_label_index_lookup ON owner_label_index(owner_kind, normalized_label, updated_at) WHERE is_deleted = 0;",
         "CREATE INDEX IF NOT EXISTS idx_owner_label_index_owner ON owner_label_index(owner_type, owner_id) WHERE is_deleted = 0;",
         "CREATE INDEX IF NOT EXISTS idx_capture_events_source ON capture_events(source_kind, created_at);",
@@ -915,6 +989,10 @@ enum CiderSchema {
         createItemLinks,
         createOwnerRelations,
         createProjects,
+        createProjectGraphStates,
+        createProjectNodes,
+        createProjectPrimaryPathMemberships,
+        createProjectNodeEvents,
         createOwnerLabelIndex,
         createCaptureEvents,
         createCaptureAttachments,
