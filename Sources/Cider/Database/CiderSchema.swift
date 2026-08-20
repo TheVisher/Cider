@@ -244,6 +244,87 @@ enum CiderSchema {
         );
         """
 
+    static let createProjectNodes = """
+        CREATE TABLE IF NOT EXISTS project_nodes (
+            id                TEXT PRIMARY KEY,
+            project_id        TEXT NOT NULL REFERENCES projects(id),
+            node_kind         TEXT NOT NULL DEFAULT 'idea'
+                              CHECK (node_kind IN ('idea', 'feature', 'milestone')),
+            title             TEXT NOT NULL,
+            concise_summary   TEXT NOT NULL,
+            lifecycle_state   TEXT NOT NULL
+                              CHECK (lifecycle_state IN ('captured', 'reviewed', 'integrated', 'deferred', 'rejected')),
+            placement_kind    TEXT NOT NULL
+                              CHECK (placement_kind IN ('intake', 'primary')),
+            intake_visibility TEXT NOT NULL DEFAULT 'active'
+                              CHECK (intake_visibility IN ('active', 'deferred', 'archived')),
+            capture_key       TEXT NOT NULL UNIQUE,
+            schema_version    INTEGER NOT NULL DEFAULT 1,
+            node_revision     INTEGER NOT NULL DEFAULT 1,
+            created_at        REAL NOT NULL,
+            updated_at        REAL NOT NULL,
+            integrated_at     REAL,
+            CHECK (
+                (lifecycle_state = 'integrated' AND placement_kind = 'primary' AND integrated_at IS NOT NULL)
+                OR
+                (lifecycle_state <> 'integrated' AND placement_kind = 'intake' AND integrated_at IS NULL)
+            )
+        );
+        """
+
+    static let createProjectPrimaryPathMemberships = """
+        CREATE TABLE IF NOT EXISTS project_primary_path_memberships (
+            project_id        TEXT NOT NULL REFERENCES projects(id),
+            node_id           TEXT NOT NULL UNIQUE REFERENCES project_nodes(id),
+            ordinal           INTEGER NOT NULL CHECK (ordinal >= 0),
+            approval_event_id TEXT NOT NULL,
+            integrated_at     REAL NOT NULL,
+            PRIMARY KEY (project_id, node_id),
+            UNIQUE (project_id, ordinal)
+        );
+        """
+
+    static let createProjectNodeEvents = """
+        CREATE TABLE IF NOT EXISTS project_node_events (
+            id                    TEXT PRIMARY KEY,
+            node_id               TEXT NOT NULL REFERENCES project_nodes(id),
+            operation_id          TEXT NOT NULL,
+            event_kind            TEXT NOT NULL CHECK (event_kind IN (
+                                      'captured', 'reviewed', 'integrated', 'deferred', 'rejected',
+                                      'reopened', 'decision', 'implementation', 'review_history',
+                                      'testing', 'acceptance', 'migration'
+                                  )),
+            from_state            TEXT,
+            to_state              TEXT,
+            actor_type            TEXT NOT NULL,
+            actor_id              TEXT,
+            authority_revision    INTEGER,
+            primary_path_revision INTEGER,
+            payload_json          TEXT NOT NULL DEFAULT '{}',
+            created_at            REAL NOT NULL,
+            UNIQUE (node_id, operation_id)
+        );
+        """
+
+    static let createProjectIntakeReviewProposals = """
+        CREATE TABLE IF NOT EXISTS project_intake_review_proposals (
+            id                         TEXT PRIMARY KEY,
+            node_id                    TEXT NOT NULL REFERENCES project_nodes(id),
+            project_id                 TEXT NOT NULL REFERENCES projects(id),
+            canonical_summary_revision INTEGER NOT NULL,
+            primary_path_revision      INTEGER NOT NULL,
+            placement_mode             TEXT NOT NULL
+                                       CHECK (placement_mode IN ('before', 'after', 'between', 'append', 'do_not_integrate')),
+            before_node_id             TEXT,
+            after_node_id              TEXT,
+            rationale                  TEXT NOT NULL,
+            authority_summary          TEXT NOT NULL,
+            path_node_ids_json         TEXT NOT NULL DEFAULT '[]',
+            created_at                 REAL NOT NULL,
+            recorded_at                REAL NOT NULL
+        );
+        """
+
     static let createOwnerLabelIndex = """
         CREATE TABLE IF NOT EXISTS owner_label_index (
             owner_type              TEXT NOT NULL,

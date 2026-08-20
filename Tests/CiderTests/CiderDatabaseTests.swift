@@ -197,7 +197,7 @@ struct CiderDatabaseTests {
 
         let version = try migrated.prepare("SELECT MAX(version) FROM schema_version;")
         #expect(try version.step())
-        #expect(version.int(at: 0) == 30)
+        #expect(version.int(at: 0) == 31)
 
         let project = try migrated.prepare("SELECT title, subtitle, updated_at FROM projects WHERE id = 'preserved-project';")
         #expect(try project.step())

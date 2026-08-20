@@ -10,7 +10,7 @@ enum DatabaseMigrations {
 
     /// Highest schema version this build knows how to run against.
     /// Bump together with any new `migrateToVN` function.
-    static let latestVersion: Int = 30
+    static let latestVersion: Int = 31
 
     /// Run all pending migrations on the given database connection.
     /// Creates the schema_version table if it does not exist.
@@ -70,7 +70,8 @@ enum DatabaseMigrations {
             if currentVersion < 27 { try migrateToV27(db); currentVersion = try readVersion(db) }
             if currentVersion < 28 { try migrateToV28(db); currentVersion = try readVersion(db) }
             if currentVersion < 29 { try migrateToV29(db); currentVersion = try readVersion(db) }
-            if currentVersion < 30 { try migrateToV30(db) }
+            if currentVersion < 30 { try migrateToV30(db); currentVersion = try readVersion(db) }
+            if currentVersion < 31 { try migrateToV31(db) }
 
             try runOnDB(db, "COMMIT;")
         } catch {
@@ -83,6 +84,39 @@ enum DatabaseMigrations {
     static func currentVersion(on db: OpaquePointer) throws -> Int {
         guard try tableExists(db, table: "schema_version") else { return 0 }
         return try readVersion(db)
+    }
+
+    // MARK: - V30 -> V31: Durable project intake lifecycle
+
+    private static func migrateToV31(_ db: OpaquePointer) throws {
+        logger.info("Migrating to schema version 31...")
+
+        try withTransaction(db) {
+            if !(try columnExists(db, table: "projects", column: "canonical_summary")) {
+                try runOnDB(db, "ALTER TABLE projects ADD COLUMN canonical_summary TEXT NOT NULL DEFAULT '';")
+            }
+            if !(try columnExists(db, table: "projects", column: "graph_revision")) {
+                try runOnDB(db, "ALTER TABLE projects ADD COLUMN graph_revision INTEGER NOT NULL DEFAULT 0;")
+            }
+            if !(try columnExists(db, table: "projects", column: "primary_path_revision")) {
+                try runOnDB(db, "ALTER TABLE projects ADD COLUMN primary_path_revision INTEGER NOT NULL DEFAULT 0;")
+            }
+            if !(try columnExists(db, table: "projects", column: "canonical_summary_revision")) {
+                try runOnDB(db, "ALTER TABLE projects ADD COLUMN canonical_summary_revision INTEGER NOT NULL DEFAULT 0;")
+            }
+            try runOnDB(db, CiderSchema.createProjectNodes)
+            try runOnDB(db, CiderSchema.createProjectPrimaryPathMemberships)
+            try runOnDB(db, CiderSchema.createProjectNodeEvents)
+            try runOnDB(db, CiderSchema.createProjectIntakeReviewProposals)
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_nodes_project_state ON project_nodes(project_id, lifecycle_state, updated_at);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_primary_path_order ON project_primary_path_memberships(project_id, ordinal);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_node_events_history ON project_node_events(node_id, created_at, id);")
+            try runOnDB(db, "CREATE INDEX IF NOT EXISTS idx_project_intake_proposals_node ON project_intake_review_proposals(node_id, recorded_at);")
+            try runOnDB(db, "DELETE FROM schema_version;")
+            try runOnDB(db, "INSERT INTO schema_version (version) VALUES (31);")
+        }
+
+        logger.info("Migration to v31 complete")
     }
 
     // MARK: - V29 -> V30: Conversation shadow archive foundation
